@@ -1,0 +1,594 @@
+// My Market v1 — screens and navigation (gallery-minimal design).
+// Rule for every screen: lead with the answer, keep the rest one tap away.
+(function () {
+  const A = window.MM_API, D = A.D, C = D.CATEGORIES;
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const app = $("#app");
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const PILOT_ORIG = { lat: 28.6517, lng: 77.1905, label: "Karol Bagh", sub: "New Delhi", source: "pilot" };
+  const SUGGEST = ["1 inch elbow", "Type-C charger", "nal", "Havells MCB", "kurti", "pressure cooker"];
+
+  // thin line icons
+  const P = {
+    back: '<path d="M15 5l-7 7 7 7"/>',
+    search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
+    user: '<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c1.2-3.6 4-5 7-5s5.8 1.4 7 5"/>',
+    heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
+    heartF: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" fill="currentColor"/>',
+    pin: '<path d="M12 21s-6-5.6-6-11a6 6 0 0 1 12 0c0 5.4-6 11-6 11z"/><circle cx="12" cy="10" r="2"/>',
+    arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    locate: '<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>',
+    close: '<path d="M6 6l12 12M18 6L6 18"/>',
+    down: '<path d="M7 10l5 5 5-5"/>',
+    bag: '<path d="M5 8h14l-1.2 12.2a1 1 0 0 1-1 .8H7.2a1 1 0 0 1-1-.8z"/><path d="M9 10V7a3 3 0 0 1 6 0v3"/>',
+    store: '<path d="M4 9l1.5-5h13L20 9"/><path d="M4 9a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0A2.7 2.7 0 0 0 20 9"/><path d="M5.5 12v8h13v-8M10 20v-5h4v5"/>',
+    camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
+    chat: '<path d="M5 5h14v10H9l-4 4z"/>',
+    box: '<path d="M4 8l8-4 8 4v8l-8 4-8-4z"/><path d="M4 8l8 4 8-4M12 12v8"/>',
+    chart: '<path d="M5 19V9M10 19V5M15 19v-7M20 19v-4"/>',
+  };
+  const ic = (n, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24">${P[n]}</svg>`;
+
+  // ---------- state ----------
+  let loc = A.store.get("loc", null);
+  let saved = A.store.get("saved", []);
+  let recent = A.store.get("recent", []);
+  let homeCat = null, homeMarket = null;
+  let cleanups = [];
+  const setLoc = (l) => { loc = l; A.store.set("loc", l); };
+  const addRecent = (q) => {
+    q = q.trim(); if (!q) return;
+    recent = [q, ...recent.filter((x) => x.toLowerCase() !== q.toLowerCase())].slice(0, 6);
+    A.store.set("recent", recent);
+  };
+
+  // ---------- helpers ----------
+  const go = (h) => { location.hash = h; };
+  const fmtHour = (h) => (h % 12 || 12) + (h < 12 ? " am" : " pm");
+  const rupee = (p) => "₹" + p.toLocaleString("en-IN");
+  const dist = (s) => A.fmtDist(A.distKm(loc, s));
+  const openWord = (s) => A.isOpen(s) ? `Open until ${fmtHour(s.close)}` : `Closed · opens ${fmtHour(s.open)}`;
+  const statusWord = { confirmed: "In stock", listed: "Ask to confirm", out: "Not available" };
+  function toast(msg) {
+    const t = $("#toast"); t.textContent = msg; t.classList.remove("hidden");
+    clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add("hidden"), 2600);
+  }
+  function openSheet(html, onMount) {
+    $("#sheet").innerHTML = html;
+    $("#sheet").classList.remove("hidden"); $("#sheet-backdrop").classList.remove("hidden");
+    onMount && onMount($("#sheet"));
+  }
+  function closeSheet() { $("#sheet").classList.add("hidden"); $("#sheet-backdrop").classList.add("hidden"); }
+  $("#sheet-backdrop").addEventListener("click", closeSheet);
+
+  // ---------- map ----------
+  function newMap(el) {
+    const m = L.map(el, { zoomControl: false });
+    // OSM tiles, toned to warm grey in CSS (.leaflet-tile-pane) so the shops are the only thing that speaks.
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    }).addTo(m);
+    cleanups.push(() => m.remove());
+    return m;
+  }
+  const meIcon = () => L.divIcon({ className: "", html: '<div class="mk-me"></div>', iconSize: [14, 14], iconAnchor: [7, 7] });
+  const dotIcon = (cls = "", s = null) => L.divIcon({ className: "", html: `<div class="mk-dot ${cls}" ${s ? `style="--c:${C[s.cat].color}"` : ""}></div>`, iconSize: [16, 16], iconAnchor: [8, 8], popupAnchor: [0, -8] });
+  const catVars = (cat) => `--c:${C[cat].color};--t:${C[cat].tint}`;
+  const mono = (s) => `<span class="mono" style="${catVars(s.cat)}">${esc(s.name[0])}</span>`;
+  const shopPopup = (s) => `<div class="pop"><div class="serif">${esc(s.name)}</div><div class="tiny">${esc(C[s.cat].name)} · ${dist(s)}</div>
+    <div class="btn-row"><a class="link" href="#/shop/${s.id}">View</a><a class="link accent" href="#/route/${s.id}">Directions</a></div></div>`;
+
+  // ---------- shared pieces ----------
+  function shopEntry(s, aside) {
+    return `<a class="entry" href="#/shop/${s.id}">${mono(s)}
+      <div class="body"><div class="name">${esc(s.name)}</div><div class="note">${esc(C[s.cat].name)} · ${openWord(s)}</div></div>
+      <div class="aside">${aside ?? dist(s)}</div></a>`;
+  }
+  function reachSteps(s) {
+    const m = A.getMarket(s.marketId);
+    return `<ol class="steps"><li>${esc(m.name)}, ${esc(m.area)}</li><li>${esc(s.landmark)}</li><li>Shop ${esc(s.shopNo)}, ${esc(s.floor.toLowerCase())}</li></ol>`;
+  }
+
+  // ---------- location ----------
+  async function reverseName(lat, lng) {
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=16&lat=${lat}&lon=${lng}`);
+      const a = (await r.json()).address || {};
+      return { label: a.suburb || a.neighbourhood || a.city_district || a.village || a.town || a.city || "Current location", sub: a.city || a.town || a.state || "" };
+    } catch { return { label: "Current location", sub: "" }; }
+  }
+  function useGPS(done) {
+    if (!navigator.geolocation) { toast("Location isn't available here"); return openLocationSheet(); }
+    toast("Finding you…");
+    navigator.geolocation.getCurrentPosition(async (p) => {
+      const { latitude: lat, longitude: lng } = p.coords;
+      const n = await reverseName(lat, lng);
+      setLoc({ lat, lng, label: n.label, sub: n.sub, source: "gps" });
+      closeSheet(); done ? done() : route();
+    }, () => { toast("Couldn't find you. Choose an area instead."); openLocationSheet(); },
+    { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
+  }
+  function pickPilot() {
+    setLoc(PILOT_ORIG); closeSheet();
+    if (A.hasDemoShift()) { A.clearDemoShift(); location.hash = "#/"; location.reload(); return; }
+    go("#/"); route();
+  }
+  function openLocationSheet() {
+    const recentLocs = A.store.get("recentLocs", []);
+    openSheet(`
+      <div class="eyebrow">Location</div>
+      <div class="title">Where are you?</div>
+      <input class="field" id="placeq" placeholder="Search an area" autocomplete="off" style="margin-top:14px">
+      <div id="placeres" class="entries" style="border:0"></div>
+      <div class="entries" style="margin-top:18px">
+        <button class="entry" id="pl-gps"><div class="body"><div class="name">Use my location</div></div><div class="aside">${ic("locate")}</div></button>
+        <button class="entry" id="pl-pilot"><div class="body"><div class="name">Karol Bagh</div><div class="note">New Delhi · pilot area</div></div></button>
+        ${recentLocs.map((l, i) => `<button class="entry" data-rl="${i}"><div class="body"><div class="name">${esc(l.label)}</div><div class="note">${esc(l.sub || "")}</div></div></button>`).join("")}
+      </div>`, (el) => {
+      $("#pl-gps", el).onclick = () => useGPS();
+      $("#pl-pilot", el).onclick = pickPilot;
+      $$("[data-rl]", el).forEach((b) => b.onclick = () => { setLoc(recentLocs[+b.dataset.rl]); closeSheet(); go("#/"); route(); });
+      let t;
+      $("#placeq", el).addEventListener("input", (e) => {
+        clearTimeout(t); const q = e.target.value.trim();
+        if (q.length < 3) { $("#placeres", el).innerHTML = ""; return; }
+        t = setTimeout(async () => {
+          try {
+            const list = await (await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=in&limit=5&q=${encodeURIComponent(q)}`)).json();
+            $("#placeres", el).innerHTML = list.length ? list.map((p, i) => `<button class="entry" data-p="${i}"><div class="body"><div class="name">${esc(p.name || p.display_name.split(",")[0])}</div><div class="note">${esc(p.display_name.split(",").slice(1, 3).join(",").trim())}</div></div></button>`).join("") : '<p class="quiet small">Nothing found.</p>';
+            $$("[data-p]", el).forEach((b) => b.onclick = () => {
+              const p = list[+b.dataset.p];
+              const l = { lat: +p.lat, lng: +p.lon, label: p.name || p.display_name.split(",")[0], sub: p.display_name.split(",").slice(1, 2).join("").trim(), source: "search" };
+              setLoc(l); A.store.set("recentLocs", [l, ...recentLocs.filter((x) => x.label !== l.label)].slice(0, 3));
+              closeSheet(); go("#/"); route();
+            });
+          } catch { $("#placeres", el).innerHTML = '<p class="quiet small">Place search needs internet.</p>'; }
+        }, 450);
+      });
+    });
+  }
+
+  // ---------- screens ----------
+  function welcome() {
+    app.innerHTML = `<div class="welcome">
+      <img class="mark" src="icon.svg" alt="">
+      <h1 class="display">My Market</h1>
+      <p class="sub">Know which shop has it,<br>before you walk the market.</p>
+      <div class="spacer"></div>
+      <div class="actions">
+        <button class="btn" id="w-gps">Use my location</button>
+        <button class="link" id="w-manual">Choose an area</button>
+      </div>
+      <div class="foot eyebrow faint">Pilot · Karol Bagh, New Delhi</div>
+    </div>`;
+    $("#w-gps").onclick = () => useGPS(() => go("#/"));
+    $("#w-manual").onclick = openLocationSheet;
+  }
+
+  function home() {
+    const markets = A.marketsNear(loc, 10);
+    const filtered = (homeCat || homeMarket) ? A.shopsNear(loc, 10, homeCat).filter((s) => !homeMarket || s.marketId === homeMarket) : [];
+    const listTitle = homeMarket ? A.getMarket(homeMarket).name : homeCat ? C[homeCat].name : "";
+    app.innerHTML = `
+      <div class="band">
+      <div class="topline">
+        <button class="loc eyebrow" id="locbtn">${ic("pin")}<span>${esc(loc.label)}${loc.sub ? ", " + esc(loc.sub) : ""}</span>${ic("down")}</button>
+        <div class="btn-row" style="gap:10px">${bagBtn()}<a class="iconbtn" href="#/me" aria-label="Profile">${ic("user")}</a></div>
+      </div>
+      <div class="pad" style="margin-top:30px">
+        <h1 class="display">What are you<br><em>looking for?</em></h1>
+        <a class="seek" href="#/search" style="margin-top:22px">${ic("search")}<span class="ph">An item, a brand, a shop</span></a>
+      </div>
+      </div>
+      ${!markets.length ? `<div class="banner"><div class="serif">Not in your area yet.</div>
+        <p>My Market starts in Karol Bagh, New Delhi. Visit the pilot, or place the demo markets around you.</p>
+        <div class="btn-row"><button class="link" id="b-pilot">Visit pilot</button><button class="link accent" id="b-demo">Demo around me</button></div></div>` : ""}
+      <div class="map" id="map"><button class="recenter" id="recenter" aria-label="My location">${ic("locate")}</button></div>
+      ${markets.length ? `<div class="block"><div class="eyebrow"><span>Markets nearby</span></div><div class="entries">
+        ${markets.map((m) => `<button class="entry ${homeMarket === m.id ? "on" : ""}" data-m="${m.id}"><div class="body"><div class="name">${esc(m.name)}</div><div class="note"><span class="cdots">${m.cats.map((c) => `<i style="--c:${C[c].color}"></i>`).join("")}</span>${esc(m.tagline)}</div></div><div class="aside">${A.fmtDist(m.dist)}</div></button>`).join("")}
+      </div></div>` : ""}
+      <div class="block"><div class="eyebrow"><span>Browse</span></div><div class="words">
+        ${Object.entries(C).map(([k, c]) => `<button class="word ${homeCat === k ? "on" : ""}" data-cat="${k}" style="${catVars(k)}">${esc(c.name)}</button>`).join("")}
+      </div></div>
+      ${listTitle ? `<div class="block" id="flist"><div class="eyebrow"><span>${esc(listTitle)} · ${filtered.length}</span><button class="link" id="clearf" style="font-size:10.5px">Clear</button></div>
+        <div class="entries">${filtered.length ? filtered.map((s) => shopEntry(s)).join("") : '<p class="quiet">No shops here yet.</p>'}</div></div>` : ""}
+      <div style="height:48px"></div>`;
+
+    $("#locbtn").onclick = openLocationSheet;
+    $("#b-pilot") && ($("#b-pilot").onclick = pickPilot);
+    $("#b-demo") && ($("#b-demo").onclick = () => { A.setDemoShift(loc); location.reload(); });
+    $("#clearf") && ($("#clearf").onclick = () => { homeCat = null; homeMarket = null; home(); });
+    const rerender = (anchor) => { cleanups.forEach((f) => f()); cleanups = []; home(); $(anchor)?.scrollIntoView({ block: "start", behavior: "instant" }); };
+    $$("[data-cat]").forEach((b) => b.onclick = () => { homeCat = homeCat === b.dataset.cat ? null : b.dataset.cat; homeMarket = null; rerender(homeCat ? "#flist" : null); });
+    $$("[data-m]").forEach((b) => b.onclick = () => { homeMarket = homeMarket === b.dataset.m ? null : b.dataset.m; homeCat = null; rerender(homeMarket ? "#flist" : null); });
+
+    const map = newMap("map");
+    L.marker([loc.lat, loc.lng], { icon: meIcon(), zIndexOffset: 1000 }).addTo(map);
+    const marketLayer = L.layerGroup(), shopLayer = L.layerGroup();
+    for (const m of markets) {
+      L.marker([m.lat, m.lng], { icon: L.divIcon({ className: "", iconSize: [0, 0], html: `<div class="mk-market">${esc(m.name)}</div>` }) })
+        .on("click", () => map.flyTo([m.lat, m.lng], 17, { duration: 0.6 })).addTo(marketLayer);
+    }
+    const focusIds = new Set(filtered.map((s) => s.id));
+    for (const s of A.shopsNear(loc, 10)) {
+      const dim = (homeCat || homeMarket) && !focusIds.has(s.id);
+      L.marker([s.lat, s.lng], { icon: dotIcon(dim ? "dim" : "", s) }).bindPopup(shopPopup(s)).addTo(shopLayer);
+    }
+    const sync = () => {
+      if (homeCat || homeMarket || map.getZoom() >= 16) { map.removeLayer(marketLayer); shopLayer.addTo(map); }
+      else { map.removeLayer(shopLayer); marketLayer.addTo(map); }
+    };
+    map.on("zoomend", sync);
+    $("#recenter").onclick = () => map.flyTo([loc.lat, loc.lng], 16, { duration: 0.6 });
+    const focus = filtered.length ? filtered : markets.slice(0, 3);
+    if (focus.length) map.fitBounds(L.latLngBounds([[loc.lat, loc.lng], ...focus.map((x) => [x.lat, x.lng])]), { padding: [36, 36], maxZoom: 17 });
+    else map.setView([loc.lat, loc.lng], 14);
+    sync();
+  }
+
+  function shopView(id, params) {
+    const s = A.getShop(id);
+    if (!s) { app.innerHTML = '<div class="empty"><div class="serif">This shop isn\'t here.</div><p><a class="link" href="#/">Back</a></p></div>'; return; }
+    const m = A.getMarket(s.marketId);
+    const isSaved = saved.includes(id);
+    const hl = params.get("item");
+    A.addView(id);
+    const open = A.isOpen(s);
+    app.innerHTML = `
+      <div class="shop-band" style="${catVars(s.cat)}">
+      <div class="shop-top">
+        <button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button>
+        <div class="btn-row" style="gap:10px">
+          <button class="iconbtn" id="save" aria-label="Save" style="${isSaved ? "color:var(--terracotta)" : ""}">${ic(isSaved ? "heartF" : "heart")}</button>
+          ${bagBtn()}
+        </div>
+      </div>
+      <div class="shop-head">
+        <div class="eyebrow">${esc(C[s.cat].name)} · ${esc(m.name)}</div>
+        <h1 class="title">${esc(s.name)}</h1>
+        <div class="facts">
+          <span class="pill ${open ? "open" : "closed"}">${openWord(s)}</span>
+          ${s.rating ? `<span class="pill star">★ ${s.rating}</span>` : '<span class="pill star">New</span>'}
+          <span class="pill">${dist(s)}</span>
+          ${s.verified ? '<span class="pill">✓ Verified</span>' : ""}
+        </div>
+      </div>
+      </div>
+      <div class="shop-actions">
+        <a class="btn" href="#/route/${s.id}">Directions</a>
+        <button class="link" id="msg">Message</button>
+      </div>
+      <div class="reach"><div class="eyebrow">How to reach</div>${reachSteps(s)}</div>
+      <div class="block">
+        <div class="eyebrow"><span>In this shop · ${s.items.length}</span></div>
+        <div class="inshop">${ic("search")}<input id="ishop" placeholder="Find in this shop" autocomplete="off"></div>
+        <div class="pgrid">${s.items.map((it) => productCard(s, it, it.id === hl)).join("") || '<p class="quiet">This shop hasn\'t listed items yet.</p>'}</div>
+      </div>
+      <div class="ask-line"><p>Not what you need?</p><button class="link" id="askshop">Ask this shop</button></div>`;
+    $("#back").onclick = () => (history.length > 1 ? history.back() : go("#/"));
+    $("#save").onclick = () => {
+      saved = isSaved ? saved.filter((x) => x !== id) : [id, ...saved]; A.store.set("saved", saved);
+      toast(isSaved ? "Removed from saved" : "Saved"); shopView(id, params);
+    };
+    const demoContact = () => toast("Demo shop — in the live app this opens WhatsApp.");
+    $("#msg").onclick = demoContact; $("#askshop").onclick = demoContact;
+    $("#ishop").addEventListener("input", (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      $$("[data-item]").forEach((b) => {
+        const it = s.items.find((x) => x.id === b.dataset.item);
+        b.classList.toggle("hidden", !!q && !`${it.name} ${it.brand}`.toLowerCase().includes(q));
+      });
+    });
+    bindAdd(app);
+    if (hl) setTimeout(() => $(`#it-${hl}`)?.scrollIntoView({ block: "center" }), 60);
+  }
+
+  // ---------- product card (shared by shop page, search, owner preview) ----------
+  const ART = {
+    mobile: '<rect x="15" y="6" width="18" height="36" rx="3"/><path d="M21 37h6"/>',
+    electronics: '<rect x="9" y="11" width="30" height="20" rx="2"/><path d="M5 36h38l-3 3H8z"/>',
+    electrical: '<path d="M24 6a11 11 0 0 0-6 20c1.5 1 2 2.5 2 4h8c0-1.5.5-3 2-4a11 11 0 0 0-6-20z"/><path d="M20 35h8M21 39h6"/>',
+    hardware: '<path d="M30 8a8 8 0 0 0-7 11L9 33a3 3 0 0 0 4 4l14-14a8 8 0 0 0 11-7l-5 5-5-1-1-5z"/>',
+    plumbing: '<path d="M8 18h18a6 6 0 0 1 6 6v5"/><path d="M8 24h16v5"/><path d="M15 18v-6M10 12h10"/><path d="M32 35c0 2-1.5 4-1.5 4S29 37 29 35a1.5 1.5 0 0 1 3 0z"/>',
+    clothes: '<path d="M17 8l-9 5 3 8 4-2v21h18V19l4 2 3-8-9-5c-1 3-3.5 4-6 4s-5-1-6-4z"/>',
+    footwear: '<path d="M6 30c0-6 2-14 4-16 3 0 4 4 9 4 3 0 5 3 9 6 5 3 14 3 14 9v3H6z"/><path d="M6 36h36"/>',
+    kitchen: '<path d="M10 20h28v12a6 6 0 0 1-6 6H16a6 6 0 0 1-6-6z"/><path d="M6 20h36M20 14h8M24 14v-3"/>',
+  };
+  const art = (cat, size = 64) => `<svg class="art" viewBox="0 0 48 48" width="${size}" height="${size}">${ART[cat]}</svg>`;
+  const pimg = (it) => it.img ? `<img src="${it.img}" alt="${esc(it.name)}" loading="lazy">` : art(it.cat);
+  const off = (it) => (it.price && it.mrp > it.price ? Math.round((1 - it.price / it.mrp) * 100) : 0);
+  function priceLine(it) {
+    if (!it.price) return '<div class="pprice"><span class="quiet">Ask for price</span></div>';
+    const o = off(it);
+    return `<div class="pprice"><b>${rupee(it.price)}</b>${o ? ` <s>${rupee(it.mrp)}</s> <span class="off">${o}% off</span>` : ""}</div>`;
+  }
+  function productCard(s, it, hl = false) {
+    const st = A.itemStatus(it);
+    return `<a class="pcard ${hl ? "hl" : ""}" id="it-${it.id}" data-item="${it.id}" href="#/item/${s.id}/${it.id}">
+      <div class="pimg" style="${catVars(it.cat)}">${pimg(it)}</div>
+      <div class="pbody">
+        <div class="pbrand">${esc(it.brand)}</div>
+        <div class="pname">${esc(it.name)}</div>
+        <div class="prate"><span class="rchip">${it.rating} ★</span><span class="faint">(${it.reviews})</span></div>
+        ${priceLine(it)}
+        <div class="pstat ${st.key}"><span class="dot ${st.key}"></span>${statusWord[st.key]}</div>
+      </div>
+      ${st.key !== "out" ? `<button class="padd" data-add="${s.id}|${it.id}" aria-label="Add to bag">+ Add</button>` : ""}
+    </a>`;
+  }
+  function bindAdd(root) {
+    $$("[data-add]", root).forEach((b) => b.onclick = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const [sid, iid] = b.dataset.add.split("|");
+      A.addToBag(sid, iid); refreshBag(); toast("Added to bag");
+      b.textContent = "✓ Added"; b.classList.add("done");
+    });
+  }
+  const bagBtn = () => { const n = A.bagCount(); return `<a class="iconbtn bagbtn" href="#/bag" aria-label="Bag">${ic("bag")}<i class="bcount ${n ? "" : "hidden"}">${n}</i></a>`; };
+  function refreshBag() { const n = A.bagCount(); $$(".bcount").forEach((b) => { b.textContent = n; b.classList.toggle("hidden", !n); }); }
+
+  function searchView(q0) {
+    let mode = "list", showMore = false;
+    app.innerHTML = `
+      <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button><div class="toggle hidden" id="tog"><button data-mode="list" class="on">List</button><button data-mode="map">Map</button></div></div>
+      <div class="pad" style="margin-top:22px"><label class="seek">
+        <input id="q" placeholder="An item, a brand, a shop" value="${esc(q0)}" autocomplete="off" enterkeyhint="search">
+        <button id="clr" class="${q0 ? "" : "hidden"}" aria-label="Clear">${ic("close")}</button>
+      </label></div>
+      <div id="results"></div>`;
+    const input = $("#q");
+    $("#back").onclick = () => go("#/");
+    if (!q0) setTimeout(() => input.focus(), 50);
+    $$("[data-mode]").forEach((b) => b.onclick = () => { mode = b.dataset.mode; $$("[data-mode]").forEach((x) => x.classList.toggle("on", x === b)); render(input.value); });
+
+    function render(q) {
+      cleanups.forEach((f) => f()); cleanups = [];
+      const box = $("#results");
+      $("#clr").classList.toggle("hidden", !q);
+      if (!q.trim()) {
+        $("#tog").classList.add("hidden");
+        box.innerHTML = `
+          ${recent.length ? `<div class="block"><div class="eyebrow"><span>Recent</span></div><div class="entries">${recent.map((r) => `<button class="entry" data-q="${esc(r)}"><div class="body"><div class="name">${esc(r)}</div></div><div class="aside">${ic("arrow")}</div></button>`).join("")}</div></div>` : ""}
+          <div class="block"><div class="eyebrow"><span>Try</span></div><div class="words">${SUGGEST.map((r) => `<button class="word" data-q="${esc(r)}">${esc(r)}</button>`).join("")}</div>
+          <p class="faint small" style="margin-top:22px;line-height:1.5">Hinglish works too — nal, taar, joota.</p></div>`;
+        $$("[data-q]", box).forEach((b) => b.onclick = () => { input.value = b.dataset.q; addRecent(b.dataset.q); A.logSearch(b.dataset.q, A.search(b.dataset.q, loc, 10)); commit(); });
+        return;
+      }
+      const r = A.search(q, loc, 10);
+      const rows = [...r.confirmed, ...r.listed];
+      const any = rows.length || r.likely.length || r.shopsByName.length;
+      $("#tog").classList.toggle("hidden", !any);
+      if (!any) {
+        box.innerHTML = `<div class="empty"><div class="serif">No shop lists “${esc(q)}” yet.</div><p>Someone nearby may still have it.</p>
+          <a class="btn" href="#/ask?q=${encodeURIComponent(q)}" style="margin-top:12px">Ask nearby shops</a></div>`;
+        return;
+      }
+      const best = rows[0];
+      // one line per shop for the rest: the nearest match in each
+      const seen = new Set(best ? [best.shop.id] : []);
+      const others = rows.filter((x) => !seen.has(x.shop.id) && seen.add(x.shop.id));
+      const rowEntry = (x) => `<a class="entry" href="#/item/${x.shop.id}/${x.item.id}">
+        <div class="body"><div class="name">${esc(x.shop.name)}</div><div class="note"><span class="dot ${x.status.key}"></span>${esc(x.item.name)}</div></div>
+        <div class="aside">${x.item.price ? `<b>${rupee(x.item.price)}</b>` : ""}${A.fmtDist(x.shop.dist)}</div></a>`;
+      box.innerHTML = `
+        ${mode === "map" ? '<div class="map tall" id="rmap"></div>' : ""}
+        ${r.shopsByName.length ? `<div class="block"><div class="eyebrow"><span>Shop</span></div><div class="entries">${r.shopsByName.map((s) => shopEntry(s)).join("")}</div></div>` : ""}
+        ${best ? `<div class="answer ${best.status.key}">
+          <div class="eyebrow"><span class="dot ${best.status.key}"></span>${best.status.key === "confirmed" ? "In stock nearby" : "Listed nearby"}</div>
+          <h2 class="title">${esc(best.item.name)}</h2>
+          <div class="where">at <b>${esc(best.shop.name)}</b>, ${esc(A.getMarket(best.shop.marketId).name)}<br>${A.fmtDist(best.shop.dist)} away · ${esc(best.status.label.replace(/^In stock · /, ""))}</div>
+          ${best.item.price ? `<div class="price" style="margin-top:10px">${rupee(best.item.price)}</div>` : ""}
+          <div class="btn-row"><a class="btn" href="#/route/${best.shop.id}">Directions</a><a class="link" href="#/item/${best.shop.id}/${best.item.id}">View item</a></div>
+        </div>` : ""}
+        ${others.length ? `<div class="block"><div class="eyebrow"><span>Also at</span><span class="faint">${others.length}</span></div><div class="entries">${others.map(rowEntry).join("")}</div></div>` : ""}
+        ${r.likely.length ? `<div class="block">${showMore
+          ? `<div class="eyebrow"><span>May also have it</span></div><div class="entries">${r.likely.map((s) => shopEntry(s, '<span class="dot likely"></span>' + A.fmtDist(s.dist))).join("")}</div>`
+          : `<button class="link" id="more">${r.likely.length} more shop${r.likely.length > 1 ? "s" : ""} may have it</button>`}</div>` : ""}
+        <div class="ask-line"><p>Not sure? Let the shops tell you.</p><a class="link accent" href="#/ask?q=${encodeURIComponent(q)}">Ask nearby shops ${ic("arrow")}</a></div>`;
+      $("#more") && ($("#more").onclick = () => { showMore = true; render(q); });
+      $$("a", box).forEach((a) => a.addEventListener("click", () => { addRecent(q); A.logSearch(q, r); }));
+      if (mode === "map") {
+        const map = newMap("rmap");
+        L.marker([loc.lat, loc.lng], { icon: meIcon() }).addTo(map);
+        const pts = [[loc.lat, loc.lng]];
+        const put = (s, cls) => { L.marker([s.lat, s.lng], { icon: dotIcon(cls) }).bindPopup(shopPopup(s)).addTo(map); pts.push([s.lat, s.lng]); };
+        if (best) put(best.shop, "best");
+        others.forEach((x) => put(x.shop, x.status.key === "confirmed" ? "hit" : ""));
+        r.likely.forEach((s) => { L.marker([s.lat, s.lng], { icon: dotIcon("dim", s) }).bindPopup(shopPopup(s)).addTo(map); pts.push([s.lat, s.lng]); });
+        map.fitBounds(pts, { padding: [36, 36], maxZoom: 17 });
+      }
+    }
+    const commit = () => {
+      history.replaceState(null, "", "#/search" + (input.value ? "?q=" + encodeURIComponent(input.value) : ""));
+      render(input.value);
+    };
+    let t;
+    input.addEventListener("input", () => { clearTimeout(t); t = setTimeout(commit, 250); });
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { addRecent(input.value); A.logSearch(input.value, A.search(input.value, loc, 10)); input.blur(); commit(); } });
+    $("#clr").onclick = (e) => { e.preventDefault(); input.value = ""; commit(); input.focus(); };
+    render(q0);
+  }
+
+  function askView(q, askId) {
+    if (askId && A.getAsk(askId)) q = A.getAsk(askId).q;
+    if (!q) return go("#/search");
+    addRecent(q);
+    app.innerHTML = `
+      <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button><span class="eyebrow faint">Simulated in v1</span></div>
+      <div class="pad" style="margin-top:34px">
+        <div class="eyebrow">Asking nearby shops</div>
+        <h1 class="title" style="margin-top:12px">“Do you have ${esc(q)}?”</h1>
+        <div class="quiet small" id="askstat" style="margin-top:14px">Sending…</div>
+        <div class="progress"><div id="bar"></div></div>
+      </div>
+      <div class="block"><div class="entries" id="asklist"></div></div>
+      <p class="pad faint tiny" style="margin:28px 0 40px;line-height:1.6">In the live app each shop receives a WhatsApp message and answers with one tap.</p>`;
+    $("#back").onclick = () => history.back();
+    // Re-opening an earlier question (?id=) shows its replies; otherwise a new question is sent.
+    let a0 = askId && A.getAsk(askId);
+    if (!a0) {
+      const job = A.ask(q, loc);
+      a0 = job.ask;
+      history.replaceState(null, "", "#/ask?id=" + a0.id + "&q=" + encodeURIComponent(q));
+    }
+    if (!a0.targets.length) { $("#askstat").textContent = "No matching shops within 5 km."; return; }
+    $("#asklist").innerHTML = a0.targets.map((t) => {
+      const s = A.getShop(t.shopId);
+      return shopEntry(s, `<span id="r-${s.id}"><span class="reply wait typing">${A.isOwnerShop(s.id) ? "Your shop" : "Waiting"}</span></span>`);
+    }).join("");
+    // replies arrive in storage (from simulated shops, or from you on the shop-owner side)
+    const paint = () => {
+      const a = A.getAsk(a0.id); if (!a) return;
+      let got = 0, yes = 0;
+      for (const t of a.targets) {
+        const rep = a.replies[t.shopId]; if (!rep) continue;
+        got++;
+        const cell = $(`#r-${t.shopId}`); if (!cell || cell.dataset.done) continue;
+        cell.dataset.done = 1;
+        if (rep.noReply) cell.innerHTML = '<span class="reply wait">No reply</span>';
+        else if (rep.has) { cell.innerHTML = `<b>${rep.price ? rupee(rep.price) : ""}</b><span class="reply yes">Has it</span>`; cell.closest(".entry").classList.add("yes"); }
+        else cell.innerHTML = '<span class="reply no">Doesn\'t have it</span>';
+      }
+      yes = Object.values(a.replies).filter((r) => r.has).length;
+      const n = a.targets.length;
+      $("#bar").style.width = (got / n) * 100 + "%";
+      $("#askstat").innerHTML = got < n ? `${got} of ${n} replied${yes ? ` · ${yes} have it` : ""}<span class="typing"></span>` : (yes ? `${yes} of ${n} shops have it` : "No shop has it right now");
+    };
+    paint();
+    const iv = setInterval(paint, 700);
+    cleanups.push(() => clearInterval(iv));
+  }
+
+  function routeView(id) {
+    const s = A.getShop(id);
+    if (!s) return go("#/");
+    let mode = "foot";
+    const MODES = { foot: { l: "Walk", verb: "walk", srv: "routed-foot", kmh: 4.5, g: "walking" }, bike: { l: "Two-wheeler", verb: "ride", srv: "routed-bike", kmh: 18, g: "two-wheeler" }, car: { l: "Car", verb: "drive", srv: "routed-car", kmh: 20, g: "driving" } };
+    const crow = A.distKm(loc, s);
+    app.innerHTML = `
+      <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button></div>
+      <div class="pad" style="margin-top:22px">
+        <div class="eyebrow">To ${esc(s.name)}</div>
+        <h1 class="display" id="rt-sum" style="margin-top:12px">…</h1>
+        <div class="quiet small" id="rt-sub" style="margin-top:8px">&nbsp;</div>
+        <div class="modes toggle">${Object.entries(MODES).map(([k, v]) => `<button class="${k === mode ? "on" : ""}" data-md="${k}">${v.l}</button>`).join("")}</div>
+      </div>
+      <div class="map tall" id="rtmap"></div>
+      <div class="pad" style="margin-top:24px"><a class="btn" id="gmaps" target="_blank" rel="noopener">Start navigation</a></div>
+      <div class="block"><div class="eyebrow"><span>Inside the market</span></div>${reachSteps(s)}
+        <p class="faint tiny" style="line-height:1.6;margin-top:12px">GPS drifts in narrow lanes — follow these once you arrive.</p></div>
+      <div style="height:40px"></div>`;
+    $("#back").onclick = () => history.back();
+    const map = newMap("rtmap");
+    L.marker([loc.lat, loc.lng], { icon: meIcon() }).addTo(map);
+    L.marker([s.lat, s.lng], { icon: dotIcon("best") }).addTo(map);
+    let line = null, reqId = 0;
+    const draw = async () => {
+      const md = MODES[mode], my = ++reqId;
+      $("#gmaps").href = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=${md.g}`;
+      let coords, km, min, approx = false;
+      try {
+        const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 8000);
+        const r = await fetch(`https://routing.openstreetmap.de/${md.srv}/route/v1/driving/${loc.lng},${loc.lat};${s.lng},${s.lat}?overview=full&geometries=geojson`, { signal: ctl.signal });
+        clearTimeout(to);
+        const rt = (await r.json()).routes[0];
+        coords = rt.geometry.coordinates.map(([x, y]) => [y, x]); km = rt.distance / 1000;
+        min = mode === "foot" ? rt.duration / 60 : (km / md.kmh) * 60; // city traffic: own speed for vehicles
+      } catch { approx = true; coords = [[loc.lat, loc.lng], [s.lat, s.lng]]; km = crow * 1.3; min = (km / md.kmh) * 60; }
+      if (my !== reqId) return;
+      line && map.removeLayer(line);
+      line = L.polyline(coords, { color: "#1f6e6a", weight: 5, opacity: .9, dashArray: approx ? "2 8" : null, lineCap: "round" }).addTo(map);
+      map.fitBounds(line.getBounds(), { padding: [40, 40], maxZoom: 18 });
+      const t = min < 60 ? `${Math.max(1, Math.round(min))} min` : `${(min / 60).toFixed(1)} h`;
+      $("#rt-sum").textContent = `${t} ${md.verb}`;
+      $("#rt-sub").textContent = `${A.fmtDist(km)}${approx ? " · approximate" : ""}${crow > 50 ? " · far from this market" : ""}`;
+    };
+    $$("[data-md]").forEach((b) => b.onclick = () => { mode = b.dataset.md; $$("[data-md]").forEach((x) => x.classList.toggle("on", x === b)); draw(); });
+    draw();
+  }
+
+  function meView() {
+    const sv = saved.map(A.getShop).filter(Boolean);
+    app.innerHTML = `
+      <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button></div>
+      <div class="pad" style="margin-top:22px"><h1 class="display">Yours</h1></div>
+      <div class="block"><div class="eyebrow"><span>Location</span><button class="link" id="chg" style="font-size:10.5px">Change</button></div>
+        <div class="serif" style="font-size:24px">${esc(loc.label)}${loc.sub ? `<span class="quiet">, ${esc(loc.sub)}</span>` : ""}</div></div>
+      <a class="bizcard" href="#/biz" style="margin:26px var(--gut) 0">
+        <span class="bz-ic">${ic("store")}</span>
+        <span class="body"><span class="serif" style="font-size:21px;display:block">${A.ownerShop() ? esc(A.ownerShop().name) : "Own a shop?"}</span>
+        <span class="small quiet">${A.ownerShop() ? "Open your shop dashboard" : "List it free — get customers who are looking for what you sell"}</span></span>${ic("arrow")}
+      </a>
+      <div class="block"><div class="eyebrow"><span>Your orders</span>${A.getOrders().length ? '<a class="link" href="#/orders" style="font-size:10.5px">All</a>' : ""}</div>
+        ${A.getOrders().length ? `<div class="entries">${A.getOrders().slice(0, 3).map(orderEntry).join("")}</div>` : '<p class="quiet small">Orders and reservations you make will show here.</p>'}</div>
+      ${A.store.get("asks", []).length ? `<div class="block"><div class="eyebrow"><span>Your questions to shops</span></div><div class="entries">
+        ${A.store.get("asks", []).slice(0, 3).map((a) => { const yes = Object.values(a.replies).filter((r) => r.has).length;
+          return `<a class="entry" href="#/ask?id=${a.id}"><div class="body"><div class="name">“${esc(a.q)}”</div><div class="note">${Object.keys(a.replies).length} of ${a.targets.length} replied</div></div><div class="aside">${yes ? `<b style="color:var(--in)">${yes} have it</b>` : ""}</div></a>`; }).join("")}
+      </div></div>` : ""}
+      <div class="block"><div class="eyebrow"><span>Saved shops</span></div>
+        ${sv.length ? `<div class="entries">${sv.map((s) => shopEntry(s)).join("")}</div>` : '<p class="quiet small">Tap the heart on a shop to keep it here.</p>'}</div>
+      <div class="block"><div class="eyebrow"><span>Recent searches</span>${recent.length ? '<button class="link" id="clrrec" style="font-size:10.5px">Clear</button>' : ""}</div>
+        ${recent.length ? `<div class="words">${recent.map((r) => `<a class="word" href="#/search?q=${encodeURIComponent(r)}">${esc(r)}</a>`).join("")}</div>` : '<p class="quiet small">None yet.</p>'}</div>
+      <div class="rule"></div>
+      <div class="block"><div class="eyebrow"><span>Demo</span></div>
+        <div style="display:grid;gap:18px;justify-items:start">
+          <button class="link" id="demo-here">Place demo markets around me</button>
+          <button class="link" id="demo-pilot">Back to Karol Bagh pilot</button>
+          <button class="link" id="demo-reset" style="color:var(--out)">Reset all demo activity</button>
+        </div></div>
+      <p class="pad faint tiny" style="margin:34px 0 40px;line-height:1.6">My Market v1 · a working prototype. Shops and replies are demo data. Map © OpenStreetMap contributors.</p>`;
+    $("#back").onclick = () => go("#/");
+    $("#chg").onclick = openLocationSheet;
+    $("#clrrec") && ($("#clrrec").onclick = () => { recent = []; A.store.set("recent", []); meView(); });
+    $("#demo-here").onclick = () => {
+      if (loc.source === "pilot" && !A.hasDemoShift()) { toast("Set your own location first."); return; }
+      A.clearDemoShift(); A.setDemoShift(loc); location.reload();
+    };
+    $("#demo-pilot").onclick = pickPilot;
+    $("#demo-reset").onclick = () => {
+      if (!confirm("Clear your orders, bag, saved shops, your shop and all demo activity on this device?")) return;
+      ["feedback", "trust", "saved", "recent", "bag", "orders", "asks", "searchLog", "views", "owner", "shopsAdded", "ownerItems", "itemEdits", "watch"].forEach((k) => A.store.del(k));
+      location.reload();
+    };
+  }
+
+  function orderEntry(o) {
+    const s = A.getShop(o.shopId);
+    const steps = A.STEPS[o.mode];
+    const label = o.cancelled ? "Cancelled" : steps[o.step];
+    const n = o.items.reduce((a, b) => a + b.qty, 0);
+    return `<a class="entry" href="#/order/${o.id}"><div class="body"><div class="name">${esc(s ? s.name : "Shop")}</div>
+      <div class="note">${n} item${n > 1 ? "s" : ""} · ${o.mode === "reserve" ? "Reserved" : o.mode === "delivery" ? "Delivery" : "Pickup"} · ${esc(label)}</div></div>
+      <div class="aside"><b>${o.total ? rupee(o.total) : "At shop"}</b>${new Date(o.at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</div></a>`;
+  }
+
+  // ---------- router ----------
+  function route() {
+    cleanups.forEach((f) => { try { f(); } catch {} }); cleanups = [];
+    closeSheet();
+    const h = location.hash.slice(1) || "/";
+    const [path, qs] = h.split("?");
+    const params = new URLSearchParams(qs || "");
+    const parts = path.split("/").filter(Boolean);
+    if (!loc && parts[0] !== "welcome") { go("#/welcome"); return; }
+    if (loc && parts[0] === "welcome") { go("#/"); return; }
+    const fn = ROUTES[parts[0] || ""] || home;
+    fn(parts, params);
+    if (parts[0] !== "shop" || !params.get("item")) window.scrollTo(0, 0);
+  }
+  // Other files (shop.js, biz.js) add their screens to ROUTES before the first render.
+  const ROUTES = {
+    "": home, welcome, me: meView,
+    shop: (p, q) => shopView(p[1], q), search: (p, q) => searchView(q.get("q") || ""),
+    ask: (p, q) => askView(q.get("q"), q.get("id")), route: (p) => routeView(p[1]),
+  };
+  window.MM_UI = {
+    A, C, $, $$, app, esc, ic, toast, openSheet, closeSheet, go, rupee, dist, openWord, statusWord, catVars, mono,
+    newMap, meIcon, dotIcon, shopPopup, reachSteps, shopEntry, productCard, priceLine, pimg, art, off, bindAdd, bagBtn, refreshBag, orderEntry,
+    loc: () => loc, addCleanup: (f) => cleanups.push(f), ROUTES, route,
+  };
+  window.addEventListener("hashchange", route);
+  document.addEventListener("DOMContentLoaded", route);
+})();

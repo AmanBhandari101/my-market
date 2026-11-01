@@ -1,0 +1,12 @@
+{
+  "name": "My Market",
+  "short_name": "My Market",
+  "description": "Find which local shop has the item you need, and how to reach it.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#fbf6ee",
+  "theme_color": "#f4e9d8",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
