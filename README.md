@@ -53,6 +53,10 @@ Product photos: Wikimedia Commons under free licences — see [CREDITS.md](CREDI
 - `js/biz.js` — shop-owner screens
 - `css/app.css` (design tokens, base screens), `css/commerce.css` (shopping + owner screens)
 
+## Licence
+Code: [MIT](LICENSE). Product photos in `img/items/` are not covered by MIT; each keeps its own
+Wikimedia Commons licence, listed in [CREDITS.md](CREDITS.md).
+
 ## Not real yet
 Backend + database, accounts/login, real WhatsApp (questions, codes, order alerts), real payments (UPI gateway),
 real shelf-photo AI, delivery partners, ads, billing-software sync.
