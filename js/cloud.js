@@ -175,7 +175,19 @@
     return null;
   }
 
-  window.MM_CLOUD = { ready: true, logSearch, searchesNear, lookupBarcode, sb, enqueue, flush, status, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
+  // ---------- bill PDFs for customers ----------
+  // Stored as <shop>/<bill>-<random>.pdf (unguessable); the customer gets a link
+  // to bill.html, which opens it.
+  async function uploadBill(shopId, billId, blob) {
+    const rand = [...crypto.getRandomValues(new Uint8Array(9))].map((x) => x.toString(36).padStart(2, "0")).join("").slice(0, 14);
+    const path = `${shopId}/${billId}-${rand}.pdf`;
+    const { error } = await sb.storage.from("bills").upload(path, blob, { contentType: "application/pdf", upsert: false });
+    if (error) throw error;
+    return new URL("bill.html", location.href).href.split("#")[0] + "#" + path;
+  }
+  const billFileUrl = (path) => `${C.supabaseUrl}/storage/v1/object/public/bills/${path}`;
+
+  window.MM_CLOUD = { ready: true, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, sb, enqueue, flush, status, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
     pending: () => Q.get().length, failedOps: () => Q.failed() };
 
   // start-up

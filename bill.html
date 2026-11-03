@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#172331">
+  <title>Your bill · My Market</title>
+  <link rel="icon" href="icons/icon-192.png">
+  <style>
+    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #e9eded; color: #0f1111; }
+    header { background: #172331; color: #fff; padding: 14px 18px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+    header img { width: 28px; height: 28px; border-radius: 6px; }
+    main { max-width: 480px; margin: 0 auto; padding: 18px; }
+    .card { background: #fff; border-radius: 10px; padding: 20px; text-align: center; }
+    h1 { font-size: 20px; margin: 6px 0 4px; }
+    p { color: #565959; line-height: 1.5; margin: 6px 0; }
+    a.btn { display: block; margin-top: 16px; padding: 14px; border-radius: 100px; background: #ffd814; border: 1px solid #f2c200; color: #0f1111; font-weight: 600; text-decoration: none; }
+    a.line { background: #fff; border-color: #d5d9d9; font-weight: 500; }
+    small { display: block; margin-top: 18px; color: #8a9191; }
+  </style>
+</head>
+<body>
+  <header><img src="icons/icon-192.png" alt="">My Market</header>
+  <main><div class="card" id="c"><p>Loading your bill…</p></div></main>
+  <script src="js/config.js"></script>
+  <script>
+    // The link carries the file's place after "#": <shop>/<bill>-<random>.pdf
+    var path = decodeURIComponent(location.hash.slice(1));
+    var c = document.getElementById("c");
+    if (!/^[0-9a-f-]{36}\/[0-9a-f-]{36}-[0-9a-z]{6,20}\.pdf$/.test(path) || !window.MM_CONFIG) {
+      c.innerHTML = "<h1>Bill not found</h1><p>This link looks incomplete. Ask the shop to send it again.</p>";
+    } else {
+      var url = MM_CONFIG.supabaseUrl + "/storage/v1/object/public/bills/" + path;
+      c.innerHTML = '<div style="font-size:40px">🧾</div><h1>Your bill is ready</h1><p>Thank you for shopping. Open it below, or save it to your phone.</p>' +
+        '<a class="btn" href="' + url + '">Open bill (PDF)</a>' +
+        '<a class="btn line" href="' + url + '?download=bill.pdf">Download</a>' +
+        '<a class="btn line" href="./">Find more shops near you on My Market</a>' +
+        '<small>Sent by the shop through My Market.</small>';
+    }
+  </script>
+</body>
+</html>

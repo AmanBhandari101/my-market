@@ -21,6 +21,7 @@ One-time setup of the server database. Takes about 10 minutes.
 Running it again later is safe.
 
 4. Then do the same with `supabase/searches.sql` (what customers search for near each shop, for the Reports page).
+5. Then `supabase/catalog.sql` (shared product catalogue) and `supabase/bills.sql` (bill PDFs sent to customers on WhatsApp).
 
 ## 3. Login settings
 

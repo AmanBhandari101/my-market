@@ -470,7 +470,7 @@
           ${cart.pay === "khata" ? `<p class="small quiet" style="margin-top:10px">Added to the customer's credit. Add their phone number so it goes in their khata.</p>` : ""}
           <label class="small quiet" style="display:block;margin-top:12px">Customer WhatsApp number <span class="faint">(optional)</span>
             <input class="field" id="ph" inputmode="tel" value="${esc(cart.phone)}" placeholder="98765 43210"></label>
-          <p class="faint tiny" style="margin:4px 0 0">If you add a number, the bill PDF is sent to it as soon as you tap Generate.</p>
+          <p class="faint tiny" style="margin:4px 0 0">With a number, WhatsApp opens on that customer's chat with the bill ready — tap Send.</p>
           <div class="opts" style="margin-top:18px"><button class="btn" id="gen" style="height:52px;font-size:16px">Generate bill · ${rupee(t.total)}</button>
             <button class="link accent" id="clearb">Clear this bill</button></div>`;
         const idx = (b, k) => +b.dataset[k];
@@ -608,23 +608,38 @@
   // (pick WhatsApp, send). Computers: the PDF downloads and the customer's
   // WhatsApp chat opens. In v2 the shop's WhatsApp Business number sends it
   // by itself through the WhatsApp Business API — this is the one place to swap.
+  // Send the bill to the customer's WhatsApp number.
+  // With a number: the PDF goes to the server and WhatsApp opens straight on that
+  // customer's chat (no need to have them in contacts) with the bill and its link —
+  // the shop only taps Send. Without a number: the phone's share menu as before.
+  // Fully automatic sending (no tap) needs the WhatsApp Business API later.
   async function sendBill(b, s) {
     const num = A.normPhone(b.phone);
-    const text = `Bill #${b.no} from ${s.name}: ${rs(b.total)}. Thank you!`;
-    if (!window.jspdf) {
-      U.toast("PDF needs the internet once — sending the bill as text");
-      if (num) window.open(`https://wa.me/91${num}?text=${encodeURIComponent(billText(b, s))}`, "_blank", "noopener");
-      return "text";
+    if (num.length === 10) {
+      // open the window now, while the tap still counts, or the phone blocks it
+      const win = window.open("", "_blank");
+      if (win) win.document.write('<p style="font:16px sans-serif;padding:24px">Opening WhatsApp…</p>');
+      let link = null;
+      try {
+        if (window.jspdf && window.MM_CLOUD && s.cloud)
+          link = await window.MM_CLOUD.uploadBill(s.id, b.id, makeBillPdf(b, s).output("blob"));
+      } catch (x) { console.warn("[MM] bill upload failed", x); }
+      const msg = link
+        ? `*${s.name}*\nBill #${b.no} · ${rs(b.total)} · ${PAYS[b.pay]}\nYour bill (PDF): ${link}\nThank you! Visit again.`
+        : billText(b, s);
+      const url = `https://wa.me/91${num}?text=${encodeURIComponent(msg)}`;
+      if (win && !win.closed) win.location.href = url; else location.href = url;
+      if (!link) U.toast(navigator.onLine ? "Sent as text — the PDF link needs your shop to be synced" : "No internet — sent the bill as text");
+      return link ? "link" : "text";
     }
+    if (!window.jspdf) { U.toast("PDF needs the internet once"); return "none"; }
     const doc = makeBillPdf(b, s);
     const file = new File([doc.output("blob")], billName(b, s), { type: "application/pdf" });
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: `Bill #${b.no}`, text }); return "shared"; }
+      try { await navigator.share({ files: [file], title: `Bill #${b.no}`, text: `Bill #${b.no} from ${s.name}: ${rs(b.total)}. Thank you!` }); return "shared"; }
       catch (x) { if (x.name === "AbortError") return "cancelled"; }
     }
-    doc.save(billName(b, s));
-    if (num) { window.open(`https://wa.me/91${num}?text=${encodeURIComponent(text + " (PDF attached)")}`, "_blank", "noopener"); U.toast("PDF saved — attach it in the WhatsApp chat that opened"); }
-    else U.toast("Bill PDF downloaded");
+    doc.save(billName(b, s)); U.toast("Bill PDF downloaded");
     return "downloaded";
   }
 
@@ -1048,7 +1063,7 @@
         <div class="rfoot">Thank you! Visit again.<br><span>${b.units} item${b.units > 1 ? "s" : ""} · My Market</span></div>
       </div>
       <div class="pad noprint" style="display:grid;gap:10px;margin:18px 0 10px">
-        <button class="btn" id="wa">${b.phone ? `Send bill PDF to ${esc(b.phone)}` : "Share bill PDF"}</button>
+        <button class="btn" id="wa">${b.phone ? `Send bill on WhatsApp to ${esc(b.phone)}` : "Share bill PDF"}</button>
         <div class="two"><button class="btn line" id="pdf">Download PDF</button><button class="btn line" id="pr">Print</button></div>
         <a class="btn warm" href="#/biz/bill">New bill</a>
       </div>
