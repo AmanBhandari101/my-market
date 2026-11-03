@@ -27,7 +27,7 @@
         <div class="topline"><span class="brand"><img src="icon-business.svg" alt="">My Market<small style="color:#5fd08a">Business</small></span></div>
         <div class="pad" style="margin-top:30px">
           <h1 class="display">Customers are already<br><em>looking for you.</em></h1>
-          <p class="quiet" style="line-height:1.55;margin:14px 0 0">List your shop free. People nearby see what you stock, ask you questions on WhatsApp, and reserve before they walk in.</p>
+          <p class="quiet" style="line-height:1.55;margin:14px 0 0">Free billing, stock and sales reports for your shop — and people nearby can see what you have and your prices, then WhatsApp you or walk in.</p>
         </div>
       </div>
       <div class="block" id="login"><div class="eyebrow"><span>Log in to your shop</span></div>
@@ -43,10 +43,10 @@
       </div>
       <p class="pad faint tiny" style="text-align:center;margin-bottom:8px">Free · takes about 5 minutes · your mobile number and 6-digit PIN become your login</p>
       <div class="block"><div class="perks">
-        <div><span>${ic("chat")}</span><b>Customer questions</b><p>“Do you have a 1 inch elbow?” — answer with one tap.</p></div>
-        <div><span>${ic("chart")}</span><b>Missed sales report</b><p>What people searched for near you that nobody had.</p></div>
-        <div><span>${ic("box")}</span><b>Orders & reservations</b><p>Pickup, delivery, or “keep it for me” — paid at your counter.</p></div>
-        <div><span>${ic("camera")}</span><b>No typing</b><p>Photograph a shelf; we build your item list.</p></div>
+        <div><span>${ic("receipt")}</span><b>Bills in seconds</b><p>Tap items, the app adds it up and sends a PDF bill on WhatsApp.</p></div>
+        <div><span>${ic("box")}</span><b>Stock that updates itself</b><p>Every bill lowers stock. Scan a barcode to add an item.</p></div>
+        <div><span>${ic("chart")}</span><b>Clear reports</b><p>Today, week, month — what's running low and what isn't selling.</p></div>
+        <div><span>${ic("search")}</span><b>Customers find you</b><p>See what people near you search for — and stock what they want.</p></div>
       </div></div>
       <div style="height:40px"></div>`;
     $("#lf").onsubmit = async (e) => {
