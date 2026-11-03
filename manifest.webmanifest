@@ -1,12 +1,37 @@
 {
+  "id": "./index.html",
   "name": "My Market",
   "short_name": "My Market",
-  "description": "Find which local shop has the item you need, and how to reach it.",
-  "start_url": "./",
+  "description": "Find which shop near you has the item you need — live stock and prices from local shops.",
+  "start_url": "./index.html#/",
   "display": "standalone",
-  "background_color": "#fbf6ee",
-  "theme_color": "#f4e9d8",
+  "background_color": "#ffffff",
+  "theme_color": "#172331",
   "icons": [
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
-  ]
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-192-maskable.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "scope": "./"
 }

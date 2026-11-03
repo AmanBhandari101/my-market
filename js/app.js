@@ -2,12 +2,15 @@
 // Rule for every screen: lead with the answer, keep the rest one tap away.
 (function () {
   const A = window.MM_API, D = A.D, C = D.CATEGORIES;
+  // Two apps, one codebase: business.html sets MM_APP = "business" (shop app),
+  // index.html is the customer app. Each only shows its own screens.
+  const BIZ = window.MM_APP === "business";
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const app = $("#app");
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const PILOT_ORIG = { lat: 28.6517, lng: 77.1905, label: "Karol Bagh", sub: "New Delhi", source: "pilot" };
-  const SUGGEST = ["1 inch elbow", "Type-C charger", "nal", "Havells MCB", "kurti", "pressure cooker"];
+  const SUGGEST = ["Type-C charger", "1 inch elbow", "nal", "Havells MCB", "kurti", "pressure cooker", "atta", "dawai", "ghadi"];
 
   // thin line icons
   const P = {
@@ -27,6 +30,11 @@
     chat: '<path d="M5 5h14v10H9l-4 4z"/>',
     box: '<path d="M4 8l8-4 8 4v8l-8 4-8-4z"/><path d="M4 8l8 4 8-4M12 12v8"/>',
     chart: '<path d="M5 19V9M10 19V5M15 19v-7M20 19v-4"/>',
+    bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+    menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+    receipt: '<path d="M6 3h12v18l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5L6 21z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+    truck: '<path d="M3 7h11v9H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17.5" cy="17.5" r="1.8"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
   };
   const ic = (n, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24">${P[n]}</svg>`;
 
@@ -48,6 +56,21 @@
   const fmtHour = (h) => (h % 12 || 12) + (h < 12 ? " am" : " pm");
   const rupee = (p) => "₹" + p.toLocaleString("en-IN");
   const dist = (s) => A.fmtDist(A.distKm(loc, s));
+  const away = (km) => `${A.fmtDist(km)} · ${A.fmtTrip(km)}`;
+  const stWord = (st) => (st.few ? "Only a few left" : statusWord[st.key]);
+  // Walking / Short ride / Whole city: caps how far "near me" looks.
+  const rangeChips = (id) => `<div class="ranges" id="${id}">${Object.entries(A.RANGES).map(([k, r]) => `<button class="${A.getRange() === k ? "on" : ""}" data-range="${k}">${r.label}</button>`).join("")}</div>`;
+  const areaNote = (km) => `within ${A.fmtDist(km)}`;
+  const stars = (r, n) => !r ? "" : `<span class="prate"><span class="stars" style="--r:${r}" aria-label="${r} out of 5">★★★★★</span>${n != null ? `<span class="rc">${n.toLocaleString("en-IN")}</span>` : ""}</span>`;
+  const amt = (p) => `<span class="amt"><sup>₹</sup>${p.toLocaleString("en-IN")}</span>`;
+  // small product tile for the home rows
+  const hcard = (x) => {
+    const o = off(x.item);
+    return `<a class="hcard" href="#/item/${x.shop.id}/${x.item.id}"><div class="himg" style="${catVars(x.item.cat)}">${pimg(x.item)}</div>
+      <div>${o ? `<span class="dealtag">${o}% off</span>` : ""}${x.item.price ? amt(x.item.price) : '<span class="quiet">Ask for price</span>'}</div>
+      <div class="hname">${esc(x.item.name)}</div>${stars(x.item.rating, x.item.reviews)}
+      <div class="hshop">${esc(x.shop.name)} · ${A.fmtDist(x.shop.dist)}</div></a>`;
+  };
   const openWord = (s) => A.isOpen(s) ? `Open until ${fmtHour(s.close)}` : `Closed · opens ${fmtHour(s.open)}`;
   const statusWord = { confirmed: "In stock", listed: "Ask to confirm", out: "Not available" };
   function toast(msg) {
@@ -80,6 +103,13 @@
   const shopPopup = (s) => `<div class="pop"><div class="serif">${esc(s.name)}</div><div class="tiny">${esc(C[s.cat].name)} · ${dist(s)}</div>
     <div class="btn-row"><a class="link" href="#/shop/${s.id}">View</a><a class="link accent" href="#/route/${s.id}">Directions</a></div></div>`;
 
+  // Open a WhatsApp chat with the shop (its registered number).
+  function waShop(s, text) {
+    const d = String(s.phone || "").replace(/\D/g, "").slice(-10);
+    if (d.length !== 10) return toast("This shop hasn't added a WhatsApp number");
+    window.open(`https://wa.me/91${d}?text=${encodeURIComponent(text)}`, "_blank", "noopener");
+  }
+
   // ---------- shared pieces ----------
   function shopEntry(s, aside) {
     return `<a class="entry" href="#/shop/${s.id}">${mono(s)}
@@ -88,7 +118,8 @@
   }
   function reachSteps(s) {
     const m = A.getMarket(s.marketId);
-    return `<ol class="steps"><li>${esc(m.name)}, ${esc(m.area)}</li><li>${esc(s.landmark)}</li><li>Shop ${esc(s.shopNo)}, ${esc(s.floor.toLowerCase())}</li></ol>`;
+    const where = [s.locality || m.locality || m.area, s.pincode || m.pincode].filter(Boolean).join(" ");
+    return `<ol class="steps"><li>${esc(m.name)}${where ? ", " + esc(where) : ""}</li><li>${esc(s.landmark)}</li><li>Shop ${esc(s.shopNo)}, ${esc(s.floor.toLowerCase())}</li></ol>`;
   }
 
   // ---------- location ----------
@@ -96,8 +127,9 @@
     try {
       const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=16&lat=${lat}&lon=${lng}`);
       const a = (await r.json()).address || {};
-      return { label: a.suburb || a.neighbourhood || a.city_district || a.village || a.town || a.city || "Current location", sub: a.city || a.town || a.state || "" };
-    } catch { return { label: "Current location", sub: "" }; }
+      const locality = a.suburb || a.neighbourhood || a.city_district || a.village || a.town || a.city || "";
+      return { label: locality || "Current location", sub: [a.city || a.town || a.state, a.postcode].filter(Boolean).join(" "), locality, pincode: a.postcode || "" };
+    } catch { return { label: "Current location", sub: "", locality: "", pincode: "" }; }
   }
   function useGPS(done) {
     if (!navigator.geolocation) { toast("Location isn't available here"); return openLocationSheet(); }
@@ -124,7 +156,7 @@
       <div id="placeres" class="entries" style="border:0"></div>
       <div class="entries" style="margin-top:18px">
         <button class="entry" id="pl-gps"><div class="body"><div class="name">Use my location</div></div><div class="aside">${ic("locate")}</div></button>
-        <button class="entry" id="pl-pilot"><div class="body"><div class="name">Karol Bagh</div><div class="note">New Delhi · pilot area</div></div></button>
+        <button class="entry" id="pl-pilot"><div class="body"><div class="name">Karol Bagh</div><div class="note">New Delhi</div></div></button>
         ${recentLocs.map((l, i) => `<button class="entry" data-rl="${i}"><div class="body"><div class="name">${esc(l.label)}</div><div class="note">${esc(l.sub || "")}</div></div></button>`).join("")}
       </div>`, (el) => {
       $("#pl-gps", el).onclick = () => useGPS();
@@ -161,47 +193,62 @@
         <button class="btn" id="w-gps">Use my location</button>
         <button class="link" id="w-manual">Choose an area</button>
       </div>
-      <div class="foot eyebrow faint">Pilot · Karol Bagh, New Delhi</div>
+
     </div>`;
     $("#w-gps").onclick = () => useGPS(() => go("#/"));
     $("#w-manual").onclick = openLocationSheet;
   }
 
   function home() {
-    const markets = A.marketsNear(loc, 10);
-    const filtered = (homeCat || homeMarket) ? A.shopsNear(loc, 10, homeCat).filter((s) => !homeMarket || s.marketId === homeMarket) : [];
+    const area = A.nearArea(loc);
+    const markets = area.markets;
+    const filtered = (homeCat || homeMarket) ? A.shopsNear(loc, area.km, homeCat).filter((s) => !homeMarket || s.marketId === homeMarket) : [];
     const listTitle = homeMarket ? A.getMarket(homeMarket).name : homeCat ? C[homeCat].name : "";
+    // product rows: what's in stock nearby, and the biggest price drops
+    const seenName = new Set();
+    const nearItems = area.shops.flatMap((sh) => sh.items.map((item) => ({ shop: sh, item, st: A.itemStatus(item) })))
+      .filter((x) => x.st.key === "confirmed" && (!homeCat || x.item.cat === homeCat));
+    const inStock = nearItems.filter((x) => x.item.img).sort((a, b) => a.shop.dist - b.shop.dist)
+      .filter((x) => !seenName.has(x.item.name) && seenName.add(x.item.name)).slice(0, 12);
+    const deals = nearItems.filter((x) => x.item.price && off(x.item) >= 15).sort((a, b) => off(b.item) - off(a.item)).slice(0, 12);
+    const catImg = (k) => { const it = D.shops.flatMap((x) => x.items).find((i) => i.cat === k && i.img); return it ? `<img src="${it.img}" alt="">` : art(k, 40); };
     app.innerHTML = `
-      <div class="band">
-      <div class="topline">
-        <button class="loc eyebrow" id="locbtn">${ic("pin")}<span>${esc(loc.label)}${loc.sub ? ", " + esc(loc.sub) : ""}</span>${ic("down")}</button>
-        <div class="btn-row" style="gap:10px">${bagBtn()}<a class="iconbtn" href="#/me" aria-label="Profile">${ic("user")}</a></div>
+      <div class="navwrap">
+        <div class="nav1"><a class="brand" href="#/"><img src="icon.svg" alt="">My Market<small>.local</small></a>
+          <div class="btn-row" style="gap:4px"><a class="iconbtn" href="#/me" aria-label="Profile">${ic("user")}</a>${bagBtn()}</div></div>
+        <div class="pad"><a class="seek" href="#/search">${ic("search")}<span class="ph">Search an item, brand or shop</span><span class="seekbtn">${ic("search")}</span></a></div>
+        ${rangeChips("hrange")}
       </div>
-      <div class="pad" style="margin-top:30px">
-        <h1 class="display">What are you<br><em>looking for?</em></h1>
-        <a class="seek" href="#/search" style="margin-top:22px">${ic("search")}<span class="ph">An item, a brand, a shop</span></a>
-      </div>
-      </div>
-      ${!markets.length ? `<div class="banner"><div class="serif">Not in your area yet.</div>
-        <p>My Market starts in Karol Bagh, New Delhi. Visit the pilot, or place the demo markets around you.</p>
-        <div class="btn-row"><button class="link" id="b-pilot">Visit pilot</button><button class="link accent" id="b-demo">Demo around me</button></div></div>` : ""}
-      <div class="map" id="map"><button class="recenter" id="recenter" aria-label="My location">${ic("locate")}</button></div>
-      ${markets.length ? `<div class="block"><div class="eyebrow"><span>Markets nearby</span></div><div class="entries">
-        ${markets.map((m) => `<button class="entry ${homeMarket === m.id ? "on" : ""}" data-m="${m.id}"><div class="body"><div class="name">${esc(m.name)}</div><div class="note"><span class="cdots">${m.cats.map((c) => `<i style="--c:${C[c].color}"></i>`).join("")}</span>${esc(m.tagline)}</div></div><div class="aside">${A.fmtDist(m.dist)}</div></button>`).join("")}
-      </div></div>` : ""}
-      <div class="block"><div class="eyebrow"><span>Browse</span></div><div class="words">
-        ${Object.entries(C).map(([k, c]) => `<button class="word ${homeCat === k ? "on" : ""}" data-cat="${k}" style="${catVars(k)}">${esc(c.name)}</button>`).join("")}
-      </div></div>
-      ${listTitle ? `<div class="block" id="flist"><div class="eyebrow"><span>${esc(listTitle)} · ${filtered.length}</span><button class="link" id="clearf" style="font-size:10.5px">Clear</button></div>
+      <button class="locbar" id="locbtn">${ic("pin")}<span>Shopping near <b>${esc(loc.label)}${loc.sub ? ", " + esc(loc.sub) : ""}</b></span>${ic("down")}</button>
+      <div class="catstrip"><button data-cat="" class="${!homeCat ? "on" : ""}">All</button>${Object.entries(C).map(([k, c]) => `<button class="${homeCat === k ? "on" : ""}" data-cat="${k}">${esc(c.name)}</button>`).join("")}</div>
+      <div class="home-body">
+      ${!markets.length && area.shops.length ? `<div class="banner" style="margin:0 var(--gut) 10px"><div class="serif">${area.shops.length} shop${area.shops.length > 1 ? "s" : ""} ${areaNote(area.km)}.</div><p>No market listed here yet — a market appears once a few shops in one spot join.</p></div>` : ""}
+      ${!markets.length && !area.shops.length ? `<div class="banner" style="margin:0 var(--gut) 10px"><div class="serif">No shops on My Market near you yet.</div>
+        <p>Shops join with the free My Market Business app. Know a shop nearby? Tell them about it — or try a wider range above.</p>
+        <div class="btn-row"><a class="link accent" href="business.html" target="_blank" rel="noopener">My Market Business</a></div></div>` : ""}
+      ${!homeCat && !homeMarket && area.shops.length ? `<div class="hero"><b>Find it in your market today</b><span>Live stock and prices from ${area.shops.length} shop${area.shops.length > 1 ? "s" : ""} ${areaNote(area.km)}</span></div>` : ""}
+      ${listTitle ? `<div class="card" id="flist"><h3><span>${esc(listTitle)} · ${filtered.length} shops</span><button class="link" id="clearf">Clear</button></h3>
         <div class="entries">${filtered.length ? filtered.map((s) => shopEntry(s)).join("") : '<p class="quiet">No shops here yet.</p>'}</div></div>` : ""}
-      <div style="height:48px"></div>`;
+      ${inStock.length ? `<div class="card"><h3><span>In stock near you</span><a class="link" href="#/search">See more</a></h3><div class="hrow">${inStock.map(hcard).join("")}</div></div>` : ""}
+      ${!homeCat ? `<div class="card"><h3>Shop by category</h3><div class="catgrid">
+        ${Object.entries(C).map(([k, c]) => `<button data-cat="${k}" class="${homeCat === k ? "on" : ""}"><span class="cimg" style="${catVars(k)}">${catImg(k)}</span>${esc(c.name)}</button>`).join("")}
+      </div></div>` : ""}
+      ${deals.length ? `<div class="card"><h3>Top deals in your market</h3><div class="hrow">${deals.map(hcard).join("")}</div></div>` : ""}
+      <div class="card"><h3><span>${markets.length ? "Markets nearby" : "Shops nearby"}</span><span class="faint small">${areaNote(area.km)}</span></h3>
+        ${markets.length ? `<div class="entries">
+        ${markets.map((m) => `<button class="entry ${homeMarket === m.id ? "on" : ""}" data-m="${m.id}"><div class="body"><div class="name">${esc(m.name)}</div><div class="note"><span class="cdots">${m.cats.map((c) => `<i style="--c:${C[c].color}"></i>`).join("")}</span>${esc(m.tagline)}</div></div><div class="aside">${A.fmtDist(m.dist)}<br><span class="faint tiny">${A.fmtTrip(m.dist)}</span></div></button>`).join("")}
+        </div>` : ""}
+        <div class="map" id="map"><button class="recenter" id="recenter" aria-label="My location">${ic("locate")}</button></div>
+      </div>
+      </div>`;
 
     $("#locbtn").onclick = openLocationSheet;
+    $$("#hrange [data-range]").forEach((b) => b.onclick = () => { A.setRange(b.dataset.range); cleanups.forEach((f) => f()); cleanups = []; home(); });
     $("#b-pilot") && ($("#b-pilot").onclick = pickPilot);
     $("#b-demo") && ($("#b-demo").onclick = () => { A.setDemoShift(loc); location.reload(); });
     $("#clearf") && ($("#clearf").onclick = () => { homeCat = null; homeMarket = null; home(); });
     const rerender = (anchor) => { cleanups.forEach((f) => f()); cleanups = []; home(); $(anchor)?.scrollIntoView({ block: "start", behavior: "instant" }); };
-    $$("[data-cat]").forEach((b) => b.onclick = () => { homeCat = homeCat === b.dataset.cat ? null : b.dataset.cat; homeMarket = null; rerender(homeCat ? "#flist" : null); });
+    $$("[data-cat]").forEach((b) => b.onclick = () => { homeCat = !b.dataset.cat || homeCat === b.dataset.cat ? null : b.dataset.cat; homeMarket = null; rerender(homeCat ? "#flist" : null); });
     $$("[data-m]").forEach((b) => b.onclick = () => { homeMarket = homeMarket === b.dataset.m ? null : b.dataset.m; homeCat = null; rerender(homeMarket ? "#flist" : null); });
 
     const map = newMap("map");
@@ -212,7 +259,7 @@
         .on("click", () => map.flyTo([m.lat, m.lng], 17, { duration: 0.6 })).addTo(marketLayer);
     }
     const focusIds = new Set(filtered.map((s) => s.id));
-    for (const s of A.shopsNear(loc, 10)) {
+    for (const s of area.shops) {
       const dim = (homeCat || homeMarket) && !focusIds.has(s.id);
       L.marker([s.lat, s.lng], { icon: dotIcon(dim ? "dim" : "", s) }).bindPopup(shopPopup(s)).addTo(shopLayer);
     }
@@ -222,7 +269,7 @@
     };
     map.on("zoomend", sync);
     $("#recenter").onclick = () => map.flyTo([loc.lat, loc.lng], 16, { duration: 0.6 });
-    const focus = filtered.length ? filtered : markets.slice(0, 3);
+    const focus = filtered.length ? filtered : markets.length ? markets.slice(0, 3) : area.shops.slice(0, 6);
     if (focus.length) map.fitBounds(L.latLngBounds([[loc.lat, loc.lng], ...focus.map((x) => [x.lat, x.lng])]), { padding: [36, 36], maxZoom: 17 });
     else map.setView([loc.lat, loc.lng], 14);
     sync();
@@ -251,14 +298,14 @@
         <div class="facts">
           <span class="pill ${open ? "open" : "closed"}">${openWord(s)}</span>
           ${s.rating ? `<span class="pill star">★ ${s.rating}</span>` : '<span class="pill star">New</span>'}
-          <span class="pill">${dist(s)}</span>
+          <span class="pill">${away(A.distKm(loc, s))}</span>
           ${s.verified ? '<span class="pill">✓ Verified</span>' : ""}
         </div>
       </div>
       </div>
       <div class="shop-actions">
         <a class="btn" href="#/route/${s.id}">Directions</a>
-        <button class="link" id="msg">Message</button>
+        <button class="link" id="msg">WhatsApp</button>
       </div>
       <div class="reach"><div class="eyebrow">How to reach</div>${reachSteps(s)}</div>
       <div class="block">
@@ -272,8 +319,8 @@
       saved = isSaved ? saved.filter((x) => x !== id) : [id, ...saved]; A.store.set("saved", saved);
       toast(isSaved ? "Removed from saved" : "Saved"); shopView(id, params);
     };
-    const demoContact = () => toast("Demo shop — in the live app this opens WhatsApp.");
-    $("#msg").onclick = demoContact; $("#askshop").onclick = demoContact;
+    $("#msg").onclick = () => waShop(s, `Hi ${s.name}, I found your shop on My Market.`);
+    $("#askshop").onclick = () => waShop(s, `Hi ${s.name}, do you have `);
     $("#ishop").addEventListener("input", (e) => {
       const q = e.target.value.trim().toLowerCase();
       $$("[data-item]").forEach((b) => {
@@ -295,6 +342,10 @@
     clothes: '<path d="M17 8l-9 5 3 8 4-2v21h18V19l4 2 3-8-9-5c-1 3-3.5 4-6 4s-5-1-6-4z"/>',
     footwear: '<path d="M6 30c0-6 2-14 4-16 3 0 4 4 9 4 3 0 5 3 9 6 5 3 14 3 14 9v3H6z"/><path d="M6 36h36"/>',
     kitchen: '<path d="M10 20h28v12a6 6 0 0 1-6 6H16a6 6 0 0 1-6-6z"/><path d="M6 20h36M20 14h8M24 14v-3"/>',
+    grocery: '<path d="M6 10h5l4 20h20l4-14H13"/><circle cx="17" cy="37" r="2.5"/><circle cx="32" cy="37" r="2.5"/>',
+    pharmacy: '<rect x="8" y="8" width="32" height="32" rx="6"/><path d="M24 15v18M15 24h18"/>',
+    stationery: '<path d="M10 8h22a4 4 0 0 1 4 4v28H14a4 4 0 0 1-4-4z"/><path d="M10 36a4 4 0 0 1 4-4h22M17 15h12M17 21h9"/>',
+    accessories: '<circle cx="24" cy="24" r="10"/><path d="M24 18v6l4 3M19 14l1-7h8l1 7M19 34l1 7h8l1-7"/>',
   };
   const art = (cat, size = 64) => `<svg class="art" viewBox="0 0 48 48" width="${size}" height="${size}">${ART[cat]}</svg>`;
   const pimg = (it) => it.img ? `<img src="${it.img}" alt="${esc(it.name)}" loading="lazy">` : art(it.cat);
@@ -302,7 +353,7 @@
   function priceLine(it) {
     if (!it.price) return '<div class="pprice"><span class="quiet">Ask for price</span></div>';
     const o = off(it);
-    return `<div class="pprice"><b>${rupee(it.price)}</b>${o ? ` <s>${rupee(it.mrp)}</s> <span class="off">${o}% off</span>` : ""}</div>`;
+    return `<div class="pprice">${o ? `<span class="offred">-${o}%</span>` : ""}${amt(it.price)}${o ? `<span class="mrp">M.R.P.: <s>${rupee(it.mrp)}</s></span>` : ""}</div>`;
   }
   function productCard(s, it, hl = false) {
     const st = A.itemStatus(it);
@@ -311,11 +362,11 @@
       <div class="pbody">
         <div class="pbrand">${esc(it.brand)}</div>
         <div class="pname">${esc(it.name)}</div>
-        <div class="prate"><span class="rchip">${it.rating} ★</span><span class="faint">(${it.reviews})</span></div>
+        ${stars(it.rating, it.reviews)}
         ${priceLine(it)}
-        <div class="pstat ${st.key}"><span class="dot ${st.key}"></span>${statusWord[st.key]}</div>
+        <div class="pstat ${st.key} ${st.few ? "few" : ""}"><span class="dot ${st.key}"></span>${stWord(st)}</div>
       </div>
-      ${st.key !== "out" ? `<button class="padd" data-add="${s.id}|${it.id}" aria-label="Add to bag">+ Add</button>` : ""}
+
     </a>`;
   }
   function bindAdd(root) {
@@ -326,19 +377,24 @@
       b.textContent = "✓ Added"; b.classList.add("done");
     });
   }
-  const bagBtn = () => { const n = A.bagCount(); return `<a class="iconbtn bagbtn" href="#/bag" aria-label="Bag">${ic("bag")}<i class="bcount ${n ? "" : "hidden"}">${n}</i></a>`; };
+  const bagBtn = () => ""; // ordering comes back once orders live on the server
+  const bagBtnOld = () => { const n = A.bagCount(); return `<a class="iconbtn bagbtn" href="#/bag" aria-label="Bag">${ic("bag")}<i class="bcount ${n ? "" : "hidden"}">${n}</i></a>`; };
   function refreshBag() { const n = A.bagCount(); $$(".bcount").forEach((b) => { b.textContent = n; b.classList.toggle("hidden", !n); }); }
 
   function searchView(q0) {
     let mode = "list", showMore = false;
     app.innerHTML = `
+      <div class="navwrap">
       <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button><div class="toggle hidden" id="tog"><button data-mode="list" class="on">List</button><button data-mode="map">Map</button></div></div>
-      <div class="pad" style="margin-top:22px"><label class="seek">
-        <input id="q" placeholder="An item, a brand, a shop" value="${esc(q0)}" autocomplete="off" enterkeyhint="search">
-        <button id="clr" class="${q0 ? "" : "hidden"}" aria-label="Clear">${ic("close")}</button>
+      <div class="pad"><label class="seek">
+        <input id="q" placeholder="Search an item, brand or shop" value="${esc(q0)}" autocomplete="off" enterkeyhint="search">
+        <button id="clr" class="${q0 ? "" : "hidden"}" aria-label="Clear">${ic("close")}</button><span class="seekbtn">${ic("search")}</span>
       </label></div>
+      ${rangeChips("srange")}
+      </div>
       <div id="results"></div>`;
     const input = $("#q");
+    $$("#srange [data-range]").forEach((b) => b.onclick = () => { A.setRange(b.dataset.range); $$("#srange button").forEach((x) => x.classList.toggle("on", x === b)); render(input.value); });
     $("#back").onclick = () => go("#/");
     if (!q0) setTimeout(() => input.focus(), 50);
     $$("[data-mode]").forEach((b) => b.onclick = () => { mode = b.dataset.mode; $$("[data-mode]").forEach((x) => x.classList.toggle("on", x === b)); render(input.value); });
@@ -356,13 +412,16 @@
         $$("[data-q]", box).forEach((b) => b.onclick = () => { input.value = b.dataset.q; addRecent(b.dataset.q); A.logSearch(b.dataset.q, A.search(b.dataset.q, loc, 10)); commit(); });
         return;
       }
-      const r = A.search(q, loc, 10);
+      const r = A.nearSearch(q, loc);
       const rows = [...r.confirmed, ...r.listed];
       const any = rows.length || r.likely.length || r.shopsByName.length;
       $("#tog").classList.toggle("hidden", !any);
       if (!any) {
-        box.innerHTML = `<div class="empty"><div class="serif">No shop lists “${esc(q)}” yet.</div><p>Someone nearby may still have it.</p>
-          <a class="btn" href="#/ask?q=${encodeURIComponent(q)}" style="margin-top:12px">Ask nearby shops</a></div>`;
+        const tryWords = [...SUGGEST, "rice", "paracetamol", "notebook", "watch"].filter((w) => w !== q).slice(0, 8);
+        box.innerHTML = `<div class="empty"><div class="serif">No shop ${areaNote(r.km)} lists “${esc(q)}” yet.</div><p>${A.getRange() !== "city" ? "Try a wider range above — " : ""}more shops are joining every week.</p>
+
+          <p class="small quiet" style="margin-top:22px">Or try one of these:</p><div class="words">${tryWords.map((w) => `<button class="word" data-try="${esc(w)}">${esc(w)}</button>`).join("")}</div></div>`;
+        $$("[data-try]", box).forEach((b) => b.onclick = () => { input.value = b.dataset.try; commit(); });
         return;
       }
       const best = rows[0];
@@ -373,21 +432,25 @@
         <div class="body"><div class="name">${esc(x.shop.name)}</div><div class="note"><span class="dot ${x.status.key}"></span>${esc(x.item.name)}</div></div>
         <div class="aside">${x.item.price ? `<b>${rupee(x.item.price)}</b>` : ""}${A.fmtDist(x.shop.dist)}</div></a>`;
       box.innerHTML = `
+        ${r.far ? `<div class="banner" style="margin:12px var(--gut) 0"><div class="serif">No shops near you yet</div>
+          <p>These are the nearest shops on My Market — ${A.fmtDist(r.far)} away.</p></div>` : ""}
         ${mode === "map" ? '<div class="map tall" id="rmap"></div>' : ""}
         ${r.shopsByName.length ? `<div class="block"><div class="eyebrow"><span>Shop</span></div><div class="entries">${r.shopsByName.map((s) => shopEntry(s)).join("")}</div></div>` : ""}
         ${best ? `<div class="answer ${best.status.key}">
           <div class="eyebrow"><span class="dot ${best.status.key}"></span>${best.status.key === "confirmed" ? "In stock nearby" : "Listed nearby"}</div>
           <h2 class="title">${esc(best.item.name)}</h2>
-          <div class="where">at <b>${esc(best.shop.name)}</b>, ${esc(A.getMarket(best.shop.marketId).name)}<br>${A.fmtDist(best.shop.dist)} away · ${esc(best.status.label.replace(/^In stock · /, ""))}</div>
+          <div class="where">at <b>${esc(best.shop.name)}</b>, ${esc(A.getMarket(best.shop.marketId).name)}<br>${away(best.shop.dist)} · ${esc(best.status.label.replace(/^In stock · /, ""))}</div>
           ${best.item.price ? `<div class="price" style="margin-top:10px">${rupee(best.item.price)}</div>` : ""}
           <div class="btn-row"><a class="btn" href="#/route/${best.shop.id}">Directions</a><a class="link" href="#/item/${best.shop.id}/${best.item.id}">View item</a></div>
         </div>` : ""}
-        ${others.length ? `<div class="block"><div class="eyebrow"><span>Also at</span><span class="faint">${others.length}</span></div><div class="entries">${others.map(rowEntry).join("")}</div></div>` : ""}
-        ${r.likely.length ? `<div class="block">${showMore
-          ? `<div class="eyebrow"><span>May also have it</span></div><div class="entries">${r.likely.map((s) => shopEntry(s, '<span class="dot likely"></span>' + A.fmtDist(s.dist))).join("")}</div>`
+        ${others.length ? `<div class="block"><div class="eyebrow"><span>Also at</span><span class="faint">${others.length} · ${r.far ? "nearest shops" : areaNote(r.km)}</span></div><div class="entries">${others.map(rowEntry).join("")}</div></div>` : ""}
+        ${r.likely.length ? `<div class="block">${showMore || !rows.length
+          ? `<div class="eyebrow"><span>${rows.length ? "May also have it" : `No exact match · these ${r.likely.length > 1 ? "shops sell" : "shop sells"} ${esc((r.cats || []).slice(0, 2).map((c) => C[c].name).join(" & ") || "similar items")}`}</span></div><div class="entries">${r.likely.map((s) => shopEntry(s, '<span class="dot likely"></span>' + A.fmtDist(s.dist))).join("")}</div>`
           : `<button class="link" id="more">${r.likely.length} more shop${r.likely.length > 1 ? "s" : ""} may have it</button>`}</div>` : ""}
-        <div class="ask-line"><p>Not sure? Let the shops tell you.</p><a class="link accent" href="#/ask?q=${encodeURIComponent(q)}">Ask nearby shops ${ic("arrow")}</a></div>`;
+        <div style="height:30px"></div>`;
       $("#more") && ($("#more").onclick = () => { showMore = true; render(q); });
+      $("#far-demo") && ($("#far-demo").onclick = () => { A.clearDemoShift(); A.setDemoShift(loc); location.reload(); });
+      $("#far-pilot") && ($("#far-pilot").onclick = pickPilot);
       $$("a", box).forEach((a) => a.addEventListener("click", () => { addRecent(q); A.logSearch(q, r); }));
       if (mode === "map") {
         const map = newMap("rmap");
@@ -400,10 +463,16 @@
         map.fitBounds(pts, { padding: [36, 36], maxZoom: 17 });
       }
     }
+    let logT;
     const commit = () => {
       history.replaceState(null, "", "#/search" + (input.value ? "?q=" + encodeURIComponent(input.value) : ""));
       render(input.value);
+      // a search counts once the customer pauses on it (not every letter typed)
+      clearTimeout(logT);
+      const v = input.value.trim();
+      if (v.length >= 3) logT = setTimeout(() => { if (input.value.trim() === v) A.logSearch(v, A.nearSearch(v, loc)); }, 2500);
     };
+    cleanups.push(() => clearTimeout(logT));
     let t;
     input.addEventListener("input", () => { clearTimeout(t); t = setTimeout(commit, 250); });
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") { addRecent(input.value); A.logSearch(input.value, A.search(input.value, loc, 10)); input.blur(); commit(); } });
@@ -516,10 +585,10 @@
       <div class="pad" style="margin-top:22px"><h1 class="display">Yours</h1></div>
       <div class="block"><div class="eyebrow"><span>Location</span><button class="link" id="chg" style="font-size:10.5px">Change</button></div>
         <div class="serif" style="font-size:24px">${esc(loc.label)}${loc.sub ? `<span class="quiet">, ${esc(loc.sub)}</span>` : ""}</div></div>
-      <a class="bizcard" href="#/biz" style="margin:26px var(--gut) 0">
+      <a class="bizcard" href="business.html" target="_blank" rel="noopener" style="margin:26px var(--gut) 0">
         <span class="bz-ic">${ic("store")}</span>
-        <span class="body"><span class="serif" style="font-size:21px;display:block">${A.ownerShop() ? esc(A.ownerShop().name) : "Own a shop?"}</span>
-        <span class="small quiet">${A.ownerShop() ? "Open your shop dashboard" : "List it free — get customers who are looking for what you sell"}</span></span>${ic("arrow")}
+        <span class="body"><span class="serif" style="font-size:19px;display:block">Own a shop? Get My Market Business</span>
+        <span class="small quiet">A separate free app for billing, stock and khata</span></span>${ic("arrow")}
       </a>
       <div class="block"><div class="eyebrow"><span>Your orders</span>${A.getOrders().length ? '<a class="link" href="#/orders" style="font-size:10.5px">All</a>' : ""}</div>
         ${A.getOrders().length ? `<div class="entries">${A.getOrders().slice(0, 3).map(orderEntry).join("")}</div>` : '<p class="quiet small">Orders and reservations you make will show here.</p>'}</div>
@@ -532,24 +601,14 @@
       <div class="block"><div class="eyebrow"><span>Recent searches</span>${recent.length ? '<button class="link" id="clrrec" style="font-size:10.5px">Clear</button>' : ""}</div>
         ${recent.length ? `<div class="words">${recent.map((r) => `<a class="word" href="#/search?q=${encodeURIComponent(r)}">${esc(r)}</a>`).join("")}</div>` : '<p class="quiet small">None yet.</p>'}</div>
       <div class="rule"></div>
-      <div class="block"><div class="eyebrow"><span>Demo</span></div>
-        <div style="display:grid;gap:18px;justify-items:start">
-          <button class="link" id="demo-here">Place demo markets around me</button>
-          <button class="link" id="demo-pilot">Back to Karol Bagh pilot</button>
-          <button class="link" id="demo-reset" style="color:var(--out)">Reset all demo activity</button>
-        </div></div>
-      <p class="pad faint tiny" style="margin:34px 0 40px;line-height:1.6">My Market v1 · a working prototype. Shops and replies are demo data. Map © OpenStreetMap contributors.</p>`;
+      <div class="block"><button class="link" id="demo-reset" style="color:var(--out)">Clear my history on this phone</button></div>
+      <p class="pad faint tiny" style="margin:34px 0 40px;line-height:1.6">My Market · shops and prices come from registered shops. Map © OpenStreetMap contributors.</p>`;
     $("#back").onclick = () => go("#/");
     $("#chg").onclick = openLocationSheet;
     $("#clrrec") && ($("#clrrec").onclick = () => { recent = []; A.store.set("recent", []); meView(); });
-    $("#demo-here").onclick = () => {
-      if (loc.source === "pilot" && !A.hasDemoShift()) { toast("Set your own location first."); return; }
-      A.clearDemoShift(); A.setDemoShift(loc); location.reload();
-    };
-    $("#demo-pilot").onclick = pickPilot;
     $("#demo-reset").onclick = () => {
-      if (!confirm("Clear your orders, bag, saved shops, your shop and all demo activity on this device?")) return;
-      ["feedback", "trust", "saved", "recent", "bag", "orders", "asks", "searchLog", "views", "owner", "shopsAdded", "ownerItems", "itemEdits", "watch"].forEach((k) => A.store.del(k));
+      if (!confirm("Clear saved shops, recent searches and your history on this phone?")) return;
+      ["feedback", "trust", "saved", "recent", "bag", "orders", "asks", "searchLog", "views", "watch"].forEach((k) => A.store.del(k));
       location.reload();
     };
   }
@@ -564,6 +623,35 @@
       <div class="aside"><b>${o.total ? rupee(o.total) : "At shop"}</b>${new Date(o.at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</div></a>`;
   }
 
+  // ---------- bottom tabs (customer screens only) ----------
+  const TAB_ON = { "": "home", shop: "home", item: "home", search: "search", ask: "search", me: "me", orders: "me", order: "me", bag: "bag" };
+  // Shop app: three pages — Bill (home), Stock, Reports.
+  const BIZ_ON = { "": "bill", bill: "bill", inbox: "bill", items: "stock", stockin: "stock", reports: "reports", bills: "reports", insights: "reports" };
+  function syncTabs(r, parts = []) {
+    const nav = $("#tabs"); if (!nav) return;
+    if (BIZ) {
+      const on = A.ownerShop() && r === "biz" ? BIZ_ON[parts[1] || ""] : null;
+      nav.classList.toggle("hidden", !on); nav.classList.add("three"); document.body.classList.toggle("tabs-on", !!on);
+      if (on) nav.innerHTML = [["bill", "#/biz", "receipt", "Bill"], ["stock", "#/biz/items", "box", "Stock"], ["reports", "#/biz/reports", "chart", "Reports"]]
+        .map(([k, h, i, l]) => `<a href="${h}" class="${on === k ? "on" : ""}">${ic(i)}${l}</a>`).join("");
+      return;
+    }
+    const on = TAB_ON[r];
+    nav.classList.toggle("hidden", !on); document.body.classList.toggle("tabs-on", !!on);
+    if (!on) return;
+    nav.innerHTML = [["home", "#/", "store", "Home"], ["search", "#/search", "search", "Search"], ["me", "#/me", "user", "You"]]
+      .map(([k, h, i, l]) => `<a href="${h}" class="${on === k ? "on" : ""}">${ic(i)}${l}${k === "bag" ? `<i class="bcount ${A.bagCount() ? "" : "hidden"}">${A.bagCount()}</i>` : ""}</a>`).join("");
+  }
+
+  if (BIZ) {
+    document.addEventListener("click", (e) => {
+      const a = e.target.closest('a[href^="#/shop/"]');
+      if (!a) return;
+      e.preventDefault();
+      window.open("index.html" + a.getAttribute("href"), "_blank", "noopener");
+    }, true);
+  }
+
   // ---------- router ----------
   function route() {
     cleanups.forEach((f) => { try { f(); } catch {} }); cleanups = [];
@@ -572,10 +660,16 @@
     const [path, qs] = h.split("?");
     const params = new URLSearchParams(qs || "");
     const parts = path.split("/").filter(Boolean);
+    if (BIZ) {
+      // shop app: shop screens only; no customer location needed
+      if (!loc) loc = PILOT_ORIG;
+      if (parts[0] !== "biz") { go("#/biz"); return; }
+    } else if (parts[0] === "biz") { location.replace("business.html" + location.hash); return; }
     if (!loc && parts[0] !== "welcome") { go("#/welcome"); return; }
     if (loc && parts[0] === "welcome") { go("#/"); return; }
     const fn = ROUTES[parts[0] || ""] || home;
     fn(parts, params);
+    syncTabs(parts[0] || "", parts);
     if (parts[0] !== "shop" || !params.get("item")) window.scrollTo(0, 0);
   }
   // Other files (shop.js, biz.js) add their screens to ROUTES before the first render.
@@ -585,7 +679,7 @@
     ask: (p, q) => askView(q.get("q"), q.get("id")), route: (p) => routeView(p[1]),
   };
   window.MM_UI = {
-    A, C, $, $$, app, esc, ic, toast, openSheet, closeSheet, go, rupee, dist, openWord, statusWord, catVars, mono,
+    BIZ, A, C, $, $$, app, esc, ic, toast, openSheet, closeSheet, go, rupee, dist, away, openWord, statusWord, stWord, catVars, mono, reverseName, stars, amt,
     newMap, meIcon, dotIcon, shopPopup, reachSteps, shopEntry, productCard, priceLine, pimg, art, off, bindAdd, bagBtn, refreshBag, orderEntry,
     loc: () => loc, addCleanup: (f) => cleanups.push(f), ROUTES, route,
   };

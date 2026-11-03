@@ -1,0 +1,37 @@
+{
+  "id": "./business.html",
+  "name": "My Market Business",
+  "short_name": "MM Business",
+  "description": "Billing, stock and accounts for your shop — and customers nearby see what you have.",
+  "start_url": "./business.html#/biz",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#172331",
+  "icons": [
+    {
+      "src": "icons/icon-business-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-business-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-business-192-maskable.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/icon-business-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "scope": "./"
+}

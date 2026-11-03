@@ -17,14 +17,15 @@
     U.app.innerHTML = `
       <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button>${U.bagBtn()}</div>
       <div class="hero-img" style="${U.catVars(it.cat)}">${U.pimg(it)}</div>
+      ${!it.photo && it.productPhoto && it.photoCredit && it.img === it.productPhoto ? `<p class="faint tiny pad" style="margin:4px 0 0">${esc(it.photoCredit)}</p>` : ""}
       <div class="pad" style="margin-top:20px">
         <div class="eyebrow" style="color:${C[it.cat].color}">${esc(it.brand)}</div>
-        <h1 class="title" style="margin-top:6px">${esc(it.name)}</h1>
-        <div class="prate" style="margin-top:10px"><span class="rchip">${it.rating} ★</span><span class="quiet small">${it.reviews} ratings</span></div>
+        <h1 class="title" style="margin-top:6px">${esc(it.name)}${it.size && !it.name.toLowerCase().includes(it.size.toLowerCase()) ? ` <span class="quiet" style="font-weight:400">· ${esc(it.size)}</span>` : ""}</h1>
+        <div style="margin-top:8px">${U.stars(it.rating, it.reviews)}</div>
         <div class="price-block">
-          ${it.price ? `<span class="big">${rupee(it.price)}</span>${o ? `<s>${rupee(it.mrp)}</s><span class="off">${o}% off</span>` : ""}` : '<span class="big" style="font-size:24px">Ask the shop for price</span>'}
+          ${it.price ? `${o ? `<span class="offred" style="font-size:26px">-${o}%</span>` : ""}<span class="amt" style="font-size:30px"><sup>₹</sup>${it.price.toLocaleString("en-IN")}</span>${o ? `<span class="mrp">M.R.P.: <s>${rupee(it.mrp)}</s> · Inclusive of all taxes</span>` : ""}` : '<span class="big" style="font-size:22px">Ask the shop for price</span>'}
         </div>
-        <div class="pstat ${st.key}" style="margin-top:8px"><span class="dot ${st.key}"></span>${esc(st.label)}</div>
+        <div class="pstat ${st.key} ${st.few ? "few" : ""}" style="margin-top:10px;font-size:16px"><span class="dot ${st.key}"></span>${esc(st.label)}</div>
       </div>
 
       <div class="sold-by">
@@ -32,30 +33,23 @@
         <a class="entry" href="#/shop/${s.id}" style="border:0;padding:8px 0 4px">${U.mono(s)}
           <div class="body"><div class="name">${esc(s.name)}</div><div class="note">${esc(m.name)} · ${U.openWord(s)}</div></div>
           <div class="aside">${U.dist(s)}</div></a>
-        <div class="ways">
-          <div><b>Pick up today</b><span>Free · ready in about 30 min</span></div>
-          <div><b>Home delivery</b><span>${rupee(39)} · free above ${rupee(999)} · about 2 hours</span></div>
-          <div><b>Reserve, pay at shop</b><span>Kept for you for 2 hours</span></div>
-        </div>
+
       </div>
 
-      ${st.key === "out" ? `
-        <div class="pad" style="margin-top:22px"><button class="btn line" id="watch">${A.isWatched(it.id) ? "We'll tell you when it's back" : "Notify me when it's back"}</button></div>` : `
-        <div class="pad buy-row">
-          <div class="stepper"><button id="minus" aria-label="Less">−</button><span id="qty">1</span><button id="plus" aria-label="More">+</button></div>
-          <button class="btn line" id="addbag">Add to bag</button>
-        </div>
-        <div class="pad" style="margin-top:12px;display:grid;gap:14px;justify-items:center">
-          <button class="btn warm" id="buynow">Buy now</button>
-          <button class="link" id="reserve">Reserve — keep it for me for 2 hours</button>
-        </div>`}
+      <div class="pad" style="margin-top:20px;display:grid;gap:10px">
+        <button class="btn" id="wa">Ask the shop on WhatsApp</button>
+        <a class="btn line" href="#/route/${s.id}">Directions</a>
+      </div>
 
       ${other.length ? `<div class="block"><div class="eyebrow"><span>Also at</span><span class="faint">compare</span></div><div class="entries">
         ${other.map((x) => `<a class="entry" href="#/item/${x.shop.id}/${x.item.id}"><div class="body"><div class="name">${esc(x.shop.name)}</div>
-          <div class="note"><span class="dot ${x.status.key}"></span>${U.statusWord[x.status.key]} · ${A.fmtDist(x.dist)}</div></div>
+          <div class="note"><span class="dot ${x.status.key}"></span>${U.stWord(x.status)} · ${A.fmtDist(x.dist)}</div></div>
           <div class="aside">${x.item.price ? `<b>${rupee(x.item.price)}</b>` : '<span class="faint">Ask</span>'}</div></a>`).join("")}
       </div></div>` : ""}
 
+      ${it.features && it.features.length ? `<div class="block"><div class="eyebrow"><span>About this item</span></div>
+        <ul class="feat">${it.features.map((f) => `<li>${esc(f)}</li>`).join("")}</ul></div>` : ""}
+      ${it.description ? `<div class="block"><p style="margin:0;line-height:1.6">${esc(it.description)}</p></div>` : ""}
       <div class="block"><div class="eyebrow"><span>Details</span></div>
         <table class="specs">${it.specs.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join("")}</table>
       </div>
@@ -67,14 +61,10 @@
     $("#back").onclick = () => (history.length > 1 ? history.back() : U.go(`#/shop/${s.id}`));
     $("#fb-yes").onclick = () => { A.feedback(s.id, it.id, true); U.toast("Thank you — marked in stock."); U.route(); };
     $("#fb-no").onclick = () => { A.feedback(s.id, it.id, false); U.toast("Thank you — we'll let others know."); U.route(); };
-    if ($("#watch")) { $("#watch").onclick = () => { A.watchItem(it.id); U.toast("We'll let you know when it's back in stock"); U.route(); }; return; }
-    $("#minus").onclick = () => { qty = Math.max(1, qty - 1); $("#qty").textContent = qty; };
-    $("#plus").onclick = () => { qty = Math.min(20, qty + 1); $("#qty").textContent = qty; };
-    $("#addbag").onclick = () => { A.addToBag(s.id, it.id, qty); U.refreshBag(); U.toast(`Added ${qty} to bag`); };
-    $("#buynow").onclick = () => { A.addToBag(s.id, it.id, qty); U.go(`#/checkout/${s.id}`); };
-    $("#reserve").onclick = () => {
-      const o = A.placeOrder({ shopId: s.id, lines: [{ item: it, qty }], mode: "reserve", pay: "shop" });
-      U.go(`#/order/${o.id}`);
+    $("#wa").onclick = () => {
+      const d = String(s.phone || "").replace(/\D/g, "").slice(-10);
+      if (d.length !== 10) return U.toast("This shop hasn't added a WhatsApp number");
+      window.open(`https://wa.me/91${d}?text=${encodeURIComponent(`Hi ${s.name}, I saw ${it.name}${it.price ? ` (${rupee(it.price)})` : ""} on My Market. Is it available?`)}`, "_blank", "noopener");
     };
   }
 

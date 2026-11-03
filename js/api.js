@@ -14,6 +14,25 @@ window.MM_API = (function () {
     del(k) { try { localStorage.removeItem("mm." + k); } catch {} },
   };
 
+  // ---------- one-time clean-up: remove old demo / test data from this device ----------
+  try {
+    if (store.get("dataVersion", 0) < 2) {
+      const keep = new Set(["mm.auth", "mm.loc", "mm.recentLocs", "mm.range", "mm.outbox", "mm.outboxFailed"]);
+      for (const k of Object.keys(localStorage)) if (k.startsWith("mm.") && !keep.has(k)) localStorage.removeItem(k);
+      store.set("dataVersion", 2);
+    }
+  } catch {}
+
+  // ---------- server sync helpers ----------
+  // Every record gets an id made on the phone, so a bill sent twice is saved once.
+  const uuid = () => (crypto.randomUUID ? crypto.randomUUID()
+    : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))).toString(16)));
+  const iso = (t) => new Date(t).toISOString();
+  const ms = (t) => (t ? Date.parse(t) : null);
+  // queue a change for the server — only for shops that live on the server
+  function q(shopId, op) { if (window.MM_CLOUD && getShop(shopId)?.cloud) window.MM_CLOUD.enqueue(op); }
+  const cloudOn = () => !!(window.MM_CLOUD && window.MM_CLOUD.ready);
+
   // ---------- demo relocation: move the pilot markets next to the user ----------
   function applyShift() {
     const s = store.get("demoShift", null);
@@ -49,30 +68,32 @@ window.MM_API = (function () {
     "men-s-formal-shirt men-s-jeans mobile-back-cover otg-adapter-type-c pad-lock pendrive-64gb phone-battery-replacement " +
     "pressure-cooker-5-l punjabi-jutti pvc-pipe-1-inch-3-m sandpaper-sheet screwdriver-set spanner-set sports-shoes " +
     "steel-water-bottle-1-l storage-geyser-15-l teflon-tape tv-remote-control type-c-fast-charger-25w usb-keyboard " +
-    "wi-fi-router wireless-mouse lunch-box measuring-tape-5-m type-c-cable-1-m").split(" "));
+    "wi-fi-router wireless-mouse lunch-box measuring-tape-5-m").split(" "));
   const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const hash = (s) => {
     let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
     h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16; // mix so similar ids spread out
     return (h >>> 0) / 4294967296;
   };
-  const WARRANTY = { mobile: "6 months", electronics: "1 year", electrical: "1 year", hardware: "6 months", plumbing: "6 months", clothes: "No warranty", footwear: "No warranty", kitchen: "1 year" };
+  const WARRANTY = { mobile: "6 months", electronics: "1 year", electrical: "1 year", hardware: "6 months", plumbing: "6 months", clothes: "No warranty", footwear: "No warranty", kitchen: "1 year", grocery: "No warranty", pharmacy: "No warranty", stationery: "No warranty", accessories: "6 months" };
 
   // Adds what a product page needs: photo, MRP (for "% off"), rating, specs.
   function enrich(it) {
     it.key = slug(it.name);
-    it.img = PHOTOS.has(it.key) ? `img/items/${it.key}.jpg` : null;
+    it.img = it.photo || (PHOTOS.has(it.key) ? `img/items/${it.key}.jpg` : null) || it.productPhoto || null;
     const h = hash(it.key + it.brand);
-    if (it.price && !it.mrp) it.mrp = Math.round((it.price * (1.1 + h * 0.3)) / 10) * 10 - 1;
-    it.rating = it.rating || Math.round((3.8 + hash(it.id) * 1.0) * 10) / 10;
-    it.reviews = it.reviews || 12 + Math.floor(hash(it.id + "r") * 900);
-    it.specs = [["Brand", it.brand], ["Category", D.CATEGORIES[it.cat].name], ["Condition", "New"],
-      ["Warranty", WARRANTY[it.cat]], ["Returns", "7-day exchange at the shop"]];
+    void h; void WARRANTY;
+    // only real values: MRP if the shop entered one, no invented ratings or policies
+    it.rating = it.rating || null;
+    it.reviews = it.reviews || 0;
+    it.specs = [["Brand", it.brand], it.model && ["Model", it.model], it.size && ["Size / quantity", it.size],
+      ["Category", D.CATEGORIES[it.cat]?.name || it.cat], ...Object.entries(it.specMap || {}), it.barcode && ["Barcode", it.barcode]].filter(Boolean);
     return it;
   }
 
   // ---------- shop-owner data (claimed / added shops, stock edits) ----------
   function loadOwnerData() {
+    for (const m of store.get("cloudMarkets", [])) if (!D.MARKETS.find((x) => x.id === m.id)) D.MARKETS.push(m);
     for (const s of store.get("shopsAdded", [])) {
       if (s.market && !D.MARKETS.find((m) => m.id === s.market.id)) D.MARKETS.push(s.market);
       if (!D.shops.find((x) => x.id === s.id)) D.shops.push(s);
@@ -91,12 +112,59 @@ window.MM_API = (function () {
         const e = edits[it.id];
         if (!e) continue;
         if (e.price != null) { it.price = e.price; it.mrp = Math.max(it.mrp || 0, e.price); }
+        if (e.cost != null) it.cost = e.cost;
+        if (e.reorderAt != null) it.reorderAt = e.reorderAt;
         if (e.inStock != null && (!fb[it.id] || fb[it.id].at < e.at)) {
           if (e.inStock) { it.lastConfirmed = e.at; it.reportedOut = null; }
           else { it.reportedOut = e.at; it.lastConfirmed = null; }
         }
       }
     }
+    replayLedger();
+  }
+
+  // ---------- inventory: stock is a log of movements ----------
+  // Each entry: { shopId, itemId, delta, set?, reason, at }. `set` = a full count
+  // ("I have 12"), otherwise `delta` adds or removes. qty = seeded count + the log.
+  // In v2 this log is a server table; the customer side only ever sees the label.
+  const REASONS = {
+    sold: "Sold at counter", order: "Online order", received: "New stock arrived", returned: "Customer return",
+    damaged: "Damaged / expired", count: "Stock count", out: "Marked out of stock",
+  };
+  function applyEntry(it, e) {
+    it.qty = e.set != null ? e.set : Math.max(0, (it.qty || 0) + e.delta);
+    it.stockAt = e.at;
+    if (it.qty > 0) { it.lastConfirmed = e.at; if (it.reportedOut && it.reportedOut < e.at) it.reportedOut = null; }
+  }
+  function replayLedger() {
+    const byItem = {};
+    for (const e of store.get("ledger", [])) (byItem[e.itemId] = byItem[e.itemId] || []).push(e);
+    for (const sh of D.shops) for (const it of sh.items) {
+      const log = byItem[it.id]; if (!log) continue;
+      if (it.qty0 !== undefined) { it.qty = it.qty0; it.stockAt = it.stockAt0; }
+      for (const e of log.sort((a, b) => a.at - b.at)) applyEntry(it, e);
+    }
+  }
+  function moveStock(shopId, itemId, { delta = 0, set = null, reason = "count", ref = null }) {
+    const it = getShop(shopId)?.items.find((x) => x.id === itemId); if (!it) return;
+    const before = it.qty ?? 0;
+    const e = { id: uuid(), shopId, itemId, delta: set != null ? set - before : delta, set, reason, at: Date.now(), ...(ref ? { ref } : {}) };
+    const log = store.get("ledger", []); log.push(e); store.set("ledger", log.slice(-3000));
+    applyEntry(it, e);
+    q(shopId, { op: "insert", table: "stock_moves", row: { id: e.id, shop_id: shopId, item_id: itemId, delta: e.delta, set_to: set, reason, ref, at: iso(e.at) } });
+    return it;
+  }
+  const stockLog = (itemId) => store.get("ledger", []).filter((e) => e.itemId === itemId).sort((a, b) => b.at - a.at);
+  const lowAt = (it) => Math.max(1, it.reorderAt ?? 3);
+  function inventory(shop) {
+    const tracked = shop.items.filter((i) => i.qty != null);
+    return {
+      tracked: tracked.length, untracked: shop.items.length - tracked.length,
+      units: tracked.reduce((a, i) => a + i.qty, 0),
+      value: tracked.reduce((a, i) => a + i.qty * (i.cost || 0), 0),
+      low: tracked.filter((i) => i.qty > 0 && i.qty <= lowAt(i)),
+      out: tracked.filter((i) => i.qty === 0),
+    };
   }
   loadOwnerData();
 
@@ -113,13 +181,61 @@ window.MM_API = (function () {
     return Math.round(km) + " km";
   }
 
+  // A new area becomes a listed market once this many shops have joined it.
+  const MARKET_MIN_SHOPS = 3;
   function marketsNear(loc, radiusKm = 10) {
     return D.MARKETS.map((m) => ({
       ...m,
       dist: distKm(loc, m),
       shopCount: D.shops.filter((s) => s.marketId === m.id).length,
       cats: [...new Set(D.shops.filter((s) => s.marketId === m.id).map((s) => s.cat))],
-    })).filter((m) => m.dist <= radiusKm).sort((a, b) => a.dist - b.dist);
+    })).filter((m) => m.dist <= radiusKm && m.shopCount > 0 && (!m.pending || m.shopCount >= MARKET_MIN_SHOPS)).sort((a, b) => a.dist - b.dist);
+  }
+
+  // ---------- "near me": travel time + a search area that widens ----------
+  // The range caps how far we look; inside it we start small and widen until
+  // there is enough to show. A dense bazaar shows walking-distance shops, a
+  // quiet town still finds something.
+  const RANGES = {
+    walk: { label: "Walking", maxKm: 1.5 },
+    ride: { label: "Short ride", maxKm: 5 },
+    city: { label: "Whole city", maxKm: 25 },
+  };
+  const AREA_STEPS = [0.5, 1, 1.5, 2.5, 4, 5, 8, 12, 18, 25];
+  const ROAD_FACTOR = 1.3; // straight line -> typical road distance in Indian cities
+  function trip(km) {
+    const road = km * ROAD_FACTOR;
+    if (road <= 1.6) return { mode: "walk", min: Math.max(1, Math.round((road / 4.5) * 60)) };
+    return { mode: "ride", min: Math.max(2, Math.round((road / 18) * 60)) };
+  }
+  const fmtTrip = (km) => { if (km > 40) return "in another city"; const t = trip(km); return `${t.min} min ${t.mode === "walk" ? "walk" : "ride"}`; };
+  const getRange = () => (RANGES[store.get("range", "ride")] ? store.get("range", "ride") : "ride");
+  const setRange = (k) => store.set("range", k);
+  function widen(range, run, enough) {
+    const max = RANGES[range].maxKm;
+    for (const step of AREA_STEPS.filter((x) => x < max)) { const r = run(step); if (enough(r)) return { r, km: step, max }; }
+    return { r: run(max), km: max, max };
+  }
+  // Home: the closest few markets and the shops around them.
+  function nearArea(loc, range = getRange()) {
+    const { r, km, max } = widen(range, (k) => ({ markets: marketsNear(loc, k), shops: shopsNear(loc, k) }), (x) => x.markets.length >= 3 || x.shops.length >= 12);
+    return { ...r, km, max };
+  }
+  // Search: widen until at least 3 shops list the item.
+  function nearSearch(q, loc, range = getRange()) {
+    const shopsWith = (x) => new Set([...x.confirmed, ...x.listed].map((y) => y.shop.id)).size;
+    const { r, km, max } = widen(range, (k) => search(q, loc, k), (x) => shopsWith(x) >= 3);
+    if (!shopsWith(r) && !r.likely.length && !r.shopsByName.length) {
+      const all = search(q, loc, 40000);
+      const n = [...all.confirmed, ...all.listed, ...all.likely.map((sh) => ({ shop: sh }))].map((x) => x.shop.dist);
+      if (n.length) return { ...all, km, max, far: Math.min(...n) };
+    }
+    return { ...r, km, max };
+  }
+  // Which market a point belongs to: the nearest one whose radius covers it.
+  function marketFor(p) {
+    const m = D.MARKETS.map((x) => ({ x, d: distKm(p, x) * 1000 })).sort((a, b) => a.d - b.d)[0];
+    return m && m.d <= (m.x.radiusM || 350) ? m.x : null;
   }
   function shopsNear(loc, radiusKm = 10, cat = null) {
     return D.shops
@@ -140,6 +256,13 @@ window.MM_API = (function () {
 
   // item status: confirmed (green) | listed (amber) | out (red)
   function itemStatus(it) {
+    if (it.qty != null && !(it.reportedOut && it.reportedOut > (it.stockAt || 0))) {
+      const fresh = it.stockAt && Date.now() - it.stockAt < CONFIRM_FRESH_DAYS * DAY;
+      if (it.qty <= 0) return { key: "out", label: "Out of stock" };
+      if (!fresh) return { key: "listed", label: "Listed · stock not updated recently" };
+      const few = it.qty <= lowAt(it);
+      return { key: "confirmed", few, label: (few ? "Only a few left · " : "In stock · ") + ago(it.stockAt).replace("confirmed", "updated") };
+    }
     if (it.reportedOut && Date.now() - it.reportedOut < CONFIRM_FRESH_DAYS * DAY) return { key: "out", label: "Reported not available" };
     if (it.lastConfirmed && Date.now() - it.lastConfirmed < CONFIRM_FRESH_DAYS * DAY) return { key: "confirmed", label: "In stock · " + ago(it.lastConfirmed) };
     return { key: "listed", label: "Listed · not confirmed recently" };
@@ -168,6 +291,13 @@ window.MM_API = (function () {
     iphone: ["lightning"], battery: ["battery"], screen: ["screen", "glass"], guard: ["glass"],
     drill: ["drill"], paint: ["primer", "paints"], cooker: ["cooker"], tawa: ["tawa"], tiffin: ["lunch"],
     bottle: ["bottle"], mixie: ["mixer"], mixi: ["mixer"], tv: ["tv"], remote: ["remote"],
+    chawal: ["rice"], aata: ["atta"], doodh: ["milk"], tel: ["oil"], dal: ["dal"], cheeni: ["sugar"], chini: ["sugar"],
+    chai: ["tea"], sabun: ["soap"], anda: ["eggs"], ande: ["eggs"], kirana: ["grocery"], ration: ["grocery"],
+    dawai: ["paracetamol", "pharmacy"], dawa: ["paracetamol", "pharmacy"], medicine: ["pharmacy", "paracetamol"], tablet: ["tablets"],
+    bukhar: ["paracetamol", "thermometer"], khansi: ["cough"], chemist: ["pharmacy"], medical: ["pharmacy"],
+    kitab: ["book"], copy: ["notebook"], kalam: ["pen"], pen: ["pen"], pencil: ["pencils"], book: ["book", "dictionary"],
+    ghadi: ["watch"], ghari: ["watch"], watch: ["watch"], basta: ["bag"], bag: ["bag", "backpack", "handbag"], batua: ["wallet"],
+    purse: ["handbag", "wallet"], chashma: ["sunglasses"], chhata: ["umbrella"], chhatri: ["umbrella"],
   };
   const STOP = new Set(["ka", "ki", "ke", "for", "the", "a", "an", "of", "wala", "wali", "wale", "chahiye", "need", "want", "buy", "kahan", "where", "milega", "shop", "dukan", "and", "with", "me", "mein"]);
 
@@ -195,7 +325,7 @@ window.MM_API = (function () {
     if (t.endsWith("s") && t.slice(0, -1) === q) return true;
     if (strict) return false;
     if (q.length >= 4 && (t.startsWith(q) || (t.length >= 4 && q.startsWith(t)))) return true;
-    if (q.length >= 4 && lev(q, t) <= (q.length >= 7 ? 2 : 1)) return true;
+    if (q.length >= 5 && lev(q, t) <= (q.length >= 7 ? 2 : 1)) return true;
     return false;
   }
   // Turns a query into groups of alternatives: each group must be matched by some token.
@@ -209,7 +339,7 @@ window.MM_API = (function () {
     return groups;
   }
   function itemTokens(it) {
-    return norm(`${it.name} ${it.brand} ${D.CATEGORIES[it.cat].name} ${it.cat}`);
+    return norm(`${it.name} ${it.brand} ${it.model || ""} ${it.size || ""} ${(it.keywords || []).join(" ")} ${D.CATEGORIES[it.cat]?.name || ""} ${it.cat}`);
   }
   // Score 0..1 for how well a token list matches the parsed query.
   function score(groups, toks) {
@@ -225,6 +355,20 @@ window.MM_API = (function () {
     }
     return s;
   }
+  // How well the query matches the item's own name (not just its category):
+  // whole word 1, prefix / spelling 0.6, category only 0. "watch" ranks a
+  // watch above a bag from the "Bags & Watches" category, "wire" ranks a
+  // wire above "wired earphones".
+  function nameRank(groups, it) {
+    const toks = norm(`${it.name} ${it.brand}`);
+    const words = groups.filter((g) => !g.num); if (!words.length) return 0;
+    let r = 0;
+    for (const g of words) {
+      if (g.alts.some((a) => toks.some((t) => tokMatch(a.w, t, true)))) r += 1;
+      else if (g.alts.some((a) => toks.some((t) => tokMatch(a.w, t, a.strict)))) r += 0.6;
+    }
+    return r / words.length;
+  }
   // Which categories does this query belong to? Uses the whole catalogue, so a
   // shop can show as "likely" even if that exact item isn't in its list.
   function queryCategories(groups) {
@@ -237,6 +381,12 @@ window.MM_API = (function () {
     return Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([c]) => c);
   }
 
+  function shopHas(shop, q) {
+    const groups = parseQuery(q); if (!groups.length) return null;
+    let best = null, bs = 0;
+    for (const it of shop.items) { const sc = score(groups, itemTokens(it)); if (sc > bs) { bs = sc; best = it; } }
+    return bs >= 0.6 ? best : null;
+  }
   function search(q, loc, radiusKm = 10) {
     const groups = parseQuery(q);
     if (!groups.length) return { confirmed: [], listed: [], likely: [], shopsByName: [], cats: [] };
@@ -248,12 +398,12 @@ window.MM_API = (function () {
         if (s < 0.6) continue;
         const st = itemStatus(it);
         if (st.key === "out") continue;
-        const row = { shop: sh, item: it, score: s, status: st };
+        const row = { shop: sh, item: it, score: s, rank: nameRank(groups, it), status: st };
         (st.key === "confirmed" ? confirmed : listed).push(row);
         matchedShops.add(sh.id);
       }
     }
-    const byRank = (a, b) => (b.score - a.score) || (a.shop.dist - b.shop.dist) || (b.shop.trust - a.shop.trust);
+    const byRank = (a, b) => (b.score - a.score) || (b.rank - a.rank) || (a.shop.dist - b.shop.dist) || (b.shop.trust - a.shop.trust);
     confirmed.sort(byRank); listed.sort(byRank);
     const cats = queryCategories(groups);
     const likely = near.filter((s) => !matchedShops.has(s.id) && s.cats.some((c) => cats.includes(c)));
@@ -289,7 +439,7 @@ window.MM_API = (function () {
     if (own && !seen.has(own.id) && own.cats.some((c) => r.cats.includes(c))) candidates.unshift({ shopId: own.id, itemId: null });
     const a = { id: "q" + Date.now().toString(36), q, at: Date.now(), targets: candidates.slice(0, 8), replies: {} };
     saveAsk(a);
-    const timers = a.targets.filter((t) => !isOwnerShop(t.shopId)).map((t, i) => setTimeout(() => {
+    const timers = [].filter(() => false).map((t, i) => setTimeout(() => { // simulated replies removed
       const it = t.itemId ? getShop(t.shopId).items.find((x) => x.id === t.itemId) : null;
       let reply;
       if (it && it.lastConfirmed) reply = { has: true, price: it.price };
@@ -310,27 +460,158 @@ window.MM_API = (function () {
     if (log[0] && log[0].q === q && Date.now() - log[0].at < 60000) return;
     log.unshift({ q, at: Date.now(), cats: r.cats, hits: r.confirmed.map((x) => x.shop.id) });
     store.set("searchLog", log.slice(0, 300));
+    if (window.MM_CLOUD && window.MM_APP !== "business")
+      window.MM_CLOUD.logSearch({ q, cats: r.cats, found: new Set([...r.confirmed, ...r.listed].map((x) => x.shop.id)).size });
   }
   function addView(shopId) { const v = store.get("views", {}); v[shopId] = (v[shopId] || 0) + 1; store.set("views", v); }
 
   // ---------- owner tools ----------
   function claimShop(id) { store.set("owner", id); }
-  function releaseShop() { store.del("owner"); }
-  function addShop(f, loc) {
-    const id = "own" + Date.now().toString(36);
-    let m = D.MARKETS.map((x) => ({ x, d: distKm(loc, x) })).sort((a, b) => a.d - b.d)[0];
+  function releaseShop() { store.del("owner"); if (cloudOn()) window.MM_CLOUD.signOut(); }
+  // addr = { locality, pincode } from reverse geocoding (may be empty offline).
+  function addShop(f, loc, addr = {}) {
+    const id = uuid();
+    const near = marketFor(loc);
     let market = null;
-    if (!m || m.d > 1) { market = { id: "m-" + id, name: f.area || "Local shops", area: f.area || "", lat: loc.lat, lng: loc.lng, tagline: D.CATEGORIES[f.cat].name }; D.MARKETS.push(market); }
+    // No market covers this spot: start a new area. It is listed as a market once
+    // MARKET_MIN_SHOPS shops have joined; the shop itself shows in "near me" at once.
+    if (!near) {
+      market = { id: "m-" + id, name: f.area || addr.locality || "Local shops", area: addr.locality || f.area || "", lat: loc.lat, lng: loc.lng,
+        radiusM: 300, pending: true, locality: addr.locality || "", pincode: addr.pincode || "", tagline: D.CATEGORIES[f.cat].name };
+      D.MARKETS.push(market);
+    }
+    const home = near || market;
+    // A pin far from every other shop is probably misplaced: flag it for a check.
+    const nearestShop = Math.min(Infinity, ...D.shops.map((s) => distKm(loc, s)));
     const shop = {
-      id, marketId: market ? market.id : m.x.id, market, name: f.name, cat: f.cat, cats: [f.cat], shopNo: f.shopNo || "—",
+      id, marketId: home.id, market, name: f.name,
+      locality: addr.locality || home.locality || "", pincode: addr.pincode || home.pincode || "", needsCheck: nearestShop > 2, cat: f.cat, cats: [f.cat], shopNo: f.shopNo || "—",
       floor: f.floor || "Ground floor", landmark: f.landmark || "Ask for the shop by name", lat: loc.lat, lng: loc.lng,
       open: +f.open || 10, close: +f.close || 20, closedDay: f.closedDay || "None", phone: f.phone || "", rating: 0, ratings: 0,
+      owner: f.owner || "", promo: f.promo || "", gst: f.gst || "",
       verified: false, trust: 0.7, items: [], own: true,
     };
     const all = store.get("shopsAdded", []); all.push(shop); store.set("shopsAdded", all);
     D.shops.push(shop); claimShop(id);
     return shop;
   }
+  // ---------- shop accounts ----------
+  // Register once with mobile number + PIN; the same pair logs in later.
+  // DEMO: accounts live on this device (PIN stored only as a salted SHA-256
+  // hash). v2 moves this to the server with an OTP on the number.
+  const normPhone = (p) => String(p || "").replace(/\D/g, "").slice(-10);
+  async function pinHash(phone, pin, salt) {
+    const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${salt}:${phone}:${pin}`));
+    return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  const accountFor = (phone) => store.get("accounts", []).find((a) => a.phone === normPhone(phone));
+  async function registerShop(f, loc, addr, { phone, pin }) {
+    const ph = normPhone(phone);
+    if (ph.length !== 10) throw new Error("Enter a 10-digit mobile number");
+    if (!/^\d{6}$/.test(pin)) throw new Error("PIN must be 6 digits");
+    if (cloudOn()) {
+      // server account first: if the number is taken, nothing is created here
+      const uid = await window.MM_CLOUD.signUp(ph, pin);
+      const shop = addShop({ ...f, phone: `+91 ${ph.slice(0, 5)} ${ph.slice(5)}` }, loc, addr);
+      shop.cloud = true; persistAddedShop(shop);
+      if (shop.market) q(shop.id, { op: "insert", table: "markets", row: marketRow(shop.market) });
+      q(shop.id, { op: "insert", table: "shops", row: shopRow(shop, uid) });
+      await window.MM_CLOUD.flush();
+      store.set("lastPull", Date.now());
+      return shop;
+    }
+    if (accountFor(ph)) throw new Error("This number already has a shop — log in instead");
+    const shop = addShop({ ...f, phone: `+91 ${ph.slice(0, 5)} ${ph.slice(5)}` }, loc, addr);
+    const salt = [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
+    store.set("accounts", [...store.get("accounts", []), { phone: ph, shopId: shop.id, owner: f.owner || "", salt, hash: await pinHash(ph, pin, salt), at: Date.now() }]);
+    return shop;
+  }
+  async function login(phone, pin) {
+    if (cloudOn()) {
+      try {
+        await window.MM_CLOUD.signIn(normPhone(phone), String(pin));
+        const id = await window.MM_CLOUD.pullShop();
+        claimShop(id);
+        return { ok: true, reload: true };
+      } catch (e) { return { ok: false, why: e.message }; }
+    }
+    const acc = accountFor(phone);
+    if (!acc) return { ok: false, why: "No shop is registered with this number" };
+    const tries = store.get("loginTries", {}); const t = tries[acc.phone] || { n: 0, until: 0 };
+    if (Date.now() < t.until) return { ok: false, why: `Too many wrong PINs. Try again in ${Math.ceil((t.until - Date.now()) / 60000)} min` };
+    if ((await pinHash(acc.phone, String(pin), acc.salt)) !== acc.hash) {
+      t.n++; if (t.n >= 5) { t.until = Date.now() + 5 * 60000; t.n = 0; }
+      tries[acc.phone] = t; store.set("loginTries", tries);
+      return { ok: false, why: "Wrong PIN" };
+    }
+    delete tries[acc.phone]; store.set("loginTries", tries);
+    claimShop(acc.shopId);
+    return { ok: true };
+  }
+  function updateShop(id, patch) {
+    const sh = getShop(id); if (!sh) return;
+    Object.assign(sh, patch); persistAddedShop(sh);
+    const row = {};
+    if ("promo" in patch) row.promo = patch.promo || null;
+    if ("phone" in patch) row.phone = patch.phone || null;
+    if ("gst" in patch) row.gst = patch.gst || null;
+    if (Object.keys(row).length) q(id, { op: "update", table: "shops", id, patch: row });
+  }
+  const shopRow = (sh, ownerId) => ({
+    id: sh.id, owner_id: ownerId, name: sh.name, owner_name: sh.owner || null, phone: sh.phone || null, cat: sh.cat, cats: sh.cats,
+    market_id: sh.marketId, shop_no: sh.shopNo, floor: sh.floor, landmark: sh.landmark, locality: sh.locality || null, pincode: sh.pincode || null,
+    lat: sh.lat, lng: sh.lng, open_h: sh.open, close_h: sh.close, closed_day: sh.closedDay, promo: sh.promo || null, gst: sh.gst || null, needs_check: !!sh.needsCheck,
+  });
+  const marketRow = (m) => ({ id: m.id, name: m.name, area: m.area || null, locality: m.locality || null, pincode: m.pincode || null,
+    lat: m.lat, lng: m.lng, radius_m: m.radiusM || 300, pending: true, tagline: m.tagline || null });
+  const itemRow = (shopId, it) => ({ id: it.id, shop_id: shopId, name: it.name, brand: it.brand || null, cat: it.cat,
+    price: it.price ?? null, mrp: it.mrp ?? null, cost: it.cost ?? null, reorder_at: it.reorderAt ?? 3 });
+  // ---------- product details (shared catalogue) ----------
+  // details d = { productId?, barcode, model, size, mrp, features[], description, specMap{}, keywords[],
+  //               productPhoto (url), photoCredit, source }
+  const DETAIL_KEYS = ["barcode", "model", "size", "features", "description", "specMap", "keywords", "productPhoto", "photoCredit", "productId", "productMine"];
+  function persistOwnerItem(shopId, it) {
+    const all = store.get("ownerItems", {}); const list = all[shopId] || [];
+    const i = list.findIndex((x) => x.id === it.id);
+    const copy = { ...it }; delete copy.specs; delete copy.img; delete copy.key;
+    if (i >= 0) list[i] = copy; else list.push(copy);
+    all[shopId] = list; store.set("ownerItems", all);
+  }
+  const productRow = (shopId, it, d) => ({
+    id: d.productId, barcode: d.barcode || null, name: it.name, brand: it.brand || null, model: d.model || null, cat: it.cat, size: d.size || null,
+    mrp: d.mrp ?? null, features: d.features || [], description: d.description || null, specs: d.specMap || {}, keywords: d.keywords || [],
+    photo_url: d.productPhoto && /^https:/.test(d.productPhoto) ? d.productPhoto : null, photo_credit: d.photoCredit || null,
+    source: d.source || "shop", created_by: shopId,
+  });
+  // Save details for an item: link to an existing catalogue product, update our own
+  // (unverified) one, or add a new product to the shared catalogue.
+  function saveDetails(shopId, itemId, d) {
+    const sh = getShop(shopId), it = sh?.items.find((x) => x.id === itemId); if (!it) return null;
+    if (d.mrp != null) it.mrp = d.mrp;
+    if (d.productId && d.productId !== it.productId && !d.productMine) {
+      // someone else's catalogue product: link to it, don't change it
+      Object.assign(it, pick(d)); it.productMine = false;
+      q(shopId, { op: "update", table: "items", id: itemId, patch: { product_id: d.productId, ...(d.mrp != null ? { mrp: d.mrp } : {}) } });
+    } else if (it.productId && it.productMine) {
+      Object.assign(it, pick(d), { productId: it.productId, productMine: true });
+      const row = productRow(shopId, it, { ...d, productId: it.productId }); delete row.id; delete row.created_by; delete row.source;
+      q(shopId, { op: "update", table: "catalog_products", id: it.productId, patch: row });
+      if (d.mrp != null) q(shopId, { op: "update", table: "items", id: itemId, patch: { mrp: d.mrp } });
+    } else if (!it.productId || !d.productId) {
+      const pid = uuid();
+      Object.assign(it, pick(d), { productId: pid, productMine: true });
+      q(shopId, { op: "insert", table: "catalog_products", row: productRow(shopId, it, { ...d, productId: pid }) });
+      q(shopId, { op: "update", table: "items", id: itemId, patch: { product_id: pid, ...(d.mrp != null ? { mrp: d.mrp } : {}) } });
+    }
+    enrich(it); persistOwnerItem(shopId, it);
+    return it;
+  }
+  function addPhoto(shopId, itemId, dataUrl) {
+    const it = getShop(shopId)?.items.find((x) => x.id === itemId); if (!it) return;
+    it.photo = dataUrl; enrich(it); persistOwnerItem(shopId, it);
+    q(shopId, { op: "photo", shopId, itemId, dataUrl, productId: it.productMine ? it.productId : null });
+  }
+  function pick(d) { const o = {}; for (const k of DETAIL_KEYS) if (d[k] !== undefined) o[k] = d[k]; return o; }
   function persistAddedShop(shop) {
     const all = store.get("shopsAdded", []);
     const i = all.findIndex((s) => s.id === shop.id);
@@ -340,20 +621,63 @@ window.MM_API = (function () {
     const edits = store.get("itemEdits", {});
     edits[itemId] = { ...(edits[itemId] || {}), ...patch, at: Date.now() };
     store.set("itemEdits", edits);
+    const row = {};
+    if (patch.price != null) row.price = patch.price;
+    if (patch.cost != null) row.cost = patch.cost;
+    if (patch.reorderAt != null) row.reorder_at = patch.reorderAt;
+    if (patch.mrp != null) row.mrp = patch.mrp;
+    if (patch.removed) row.removed = true;
+    if (Object.keys(row).length) q(shopId, { op: "update", table: "items", id: itemId, patch: row });
     const it = getShop(shopId)?.items.find((x) => x.id === itemId); if (!it) return;
-    if (patch.price != null) { it.price = patch.price; it.mrp = Math.max(it.mrp || 0, patch.price); }
+    if (patch.price != null) { it.price = patch.price; }
+    if (patch.mrp != null) it.mrp = patch.mrp;
     if (patch.inStock === true) { it.lastConfirmed = Date.now(); it.reportedOut = null; }
     if (patch.inStock === false) { it.reportedOut = Date.now(); it.lastConfirmed = null; }
     if (patch.removed) { const sh = getShop(shopId); sh.items = sh.items.filter((x) => x.id !== itemId); }
   }
-  function addItem(shopId, [name, brand, price], cat) {
+  function addItem(shopId, [name, brand], cat) {
+    const price = null; // the shop sets its own price
     const sh = getShop(shopId);
     if (sh.items.find((x) => x.name === name && x.brand === brand)) return null;
-    const it = enrich({ id: `${shopId}-a${Date.now().toString(36)}${Math.floor(Math.random() * 99)}`, name, brand, cat: cat || sh.cat, price, lastConfirmed: Date.now() });
+    const it = enrich({ id: uuid(), name, brand, cat: cat || sh.cat, price, lastConfirmed: Date.now(), addedAt: Date.now() });
     const all = store.get("ownerItems", {}); (all[shopId] = all[shopId] || []).push(it); store.set("ownerItems", all);
     sh.items.push(it);
+    q(shopId, { op: "insert", table: "items", row: itemRow(shopId, it) });
     return it;
   }
+  // A shop's own new item: name, price, optional photo (small JPEG data URL),
+  // cost and opening quantity. The photo also shows in the customer app.
+  function addOwnItem(shopId, { name, brand = "", cat, price = null, cost = null, photo = null, qty = null, details = null }) {
+    const sh = getShop(shopId); if (!sh) return null;
+    if (sh.items.find((x) => x.name.toLowerCase() === name.toLowerCase() && (x.brand || "") === brand)) return null;
+    const it = enrich({ id: uuid(), name, brand: brand || "Generic", cat: cat || sh.cat, price, cost, photo, lastConfirmed: Date.now(), addedAt: Date.now() });
+    const all = store.get("ownerItems", {}); (all[shopId] = all[shopId] || []).push(it); store.set("ownerItems", all);
+    sh.items.push(it);
+    q(shopId, { op: "insert", table: "items", row: itemRow(shopId, it) });
+    const photoOp = photo ? { op: "photo", shopId, itemId: it.id, dataUrl: photo } : null;
+    if (details && Object.values(details).some((v) => v && (!Array.isArray(v) || v.length) && (typeof v !== "object" || Array.isArray(v) || Object.keys(v).length)))
+      saveDetails(shopId, it.id, details);
+    if (photoOp) q(shopId, { ...photoOp, productId: it.productMine ? it.productId : null }); // after the product exists
+    if (!sh.cats.includes(it.cat)) sh.cats.push(it.cat);
+    if (qty != null) moveStock(shopId, it.id, { set: qty, reason: "received" });
+    return it;
+  }
+  // Stock arrived from a supplier: every line goes into stock, the purchase is kept for reports.
+  function savePurchase(shopId, { lines, supplier = "", pay = "cash" }) {
+    const p = { id: uuid(), shopId, at: Date.now(), supplier: supplier.trim(), pay,
+      lines: lines.map((l) => ({ id: uuid(), itemId: l.itemId, name: l.name, qty: l.qty, cost: l.cost ?? null })) };
+    p.total = p.lines.reduce((a, l) => a + (l.cost || 0) * l.qty, 0);
+    q(shopId, { op: "insert", table: "purchases", row: { id: p.id, shop_id: shopId, at: iso(p.at), supplier: p.supplier || null, pay, total: p.total } });
+    for (const l of p.lines) q(shopId, { op: "insert", table: "purchase_lines", row: { id: l.id, purchase_id: p.id, shop_id: shopId, item_id: l.itemId, name: l.name, qty: l.qty, cost: l.cost } });
+    for (const l of p.lines) {
+      moveStock(shopId, l.itemId, { delta: l.qty, reason: "received", ref: p.id });
+      if (l.cost) setItem(shopId, l.itemId, { cost: l.cost });
+      const it = getShop(shopId)?.items.find((x) => x.id === l.itemId); if (it && l.cost) it.cost = l.cost;
+    }
+    const all = store.get("purchases", []); all.unshift(p); store.set("purchases", all.slice(0, 1000));
+    return p;
+  }
+  const purchasesFor = (shopId) => store.get("purchases", []).filter((p) => p.shopId === shopId);
   const catalogFor = (cat) => D.CATALOG[cat].map(([n, b, p]) => ({ tmpl: [n, b, p], name: n, brand: b, price: p, img: PHOTOS.has(slug(n)) ? `img/items/${slug(n)}.jpg` : null }));
 
   // "People searched for X near you and nobody had it" — the hook that tells a shop what to stock.
@@ -361,11 +685,7 @@ window.MM_API = (function () {
     const log = store.get("searchLog", []).filter((l) => Date.now() - l.at < 7 * DAY && l.cats.some((c) => shop.cats.includes(c)) && !l.hits.includes(shop.id));
     const counts = {};
     for (const l of log) counts[l.q] = (counts[l.q] || 0) + 1;
-    const real = Object.entries(counts).map(([q, n]) => ({ q, n, real: true }));
-    // demo baseline so a new shop sees a realistic report on day one
-    const have = new Set(shop.items.map((i) => slug(i.name)));
-    const base = D.CATALOG[shop.cat].filter(([n]) => !have.has(slug(n))).map(([n, b]) => ({ q: `${b !== "Generic" ? b + " " : ""}${n}`.toLowerCase(), n: 3 + Math.floor(hash(shop.id + n) * 40), real: false, tmpl: [n, b] }));
-    return [...real, ...base].sort((a, b) => b.n - a.n).slice(0, 10);
+    return Object.entries(counts).map(([q, n]) => ({ q, n, real: true })).sort((a, b) => b.n - a.n).slice(0, 10);
   }
 
   // ---------- bag & orders ----------
@@ -406,7 +726,7 @@ window.MM_API = (function () {
   function saveOrder(o) { const all = store.get("orders", []).map((x) => (x.id === o.id ? o : x)); store.set("orders", all); }
   // Shops other than yours move orders forward on their own (simulated).
   function autoAdvance(o) {
-    if (isOwnerShop(o.shopId) || o.cancelled) return o;
+    if (isOwnerShop(o.shopId) || o.cancelled || true) return o; // no simulated shop actions
     const last = STEPS[o.mode].length - 1;
     const t = (Date.now() - o.at) / 1000;
     const want = t > 90 ? last : t > 20 ? Math.min(2, last) : t > 6 ? 1 : 0;
@@ -417,11 +737,151 @@ window.MM_API = (function () {
   const getOrder = (id) => getOrders().find((o) => o.id === id);
   function advanceOrder(id) {
     const o = store.get("orders", []).find((x) => x.id === id); if (!o) return;
-    if (o.step < STEPS[o.mode].length - 1) { o.step++; o.history.push({ step: o.step, at: Date.now() }); if (o.step === STEPS[o.mode].length - 1) o.paid = true; }
+    if (o.step < STEPS[o.mode].length - 1) {
+      o.step++; o.history.push({ step: o.step, at: Date.now() });
+      if (o.step === STEPS[o.mode].length - 1) {
+        o.paid = true;
+        // a finished order at a shop that counts stock takes the units out
+        if (!o.stockDone) {
+          for (const l of o.items) { const it = getShop(o.shopId)?.items.find((x) => x.id === l.itemId); if (it && it.qty != null) moveStock(o.shopId, l.itemId, { delta: -l.qty, reason: "order" }); }
+          o.stockDone = true;
+        }
+      }
+    }
     saveOrder(o);
   }
   function cancelOrder(id) { const o = store.get("orders", []).find((x) => x.id === id); if (o) { o.cancelled = Date.now(); saveOrder(o); } }
   const ordersFor = (shopId) => store.get("orders", []).filter((o) => o.shopId === shopId);
+
+  // ---------- counter billing ----------
+  // A bill = picked items x quantity; the app does the maths. Saving a bill
+  // takes the units out of stock (for items the shop counts) and records the
+  // sale. Bills are never edited: a cancel is a new "returned" stock entry.
+  // lines: [{ itemId|null, name, qty, price, cost }]
+  function billTotals(lines, discount = 0) {
+    const sub = lines.reduce((a, l) => a + l.qty * l.price, 0);
+    const disc = Math.min(Math.max(0, Math.round(discount || 0)), sub);
+    return { sub, discount: disc, total: sub - disc, units: lines.reduce((a, l) => a + l.qty, 0) };
+  }
+  function saveBill(shopId, { lines, discount = 0, pay = "cash", phone = "", received = null }) {
+    const seq = store.get("billSeq", {}); seq[shopId] = (seq[shopId] || 1000) + 1; store.set("billSeq", seq);
+    const t = billTotals(lines, discount);
+    const b = {
+      id: uuid(), no: seq[shopId], shopId, at: Date.now(),
+      lines: lines.map((l) => ({ id: uuid(), itemId: l.itemId || null, name: l.name, brand: l.brand || "", qty: l.qty, price: l.price, cost: l.cost ?? null })),
+      ...t, pay, phone: phone || "", received: pay === "cash" && received ? received : null,
+    };
+    const all = store.get("bills", []); all.unshift(b); store.set("bills", all.slice(0, 2000));
+    q(shopId, { op: "insert", table: "bills", row: { id: b.id, shop_id: shopId, no: b.no, at: iso(b.at), sub: b.sub, discount: b.discount, total: b.total,
+      units: b.units, pay, phone: b.phone || null, received: b.received } });
+    for (const l of b.lines) q(shopId, { op: "insert", table: "bill_lines", row: { id: l.id, bill_id: b.id, shop_id: shopId, item_id: l.itemId,
+      name: l.name, brand: l.brand || null, qty: l.qty, price: l.price, cost: l.cost } });
+    for (const l of b.lines) {
+      const it = l.itemId && getShop(shopId)?.items.find((x) => x.id === l.itemId);
+      if (it && it.qty != null) moveStock(shopId, l.itemId, { delta: -l.qty, reason: "sold", ref: b.id });
+    }
+    return b;
+  }
+  function cancelBill(id) {
+    const all = store.get("bills", []); const b = all.find((x) => x.id === id);
+    if (!b || b.cancelled) return;
+    b.cancelled = Date.now(); store.set("bills", all);
+    q(b.shopId, { op: "update", table: "bills", id: b.id, patch: { cancelled_at: iso(b.cancelled) } });
+    for (const l of b.lines) {
+      const it = l.itemId && getShop(b.shopId)?.items.find((x) => x.id === l.itemId);
+      if (it && it.qty != null) moveStock(b.shopId, l.itemId, { delta: l.qty, reason: "returned", ref: b.id });
+    }
+  }
+  // A logged-in shop's data from the server replaces what this phone had for it.
+  // The caller reloads the page afterwards so every screen starts from it.
+  function hydrateShop({ shop: r, items, bills, purchases, markets, products }, photoUrl) {
+    const prod = {}; for (const p of products || []) prod[p.id] = p;
+    const cm = (markets || []).map((m) => ({ id: m.id, name: m.name, area: m.area || "", locality: m.locality || "", pincode: m.pincode || "",
+      lat: m.lat, lng: m.lng, radiusM: m.radius_m, pending: m.pending, tagline: m.tagline || "" }));
+    store.set("cloudMarkets", cm);
+    const shop = {
+      id: r.id, marketId: r.market_id, market: null, name: r.name, owner: r.owner_name || "", phone: r.phone || "", cat: r.cat,
+      cats: r.cats && r.cats.length ? r.cats : [r.cat], shopNo: r.shop_no || "—", floor: r.floor || "Ground floor", landmark: r.landmark || "",
+      locality: r.locality || "", pincode: r.pincode || "", lat: r.lat, lng: r.lng, open: r.open_h, close: r.close_h, closedDay: r.closed_day,
+      promo: r.promo || "", gst: r.gst || "", verified: r.verified, needsCheck: r.needs_check, rating: 0, ratings: 0, trust: 0.7, items: [], own: true, cloud: true,
+    };
+    store.set("shopsAdded", [...store.get("shopsAdded", []).filter((s) => s.id !== r.id), shop]);
+    const its = (items || []).filter((i) => !i.removed).map((i) => ({
+      id: i.id, name: i.name, brand: i.brand || "Generic", cat: i.cat, price: i.price, mrp: i.mrp, cost: i.cost, reorderAt: i.reorder_at,
+      qty: i.qty, qty0: i.qty, stockAt: ms(i.stock_at), stockAt0: ms(i.stock_at), lastConfirmed: i.qty > 0 ? ms(i.stock_at) : null,
+      photo: photoUrl(i.photo_path), addedAt: ms(i.created_at),
+      ...(prod[i.product_id] ? productDetails(prod[i.product_id], photoUrl, r.id) : {}),
+    }));
+    const oi = store.get("ownerItems", {}); oi[r.id] = its; store.set("ownerItems", oi);
+    const ids = new Set((items || []).map((i) => i.id));
+    const ed = store.get("itemEdits", {}); for (const k of Object.keys(ed)) if (ids.has(k)) delete ed[k]; store.set("itemEdits", ed);
+    store.set("ledger", store.get("ledger", []).filter((e) => e.shopId !== r.id));
+    const bl = (bills || []).map((b) => ({ id: b.id, no: b.no, shopId: r.id, at: ms(b.at), sub: b.sub, discount: b.discount, total: b.total, units: b.units,
+      pay: b.pay, phone: b.phone || "", received: b.received, ...(b.cancelled_at ? { cancelled: ms(b.cancelled_at) } : {}),
+      lines: (b.bill_lines || []).map((l) => ({ id: l.id, itemId: l.item_id, name: l.name, brand: l.brand || "", qty: l.qty, price: l.price, cost: l.cost })) }));
+    store.set("bills", [...bl, ...store.get("bills", []).filter((b) => b.shopId !== r.id)].sort((a, b) => b.at - a.at));
+    const seq = store.get("billSeq", {}); seq[r.id] = Math.max(seq[r.id] || 1000, ...bl.map((b) => b.no)); store.set("billSeq", seq);
+    const pu = (purchases || []).map((p) => ({ id: p.id, shopId: r.id, at: ms(p.at), supplier: p.supplier || "", pay: p.pay, total: p.total,
+      lines: (p.purchase_lines || []).map((l) => ({ id: l.id, itemId: l.item_id, name: l.name, qty: l.qty, cost: l.cost })) }));
+    store.set("purchases", [...pu, ...store.get("purchases", []).filter((p) => p.shopId !== r.id)]);
+    return shop;
+  }
+  function productDetails(p, photoUrl, shopId) {
+    return { productId: p.id, productMine: p.created_by === shopId && !p.verified, barcode: p.barcode || "", model: p.model || "", size: p.size || "",
+      features: p.features || [], description: p.description || "", specMap: p.specs || {}, keywords: p.keywords || [],
+      productPhoto: p.photo_path ? photoUrl(p.photo_path) : p.photo_url || null, photoCredit: p.photo_url && !p.photo_path ? p.photo_credit || "" : "" };
+  }
+  // Customer app: real shops from the server join the map and search.
+  // Only public columns arrive: stock is a label (in / few / out / listed), never a count.
+  function mergePublic({ markets, shops, items }, photoUrl) {
+    for (const m of markets || []) if (!D.MARKETS.find((x) => x.id === m.id))
+      D.MARKETS.push({ id: m.id, name: m.name, area: m.area || "", locality: m.locality || "", pincode: m.pincode || "", lat: m.lat, lng: m.lng, radiusM: m.radius_m, pending: m.pending, tagline: m.tagline || "" });
+    const byShop = {};
+    for (const i of items || []) (byShop[i.shop_id] = byShop[i.shop_id] || []).push(i);
+    let n = 0;
+    for (const r of shops || []) {
+      if (getShop(r.id) || r.lat == null) continue;
+      const sh = {
+        id: r.id, marketId: r.market_id || null, name: r.name, cat: r.cat, cats: r.cats && r.cats.length ? r.cats : [r.cat],
+        shopNo: r.shop_no || "—", floor: r.floor || "Ground floor", landmark: r.landmark || "", locality: r.locality || "", pincode: r.pincode || "",
+        lat: r.lat, lng: r.lng, open: r.open_h, close: r.close_h, closedDay: r.closed_day, phone: r.phone || "", promo: r.promo || "",
+        rating: 0, ratings: 0, verified: r.verified, trust: 0.8, live: true,
+        items: (byShop[r.id] || []).map((i) => {
+          const at = ms(i.updated_at);
+          const qty = i.stock === "in" ? 10 : i.stock === "few" ? 1 : i.stock === "out" ? 0 : null;
+          return enrich({ id: i.id, name: i.name, brand: i.brand || "Generic", cat: i.cat, price: i.price, mrp: i.mrp ?? i.product_mrp ?? null, reorderAt: 3,
+            qty, stockAt: qty == null ? null : at, lastConfirmed: qty > 0 ? at : null, photo: photoUrl(i.photo_path),
+            ...(i.product_id ? productDetails({ id: i.product_id, barcode: i.barcode, model: i.model, size: i.size, features: i.features, description: i.description,
+              specs: i.specs, keywords: i.keywords, photo_path: i.product_photo_path, photo_url: i.product_photo_url, photo_credit: i.photo_credit, verified: true }, photoUrl, null) : {}) });
+        }),
+      };
+      if (!sh.marketId || !D.MARKETS.find((m) => m.id === sh.marketId)) {
+        const near = marketFor(sh); sh.marketId = near ? near.id : null;
+      }
+      if (!sh.marketId) { // a shop in an area with no market yet: give it a stand-alone one
+        const m = { id: "solo-" + r.id, name: r.locality || r.name, area: r.locality || "", locality: r.locality || "", pincode: r.pincode || "", lat: r.lat, lng: r.lng, radiusM: 200, pending: true, tagline: D.CATEGORIES[r.cat]?.name || "" };
+        D.MARKETS.push(m); sh.marketId = m.id;
+      }
+      D.shops.push(sh); n++;
+    }
+    return n;
+  }
+  const billsFor = (shopId) => store.get("bills", []).filter((b) => b.shopId === shopId);
+  const getBill = (id) => store.get("bills", []).find((b) => b.id === id);
+  // Today's money: sales by payment type and profit (where the cost is known).
+  function daySummary(shopId, day = new Date()) {
+    const from = new Date(day); from.setHours(0, 0, 0, 0);
+    const to = from.getTime() + DAY;
+    const bills = billsFor(shopId).filter((b) => !b.cancelled && b.at >= from.getTime() && b.at < to);
+    const by = { cash: 0, upi: 0, card: 0, khata: 0 };
+    let profit = 0, costKnown = true;
+    for (const b of bills) {
+      by[b.pay] = (by[b.pay] || 0) + b.total;
+      for (const l of b.lines) { if (l.cost == null) costKnown = false; else profit += (l.price - l.cost) * l.qty; }
+      profit -= b.discount;
+    }
+    return { bills: bills.length, total: bills.reduce((a, b) => a + b.total, 0), by, profit, costKnown };
+  }
 
   // same product at other shops, for price comparison
   function elsewhere(item, shopId, loc) {
@@ -451,7 +911,11 @@ window.MM_API = (function () {
   }
 
   return {
-    D, store, distKm, fmtDist, marketsNear, shopsNear, getShop, getMarket, isOpen, itemStatus,
+    D, store, distKm, fmtDist, marketsNear, shopsNear,
+    RANGES, getRange, setRange, trip, fmtTrip, nearArea, nearSearch, marketFor,
+    REASONS, moveStock, stockLog, inventory, lowAt,
+    billTotals, saveBill, cancelBill, billsFor, getBill, daySummary,
+    registerShop, login, updateShop, normPhone, addOwnItem, savePurchase, purchasesFor, hydrateShop, mergePublic, uuid, shopHas, saveDetails, productDetails, addPhoto, getShop, getMarket, isOpen, itemStatus,
     search, ask, getAsk, replyAsk, pendingAsks, feedback, logSearch, addView,
     ownerShopId, ownerShop, isOwnerShop, claimShop, releaseShop, addShop, persistAddedShop, setItem, addItem, catalogFor, missedSales,
     getBag, addToBag, setQty, bagCount, bagLines, STEPS, placeOrder, getOrders, getOrder, advanceOrder, cancelOrder, ordersFor,

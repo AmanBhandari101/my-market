@@ -19,6 +19,10 @@ window.MM_DATA = (function () {
     clothes:     { name: "Clothes",              icon: "👕", color: "#B4506F", tint: "#F8E5EA" },
     footwear:    { name: "Footwear",             icon: "👟", color: "#8E5487", tint: "#F3E5EF" },
     kitchen:     { name: "Kitchenware",          icon: "🍳", color: "#5A8644", tint: "#E8F0DF" },
+    grocery:     { name: "Grocery",              icon: "🛒", color: "#6B7A2E", tint: "#EEF1DC" },
+    pharmacy:    { name: "Pharmacy",             icon: "💊", color: "#2F7D6D", tint: "#DFF1EC" },
+    stationery:  { name: "Books & Stationery",   icon: "📒", color: "#4A5FA0", tint: "#E5E9F6" },
+    accessories: { name: "Bags & Watches",       icon: "👜", color: "#9A5B34", tint: "#F5E7DC" },
   };
 
   // [name, brand, typical price ₹]
@@ -84,13 +88,42 @@ window.MM_DATA = (function () {
     ],
   };
 
+  Object.assign(CATALOG, {
+    grocery: [
+      ["Basmati Rice 5 kg", "India Gate", 649], ["Aashirvaad Atta 10 kg", "Aashirvaad", 499], ["Toned Milk 1 L", "Amul", 56],
+      ["Mustard Oil 1 L", "Fortune", 175], ["Toor Dal 1 kg", "Tata Sampann", 189], ["Sugar 1 kg", "Generic", 48],
+      ["Tea 500 g", "Tata Tea", 285], ["Bathing Soap (pack of 4)", "Lux", 160], ["Detergent Powder 1 kg", "Surf Excel", 140],
+      ["Biscuits Family Pack", "Parle-G", 50], ["Bread", "Harvest Gold", 45], ["Eggs (12)", "Generic", 84],
+    ],
+    pharmacy: [
+      ["Paracetamol 650 mg (15 tablets)", "Dolo", 33], ["Cough Syrup 100 ml", "Benadryl", 135], ["ORS Sachet", "Electral", 22],
+      ["Antiseptic Liquid 500 ml", "Dettol", 199], ["Hand Sanitizer 500 ml", "Lifebuoy", 150], ["Bandage Strips (pack)", "Hansaplast", 60],
+      ["Digital Thermometer", "Dr Trust", 249], ["Face Masks (pack of 10)", "Generic", 99], ["Vitamin C Tablets", "Limcee", 25],
+      ["Pain Relief Spray", "Volini", 245], ["BP Monitor", "Omron", 1999], ["Antacid Gel 200 ml", "Digene", 145],
+    ],
+    stationery: [
+      ["Notebook 200 pages", "Classmate", 70], ["Ball Pen (pack of 10)", "Reynolds", 100], ["Geometry Box", "Camlin", 150],
+      ["A4 Paper Ream 500 sheets", "JK Copier", 349], ["School Bag", "Skybags", 1199], ["Colour Pencils 24", "Faber-Castell", 180],
+      ["Scientific Calculator", "Casio", 799], ["Exam Board Clip", "Generic", 60], ["Glue Stick", "Fevistik", 30],
+      ["NCERT Book (any class)", "NCERT", 120], ["Dictionary English-Hindi", "Oxford", 395], ["Sticky Notes", "3M", 99],
+    ],
+    accessories: [
+      ["Analog Wrist Watch", "Titan", 2495], ["Digital Sports Watch", "Casio", 1295], ["Smart Watch", "Noise", 1999],
+      ["Leather Wallet", "Generic", 499], ["Leather Belt", "Generic", 399], ["Ladies Handbag", "Lavie", 1799],
+      ["Backpack 30 L", "Wildcraft", 1499], ["Trolley Suitcase", "VIP", 3999], ["Sunglasses", "Generic", 349],
+      ["Umbrella", "Generic", 299], ["Laptop Bag", "American Tourister", 1599], ["Travel Duffel Bag", "Generic", 899],
+    ],
+  });
+
   // Pilot area: Karol Bagh, New Delhi.
+  // A market is a named cluster of shops: centre + radius (m). Shops inside the
+  // radius belong to it. Locality + pincode come from the address (reverse geocode).
   const MARKETS = [
-    { id: "gaffar", name: "Gaffar Market", area: "Karol Bagh", lat: 28.6519, lng: 77.1907,
+    { id: "gaffar", radiusM: 350, locality: "Karol Bagh", pincode: "110005", name: "Gaffar Market", area: "Karol Bagh", lat: 28.6519, lng: 77.1907,
       tagline: "Mobiles, accessories & electronics" },
-    { id: "ajmal", name: "Ajmal Khan Road", area: "Karol Bagh", lat: 28.6487, lng: 77.1923,
+    { id: "ajmal", radiusM: 350, locality: "Karol Bagh", pincode: "110005", name: "Ajmal Khan Road", area: "Karol Bagh", lat: 28.6487, lng: 77.1923,
       tagline: "Clothes, footwear & household" },
-    { id: "beadon", name: "Beadonpura Hardware Bazaar", area: "Karol Bagh", lat: 28.6547, lng: 77.1876,
+    { id: "beadon", radiusM: 350, locality: "Karol Bagh", pincode: "110005", name: "Beadonpura Hardware Bazaar", area: "Karol Bagh", lat: 28.6547, lng: 77.1876,
       tagline: "Hardware, plumbing & electrical" },
   ];
 
@@ -120,10 +153,24 @@ window.MM_DATA = (function () {
     ["beadon", "plumbing", "Goyal Pipe House", "End of Lane 2, godown behind"],
     ["beadon", "electrical", "Jyoti Electricals", "Lane 1, next to Aggarwal Tools"],
     ["beadon", "electrical", "Power Line Electric", "First floor, stairs by the chai stall"],
+    // added 2026-11-02 — kept at the end so the shops above keep their demo data
+    ["ajmal", "grocery", "Aggarwal General Store", "Corner of the main road, red board"],
+    ["gaffar", "grocery", "Sharma Kirana", "Lane 3, opposite the dairy"],
+    ["beadon", "grocery", "Bansal Provision Store", "Next to Shiv Hardware"],
+    ["ajmal", "pharmacy", "Jeevan Medicos", "Opposite the bank, green cross sign"],
+    ["gaffar", "pharmacy", "City Chemist", "Beside the ATM"],
+    ["beadon", "pharmacy", "Shree Medical Store", "Entrance of the bazaar, right side"],
+    ["ajmal", "stationery", "Vidya Book Depot", "Near the school gate"],
+    ["gaffar", "stationery", "Modern Stationers", "Lane 1, first floor"],
+    ["ajmal", "accessories", "Time Zone Watches", "Middle of the road, glass front"],
+    ["ajmal", "accessories", "Bag Bazaar", "Two shops after Kapoor Garments"],
   ];
 
   const DAY = 86400000;
   const now = Date.now();
+  // Separate generator for stock numbers so adding them doesn't move the demo shops.
+  let seed2 = 7761;
+  const rnd2 = () => ((seed2 = (seed2 * 1664525 + 1013904223) % 4294967296) / 4294967296);
 
   const shops = SHOPS_RAW.map(([mId, cat, name, landmark], i) => {
     const m = MARKETS.find((x) => x.id === mId);
@@ -145,6 +192,16 @@ window.MM_DATA = (function () {
         lastConfirmed: confirmed ? now - Math.floor(rnd() * 10) * DAY - Math.floor(rnd() * 20) * 3600000 : null,
       };
     });
+    // Inventory (private to the shop). qty null = the shop doesn't count this item yet.
+    items.forEach((it) => {
+      const r = rnd2();
+      if (it.lastConfirmed && r < 0.75) { it.qty = r < 0.12 ? 1 + Math.floor(rnd2() * 3) : 4 + Math.floor(rnd2() * 30); it.stockAt = it.lastConfirmed; }
+      else if (!it.lastConfirmed && r < 0.15) { it.qty = 0; it.stockAt = now - Math.floor(rnd2() * 3) * DAY; }
+      else { it.qty = null; it.stockAt = null; }
+      it.qty0 = it.qty; it.stockAt0 = it.stockAt;
+      it.reorderAt = 3;
+      it.cost = it.price ? Math.round(it.price * (0.68 + rnd2() * 0.14)) : null;
+    });
     const floor = /first floor/i.test(landmark) ? "1st floor" : /basement/i.test(landmark) ? "Basement" : "Ground floor";
     const openH = pick([9, 10, 10, 11]);
     return {
@@ -157,6 +214,7 @@ window.MM_DATA = (function () {
       floor,
       landmark,
       lat, lng,
+      locality: m.locality, pincode: m.pincode,
       open: openH, close: pick([20, 20, 21, 22]),
       closedDay: pick(["Monday", "Monday", "Tuesday", "None"]),
       phone: `+91 90000 ${String(10000 + i).slice(-5)}`, // fake numbers
@@ -168,5 +226,8 @@ window.MM_DATA = (function () {
     };
   });
 
-  return { CATEGORIES, CATALOG, MARKETS, shops, PILOT: { name: "Karol Bagh, New Delhi", lat: 28.6517, lng: 77.1905 } };
+  // Live mode: no fictional shops or markets. Real ones come from the server.
+  // (The generator above is kept only for offline demos; its output is not used.)
+  void shops; void MARKETS;
+  return { CATEGORIES, CATALOG, MARKETS: [], shops: [], PILOT: { name: "Karol Bagh, New Delhi", lat: 28.6517, lng: 77.1905 } };
 })();

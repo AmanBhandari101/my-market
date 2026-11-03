@@ -137,3 +137,18 @@ select.field { appearance: none; -webkit-appearance: none; padding-right: 34px; 
 .bar .bl span { color: var(--ink-2); font-size: 12px; flex: none; }
 .bar .bt { height: 8px; border-radius: 4px; background: var(--sand); margin: 6px 0; overflow: hidden; }
 .bar .bt i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--marigold), var(--terracotta)); }
+
+/* near-me range: Walking / Short ride / Whole city */
+.ranges { display: flex; gap: 6px; margin-top: 14px; }
+.ranges button { flex: 1; font-size: 12.5px; font-weight: 500; padding: 7px 8px; border-radius: 20px; color: var(--ink-2); background: rgba(255,255,255,.6); border: 1.5px solid var(--line); }
+.ranges button.on { color: var(--teal); border-color: var(--teal); background: #fff; }
+
+/* owner stock screen */
+.stats button { text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.oitem button.body { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+.stepper { display: flex; align-items: center; border: 1.5px solid var(--line); border-radius: 22px; background: #fff; flex: none; }
+.stepper button { width: 34px; height: 34px; font-size: 19px; color: var(--teal); background: none; border: 0; cursor: pointer; }
+.stepper button:disabled { color: var(--line); cursor: default; }
+.stepper b { min-width: 26px; text-align: center; font-variant-numeric: tabular-nums; }
+.stepper.low { border-color: var(--marigold); background: var(--marigold-soft); }
+.stepper.out { border-color: var(--terracotta, #b4503c); }

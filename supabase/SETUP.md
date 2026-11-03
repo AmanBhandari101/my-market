@@ -1,0 +1,66 @@
+# My Market — Supabase setup (free plan)
+
+One-time setup of the server database. Takes about 10 minutes.
+
+## 1. Create the project
+
+1. Go to <https://supabase.com> → **Start your project** → sign in (GitHub sign-in is easiest).
+2. **New project**
+   - Organization: your personal one, plan **Free**
+   - Name: `my-market`
+   - Database password: click **Generate**, then save it in your password manager. You won't type it into the app — it is only for emergencies.
+   - Region: **South Asia (Mumbai)**
+3. Click **Create new project** and wait 1–2 minutes until it says the project is ready.
+
+## 2. Create the tables
+
+1. Left menu → **SQL Editor** → **New query**.
+2. Open `supabase/schema.sql` from this folder, copy everything, paste it in, click **Run**.
+3. It should end with **Success. No rows returned**. If it shows an error, copy the red message and send it over.
+
+Running it again later is safe.
+
+4. Then do the same with `supabase/searches.sql` (what customers search for near each shop, for the Reports page).
+
+## 3. Login settings
+
+Shops log in with mobile number + 6-digit PIN. Behind the scenes that becomes an
+email-style login that never sends email, so email confirmation must be off:
+
+- Left menu → **Authentication** → **Sign In / Providers** → **Email**
+- Keep **Enable Email provider** on
+- Turn **Confirm email** **off** → **Save**
+
+## 4. Copy two values for the app
+
+Left menu → **Project Settings** → **API Keys** (and **Data API** for the URL):
+
+| Copy this | Looks like | Safe to put in the app? |
+|---|---|---|
+| Project URL | `https://abcdefgh.supabase.co` | Yes |
+| Publishable key (older projects: **anon public** key) | `sb_publishable_…` or a long `eyJ…` | Yes — it is meant to be public; the privacy rules protect the data |
+
+**Never** share or put in the app: the **secret** / **service_role** key or the database password.
+
+## What the setup file creates
+
+| Table / view | Holds | Who can read it |
+|---|---|---|
+| `markets` | Market areas, pincodes | Everyone |
+| `shops` | Shop details | Only that shop's owner |
+| `items` | Items, prices, costs, stock count | Only that shop's owner |
+| `stock_moves` | Every stock +/− (append-only) | Only that shop's owner |
+| `bills`, `bill_lines` | Bills (can only be cancelled, never edited) | Only that shop's owner |
+| `purchases`, `purchase_lines` | Stock arrived from suppliers | Only that shop's owner |
+| `public_shops` (view) | Name, address, hours, phone | Everyone (customer app) |
+| `public_items` (view) | Name, brand, photo, price, stock label (in / few / out / listed) | Everyone (customer app) |
+| `item-photos` (storage) | Item photos, `<shop id>/<item id>.jpg` | Everyone can view; only that shop can upload |
+
+The stock count on each item is recalculated by the database from `stock_moves`,
+so bills made offline on two phones still add up correctly when they sync.
+
+## Free plan limits to keep in mind
+
+- 500 MB database, 1 GB photo storage — enough for a pilot of 10–30 shops for a long time.
+- A free project **pauses after about a week with no activity**; open the dashboard and click **Restore** to wake it. Daily use keeps it awake.
+- No downloadable backups on the free plan — a nightly backup job is part of the next steps.

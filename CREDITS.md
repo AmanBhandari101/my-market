@@ -36,7 +36,6 @@ They were resized and padded onto a square background. Shop names, items and pri
 | `storage-geyser-15-l.jpg` | [Japanese Electric Water Heater.jpg](https://commons.wikimedia.org/wiki/File:Japanese_Electric_Water_Heater.jpg) | DryPot | CC BY-SA 3.0 |
 | `teflon-tape.jpg` | [PTFE Rolls.png](https://commons.wikimedia.org/wiki/File:PTFE_Rolls.png) | Kees08 | CC BY-SA 4.0 |
 | `tv-remote-control.jpg` | [AverMedia RM-RH Remote control (white background) edit.jpg](https://commons.wikimedia.org/wiki/File:AverMedia_RM-RH_Remote_control_(white_background)_edit.jpg) | Taken by the uploader, w:es:Usuario:Barcex | CC BY-SA 3.0 |
-| `type-c-cable-1-m.jpg` | [Nintendo-Switch-JoyCon-Grip-Chargeable-04.jpg](https://commons.wikimedia.org/wiki/File:Nintendo-Switch-JoyCon-Grip-Chargeable-04.jpg) | Evan-Amos | Public domain |
 | `type-c-fast-charger-25w.jpg` | [USB power adapter for Apple iPod, Model A1205, by Foxlink Technology Ltd-1048.jpg](https://commons.wikimedia.org/wiki/File:USB_power_adapter_for_Apple_iPod,_Model_A1205,_by_Foxlink_Technology_Ltd-1048.jpg) | Raimond Spekking | CC BY-SA 4.0 |
 | `usb-keyboard.jpg` | [German computer keyboard.jpg](https://commons.wikimedia.org/wiki/File:German_computer_keyboard.jpg) | Runner1928 | CC BY-SA 4.0 |
 | `wi-fi-router.jpg` | [Netgear N300 wireless router n03.jpg](https://commons.wikimedia.org/wiki/File:Netgear_N300_wireless_router_n03.jpg) | Marie-Lan Nguyen | CC BY 2.5 |

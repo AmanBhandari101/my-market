@@ -1,5 +1,16 @@
 # My Market — v1 prototype
 
+## Live pilot
+
+| App | For | Open |
+|---|---|---|
+| **My Market** | Customers: find which nearby shop has an item, at what price | https://amanbhandari101.github.io/my-market/ |
+| **My Market Business** | Shops: billing, stock, reports; register with mobile number + 6-digit PIN | https://amanbhandari101.github.io/my-market/business.html |
+
+Both install on Android from Chrome (menu → *Install app*). Data lives in a Supabase project (Mumbai);
+the database setup is in `supabase/` (`schema.sql`, `searches.sql`, `catalog.sql`, see `supabase/SETUP.md`).
+
+
 Find which local shop has the item you need, buy or reserve it, and walk straight to it.
 Shops get customers, customer questions and a "what to stock next" report with almost no typing.
 
