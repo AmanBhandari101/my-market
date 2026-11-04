@@ -48,6 +48,16 @@ The phone downloads only the **nearest 150 shops within 25 km** (and their items
 as more towns join. A shop opened from a shared link, QR poster or bill loads on its own from anywhere;
 moving more than 5 km loads the new area.
 
+## Admin app (My Market Admin)
+
+`admin.html` — for My Market staff only (numbers in `public.admins`; everything it shows comes from
+`admin_*` server functions that refuse anyone else). Overview (shops, active shops, plans, money,
+bills, orders, searches), shops list with filters and Excel export, each shop's details, plan,
+payments and private notes with **give free months / extend trial / WhatsApp reminder**, payments
+(**load bank statement** — matched by each shop's payment code — credits that need a look, overdue
+shops, all payments with export), customers & demand (what people searched and nobody had), and an
+activity log of every staff action.
+
 ## Server (Supabase)
 
 Set up once in the Supabase SQL editor — the files in `supabase/`, in the order given in

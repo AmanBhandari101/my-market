@@ -322,7 +322,7 @@
         ${s.cloud ? `<a class="entry" href="#/biz/security"><div class="body"><div class="name">Login & security</div><div class="note">Backup number, change PIN, log out other phones</div></div>${ic("arrow")}</a>` : ""}
         <button class="entry" id="m-bs"><div class="body"><div class="name">Bill settings</div><div class="note">Advert, phone and GSTIN on your bills</div></div>${ic("arrow")}</button>
         <a class="entry" href="index.html#/shop/${s.id}" target="_blank" rel="noopener"><div class="body"><div class="name">See my shop as customers do</div><div class="note">Opens the My Market customer app</div></div>${ic("arrow")}</a>
-        ${A.store.get("isAdmin", false) ? `<a class="entry" href="#/biz/admin"><div class="body"><div class="name">Admin · payments</div><div class="note">Load a bank statement — payments are marked done by code</div></div>${ic("arrow")}</a>` : ""}
+        ${A.store.get("isAdmin", false) ? `<a class="entry" href="admin.html" target="_blank" rel="noopener"><div class="body"><div class="name">My Market Admin</div><div class="note">Shops, payments, bank statement — staff only</div></div>${ic("arrow")}</a>` : ""}
         <a class="entry" href="#/biz/plan"><div class="body"><div class="name">My plan</div><div class="note">${(() => { const st = planStage(s); return st.state === "trial" ? `Free plan · ${st.daysLeft} days left` : st.state === "active" ? "Active" : st.state === "unknown" ? "2 months free, then ₹150/month" : "Payment due"; })()}</div></div>${ic("arrow")}</a>
         <a class="entry" href="#/biz/backup"><div class="body"><div class="name">Back up bills</div><div class="note">Save a copy to Google Drive</div></div>${ic("arrow")}</a>
         <a class="entry" href="#/biz/insights"><div class="body"><div class="name">What people searched for</div><div class="note">Items nobody near you had</div></div>${ic("arrow")}</a>
@@ -593,91 +593,8 @@
     U.openSheet("", draw);
   }
 
-  // ---------- staff: load a bank statement, payments are marked done by the shop's code ----------
-  // Reads Excel / CSV statements from any bank: finds the credit, narration, date and
-  // transaction-ID columns, keeps credits whose narration has a code like MM9D6E77E2.
-  let xlsxLoad = null;
-  const loadXLSX = () => xlsxLoad || (xlsxLoad = new Promise((res, rej) => {
-    const sc = document.createElement("script"); sc.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
-    sc.onload = () => res(window.XLSX); sc.onerror = () => { xlsxLoad = null; rej(new Error("Needs the internet to read Excel files")); }; document.head.appendChild(sc);
-  }));
-  const num = (v) => { const n = parseFloat(String(v ?? "").replace(/[^0-9.\-]/g, "")); return isFinite(n) ? n : 0; };
-  function statementRows(grid) {
-    // find the header row: it names a narration column and a credit column
-    const low = (x) => String(x ?? "").toLowerCase().trim();
-    let h = -1, col = {};
-    for (let i = 0; i < Math.min(grid.length, 60); i++) {
-      const r = grid[i].map(low);
-      const find = (re, not) => r.findIndex((x) => re.test(x) && !(not && not.test(x)));
-      const narr = find(/narration|description|particular|remark|details|transaction details/);
-      const cr = find(/credit|deposit|cr amount|amount \(cr\)|^cr$/, /debit/);
-      if (narr >= 0 && cr >= 0) { h = i; col = { narr, cr, dt: find(/date/), ref: find(/ref|utr|chq|cheque/), amt: -1 }; break; }
-      const amt = find(/^amount|txn amount|transaction amount/), type = find(/type|dr\s*\/\s*cr|cr\s*\/\s*dr/);
-      if (narr >= 0 && amt >= 0 && type >= 0) { h = i; col = { narr, cr: -1, amt, type, dt: find(/date/), ref: find(/ref|utr|chq|cheque/) }; break; }
-    }
-    if (h < 0) return null;
-    const out = [];
-    for (const r of grid.slice(h + 1)) {
-      const narration = String(r[col.narr] ?? "").trim(); if (!narration) continue;
-      let amount = col.cr >= 0 ? num(r[col.cr]) : (/cr|credit/i.test(String(r[col.type] ?? "")) ? num(r[col.amt]) : 0);
-      if (!(amount > 0)) continue;
-      const refCell = col.ref >= 0 ? String(r[col.ref] ?? "").replace(/\D/g, "") : "";
-      // UPI transaction IDs are 12 digits; banks may pad the reference column with zeros
-      const inNarr = (narration.match(/(?:^|\D)(\d{12})(?:\D|$)/) || [])[1] || "";
-      const fromRef = refCell.replace(/^0+/, "");
-      const utr = inNarr || (/^0{2,}/.test(refCell) && fromRef.length <= 12 ? fromRef : refCell);
-      const dtRaw = col.dt >= 0 ? r[col.dt] : "";
-      let at = ""; if (dtRaw instanceof Date) at = dtRaw.toISOString();
-      else if (dtRaw) { const m = String(dtRaw).match(/(\d{1,2})[\/\-. ](\d{1,2}|[A-Za-z]{3})[\/\-. ](\d{2,4})/); if (m) { const mon = isNaN(+m[2]) ? "JanFebMarAprMayJunJulAugSepOctNovDec".indexOf(m[2].slice(0, 3)) / 3 : +m[2] - 1; const y = +m[3] < 100 ? 2000 + +m[3] : +m[3]; const d = new Date(y, mon, +m[1], 12); if (!isNaN(d)) at = d.toISOString(); } }
-      out.push({ utr, amount, narration, at, code: (narration.toUpperCase().match(/MM[0-9A-F]{8}/) || [""])[0] });
-    }
-    return out;
-  }
-  function adminView() {
-    const s = A.ownerShop();
-    let rows = null, results = null, busy = false, fileName = "";
-    const draw = () => {
-      const withCode = rows ? rows.filter((r) => r.code && r.utr) : [];
-      const counts = results ? results.reduce((m2, r) => (m2[r.result] = (m2[r.result] || 0) + 1, m2), {}) : null;
-      U.app.innerHTML = `
-        ${bizTop("Admin · payments")}
-        <div class="rsec"><p class="small" style="margin:0 0 8px">Load your bank statement (Excel or CSV from net banking). Every credit whose note has a shop's payment code, like <b>MM9D6E77E2</b>, is marked paid and that shop's plan is extended — ₹150 = 1 month, ₹1,500 = 1 year. Loading the same statement twice is safe.</p>
-          <label class="btn line" style="display:block;text-align:center;cursor:pointer">${ic("receipt")} Choose statement file<input type="file" id="stf" accept=".csv,.xls,.xlsx,text/csv" hidden></label>
-          ${fileName ? `<p class="faint tiny" style="margin:6px 0 0">${esc(fileName)}</p>` : ""}</div>
-        ${rows ? `<div class="rsec"><div class="rhd"><b>${withCode.length} payment${withCode.length === 1 ? "" : "s"} with a shop code</b><span class="faint tiny">${rows.length} credits in the file</span></div>
-          ${withCode.slice(0, 50).map((r) => `<div class="an-li"><span><b>${esc(r.code)}</b><em>${esc(r.narration.slice(0, 70))}${r.at ? " · " + new Date(r.at).toLocaleDateString("en-IN") : ""}</em></span><b>₹${r.amount.toLocaleString("en-IN")}</b></div>`).join("") || '<p class="quiet small">No line in this file has a shop code. Check that the bank statement shows the UPI note.</p>'}
-          ${withCode.length && !results ? `<button class="btn" id="mark" style="margin-top:12px">${busy ? "Marking…" : `Mark ${withCode.length} payment${withCode.length === 1 ? "" : "s"} done`}</button>` : ""}</div>` : ""}
-        ${results ? `<div class="rsec"><div class="rhd"><b>Done</b></div>
-          <div class="an-kpis three"><div><em>Marked paid</em><b>${counts.matched || 0}</b></div><div><em>Already done before</em><b>${counts.already_done || 0}</b></div><div><em>Need a look</em><b>${(counts.unknown_shop || 0) + (counts.too_small || 0) + (counts.error || 0)}</b></div></div>
-          ${results.filter((r) => !["matched", "already_done"].includes(r.result)).map((r) => `<div class="an-li"><span>${esc(r.code || r.utr || "")}<em>${{ unknown_shop: "No shop has this code", too_small: "Amount under ₹150", no_code: "No code", error: esc(r.error || "Error") }[r.result] || esc(r.result)}</em></span></div>`).join("")}</div>` : ""}
-        <div style="height:30px"></div>`;
-      bindTop();
-      $("#stf").onchange = async (e) => {
-        const f = e.target.files[0]; if (!f) return; fileName = f.name; results = null;
-        try {
-          let grid;
-          if (/\.csv$/i.test(f.name) || f.type === "text/csv") {
-            const text = await f.text();
-            grid = text.split(/\r?\n/).map((line) => { const out = []; let cur = "", q = false; for (const ch of line) { if (ch === '"') q = !q; else if (ch === "," && !q) { out.push(cur); cur = ""; } else cur += ch; } out.push(cur); return out; });
-          } else {
-            const X = await loadXLSX(); const wb = X.read(await f.arrayBuffer(), { type: "array", cellDates: true });
-            grid = X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: "" });
-          }
-          rows = statementRows(grid);
-          if (!rows) { rows = null; U.toast("Couldn't find the narration and credit columns in this file", 6000); }
-        } catch (x) { U.toast(x.message || "Couldn't read this file", 6000); }
-        draw();
-      };
-      $("#mark") && ($("#mark").onclick = async () => {
-        if (busy) return; busy = true; draw();
-        try { results = await window.MM_CLOUD.importStatement(withCode.map(({ utr, amount, narration, at }) => ({ utr, amount, narration, at }))); }
-        catch (x) { U.toast(x.message, 7000); }
-        busy = false; draw();
-      });
-    };
-    if (!A.store.get("isAdmin", false)) { U.app.innerHTML = `${bizTop("Admin")}<div class="rsec"><p class="small quiet">This page is only for My Market staff numbers.</p></div>`; bindTop(); return; }
-    draw();
-  }
+  // staff tools live in the separate admin app (admin.html)
+  function adminView() { location.href = "admin.html#/payments"; }
 
   // ---------- shop analytics ----------
   // Standard retail measures, worked out on the phone from the shop's own bills,
