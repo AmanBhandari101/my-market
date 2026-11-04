@@ -32,7 +32,7 @@
         <div class="topline"><span class="brand"><img src="icon-business.svg" alt="">My Market<small style="color:#5fd08a">Business</small></span></div>
         <div class="pad" style="margin-top:30px">
           <h1 class="display">Customers are already<br><em>looking for you.</em></h1>
-          <p class="quiet" style="line-height:1.55;margin:14px 0 0">Free billing, stock and sales reports for your shop — and people nearby can see what you have and your prices, then WhatsApp you or walk in.</p>
+          <p class="quiet" style="line-height:1.55;margin:14px 0 0">Billing, stock and sales reports for your shop — <b>2 months free, then ₹150/month</b>. People nearby can see what you have and your prices, then WhatsApp you or walk in.</p>
         </div>
       </div>
       <div class="block" id="login"><div class="eyebrow"><span>Log in to your shop</span></div>
@@ -47,7 +47,7 @@
         <span class="quiet small">New to My Market?</span>
         <a class="btn line" href="#/biz/new">Register your shop</a>
       </div>
-      <p class="pad faint tiny" style="text-align:center;margin-bottom:8px">Free · takes about 5 minutes · your mobile number and 6-digit PIN become your login</p>
+      <p class="pad faint tiny" style="text-align:center;margin-bottom:8px">2 months free, then ₹150/month · takes about 5 minutes · your mobile number and 6-digit PIN become your login</p>
       <div class="block"><div class="perks">
         <div><span>${ic("receipt")}</span><b>Bills in seconds</b><p>Tap items, the app adds it up and sends a PDF bill on WhatsApp.</p></div>
         <div><span>${ic("box")}</span><b>Stock that updates itself</b><p>Every bill lowers stock. Scan a barcode to add an item.</p></div>
@@ -950,7 +950,7 @@
         </div>
       </div>
       <div class="rsec"><div class="rhd"><b>Your shop's website</b><a class="link" href="${esc(siteLink(s, "app"))}" target="_blank" rel="noopener">Open</a></div>
-        <p class="small quiet" style="margin:0 0 8px">Free. Shows your items, prices, stock, hours and location — and lets people WhatsApp or call you.</p>
+        <p class="small quiet" style="margin:0 0 8px">Included in your plan. Shows your items, prices, stock, hours and location — and lets people WhatsApp or call you.</p>
         <div class="linkbox"><input class="field" readonly value="${esc(link)}" id="lnk"><button class="btn auto" id="copy">Copy</button></div>
         <div class="two" style="margin-top:10px"><button class="btn line" id="wash">Share on WhatsApp</button><button class="btn line" id="nsh">Share…</button></div>
       </div>

@@ -247,7 +247,7 @@
       <div class="home-body">
       ${!markets.length && area.shops.length ? `<div class="banner" style="margin:0 var(--gut) 10px"><div class="serif">${area.shops.length} shop${area.shops.length > 1 ? "s" : ""} ${areaNote(area.km)}.</div><p>No market listed here yet — a market appears once a few shops in one spot join.</p></div>` : ""}
       ${!markets.length && !area.shops.length ? `<div class="banner" style="margin:0 var(--gut) 10px"><div class="serif">No shops on My Market near you yet.</div>
-        <p>Shops join with the free My Market Business app. Know a shop nearby? Tell them about it — or try a wider range above.</p>
+        <p>Shops join with the My Market Business app (2 months free). Know a shop nearby? Tell them about it — or try a wider range above.</p>
         <div class="btn-row"><a class="link accent" href="business.html" target="_blank" rel="noopener">My Market Business</a></div></div>` : ""}
       ${!homeCat && !homeMarket && area.shops.length ? `<div class="hero"><b>Find it in your market today</b><span>Live stock and prices from ${area.shops.length} shop${area.shops.length > 1 ? "s" : ""} ${areaNote(area.km)}</span></div>` : ""}
       ${listTitle ? `<div class="card" id="flist"><h3><span>${esc(listTitle)} · ${filtered.length} shops</span><button class="link" id="clearf">Clear</button></h3>
@@ -540,7 +540,7 @@
         <div class="s-in">
           <b>${esc(s.name)}</b>
           <p>${esc(where)}</p>
-          <div class="s-foot-links"><a href="#/">Find more shops near you</a><a href="business.html" target="_blank" rel="noopener">Own a shop? Get a free website</a></div>
+          <div class="s-foot-links"><a href="#/">Find more shops near you</a><a href="business.html" target="_blank" rel="noopener">Own a shop? Get your own website</a></div>
           <small>Website by <a href="#/">My Market</a> · live stock and prices from local shops</small>
         </div>
       </footer>
@@ -900,7 +900,7 @@
       <a class="bizcard" href="business.html" target="_blank" rel="noopener" style="margin:26px var(--gut) 0">
         <span class="bz-ic">${ic("store")}</span>
         <span class="body"><span class="serif" style="font-size:19px;display:block">Own a shop? Get My Market Business</span>
-        <span class="small quiet">A separate free app for billing, stock and khata</span></span>${ic("arrow")}
+        <span class="small quiet">A separate app for billing, stock and khata — 2 months free</span></span>${ic("arrow")}
       </a>
       <div class="block"><div class="eyebrow"><span>Your orders</span>${A.getOrders().length ? '<a class="link" href="#/orders" style="font-size:10.5px">All</a>' : ""}</div>
         ${A.getOrders().length ? `<div class="entries">${A.getOrders().slice(0, 3).map(orderEntry).join("")}</div>` : '<p class="quiet small">Orders and reservations you make will show here.</p>'}</div>
