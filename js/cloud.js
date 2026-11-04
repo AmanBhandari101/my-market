@@ -266,6 +266,44 @@
     return null;
   }
 
+  // ---------- product search by name ----------
+  // 1) the shared My Market catalogue (everything shops have added)
+  const PCOLS = "id,barcode,name,brand,model,cat,size,mrp,features,description,specs,keywords,photo_path,photo_url,photo_credit,created_by,verified";
+  async function searchCatalog(q) {
+    const words = String(q || "").toLowerCase().replace(/[^\p{L}\p{N} ]+/gu, " ").split(/\s+/).filter((w) => w.length > 1).slice(0, 4);
+    if (!words.length) return [];
+    const w = words.sort((a, b) => b.length - a.length)[0]; // the longest word narrows it on the server
+    const { data, error } = await sb.from("catalog_products").select(PCOLS).or(`name.ilike.%${w}%,brand.ilike.%${w}%`).limit(60);
+    if (error) throw error;
+    const hay = (p) => `${p.name} ${p.brand || ""} ${p.model || ""} ${p.size || ""} ${(p.keywords || []).join(" ")}`.toLowerCase();
+    return (data || []).filter((p) => words.every((x) => hay(p).includes(x))).slice(0, 30);
+  }
+  // 2) Open Food Facts / Open Products Facts by name (openly licensed, with photos)
+  async function searchOnline(q) {
+    const term = encodeURIComponent(String(q || "").trim().slice(0, 60)); if (!term) return [];
+    let busy = 0;
+    const one = async (host, label, india) => {
+      try {
+        const r = await fetch(`https://${host}/cgi/search.pl?search_terms=${term}&search_simple=1&action=process&json=1&page_size=12&fields=code,product_name,product_name_en,brands,quantity,image_front_small_url,image_front_url,categories_tags` +
+          (india ? "&tagtype_0=countries&tag_contains_0=contains&tag_0=india" : ""));
+        if (!r.ok) { busy++; return []; }
+        const j = await r.json();
+        return (j.products || []).filter((p) => (p.product_name_en || p.product_name) && /^[0-9]{6,14}$/.test(p.code || "")).map((p) => {
+          const tags = (p.categories_tags || []).join(" ");
+          return { code: p.code, name: (p.product_name_en || p.product_name).trim().slice(0, 120), brand: (p.brands || "").split(",")[0].trim(), size: p.quantity || "",
+            img: p.image_front_small_url || p.image_front_url || null, photo: p.image_front_url || p.image_front_small_url || null, label,
+            cat: /beauty|cosmetic|hygiene|soap|shampoo|medic|pharma/.test(tags) ? "pharmacy" : /book|paper|station/.test(tags) ? "stationery" : host.includes("food") ? "grocery" : null };
+        });
+      } catch { busy++; return []; }
+    };
+    // products sold in India first; the whole world only if India has too few
+    let [a, b] = await Promise.all([one("world.openfoodfacts.org", "Open Food Facts", true), one("world.openproductsfacts.org", "Open Products Facts", true)]);
+    if (a.length + b.length < 4) { const [c, d] = await Promise.all([one("world.openfoodfacts.org", "Open Food Facts"), one("world.openproductsfacts.org", "Open Products Facts")]); a = [...a, ...c]; b = [...b, ...d]; }
+    const seen = new Set(), list = [...a, ...b].filter((p) => !seen.has(p.code) && seen.add(p.code)).slice(0, 20);
+    if (!list.length && busy) throw new Error("busy");
+    return list;
+  }
+
   // ---------- bill PDFs for customers ----------
   // Stored as <shop>/<bill>-<random>.pdf (unguessable); the customer gets a link
   // to bill.html, which opens it.
@@ -391,7 +429,7 @@
   async function myNumber() { const { data } = await sb.auth.getSession(); const m = (data.session?.user?.email || "").match(/^91(\d{10})@/); return m ? m[1] : ""; }
   async function deleteShop(shopId) { const { error } = await sb.rpc("delete_my_shop", { p_shop: shopId }); if (error) throw new Error(friendly(error)); }
 
-  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, myPlan, claimPayment, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
+  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, searchCatalog, searchOnline, myPlan, claimPayment, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
     pending: () => Q.get().length, failedOps: () => Q.failed() };
 
   // start-up

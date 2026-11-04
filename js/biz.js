@@ -510,7 +510,8 @@
           <p class="quiet small" style="line-height:1.5">No typing — pick from the list. You can add prices later.</p></div>` : ""}
         ${setup ? `<div class="block"><div class="pick">${cat.map((c) => `<button class="pickc ${listed.has(A.slug(c.name)) ? "on" : ""}" data-pick="${esc(c.name)}">
             <span class="pimg sm" style="${U.catVars(s.cat)}">${c.img ? `<img src="${c.img}" alt="">` : U.art(s.cat, 36)}</span><span>${esc(c.name)}<em>${esc(c.brand)}</em></span></button>`).join("")}</div>
-          <div class="pad" style="margin:24px 0 40px;padding:0"><a class="btn" href="#/biz">Done — start billing</a></div></div>` : `
+          <div class="pad" style="margin:18px 0 0;padding:0"><button class="btn line" id="allp">${ic("search")} Search all products</button></div>
+          <div class="pad" style="margin:12px 0 40px;padding:0"><a class="btn" href="#/biz">Done — start billing</a></div></div>` : `
         <div class="addstock">
           <a class="as-main" href="#/biz/stockin">${ic("truck")}<b>Stock arrived</b><span>Add quantities from a supplier</span></a>
           <button class="as-main" id="newit">${ic("camera")}<b>New item</b><span>Photo, name, price, quantity</span></button>
@@ -522,7 +523,7 @@
           <button data-f="out" class="${inv.out.length ? "hot" : ""}"><b>${inv.out.length}</b><span>out of stock</span></button>
         </div>
         <div class="pad" style="margin-top:12px;display:flex;gap:10px">
-          <button class="btn line auto" id="addcat" style="flex:1;height:40px;font-size:13.5px">+ Pick from list</button>
+          <button class="btn line auto" id="addcat" style="flex:1;height:40px;font-size:13.5px">${ic("search")} Find & add products</button>
         </div>
         <div class="block">
           <div class="words" id="filt">${Object.entries(FILTERS).map(([k, l]) => `<button class="word ${filter === k ? "on" : ""}" data-f="${k}">${l}</button>`).join("")}</div>
@@ -554,35 +555,10 @@
       $$("[data-sell]").forEach((b) => b.onclick = () => { A.moveStock(s.id, b.dataset.sell, { delta: -1, reason: "sold" }); draw(); });
       $$("[data-recv]").forEach((b) => b.onclick = () => { A.moveStock(s.id, b.dataset.recv, { delta: 1, reason: "received" }); draw(); });
       $$("[data-open]").forEach((b) => b.onclick = () => itemSheet(s.items.find((x) => x.id === b.dataset.open)));
-      $("#addcat") && ($("#addcat").onclick = () => U.go("#/biz/items?setup=1"));
-      $("#scan") && ($("#scan").onclick = scanShelf);
+      $("#addcat") && ($("#addcat").onclick = () => addItemsSheet(s, "", draw));
+      $("#allp") && ($("#allp").onclick = () => addItemsSheet(s, "", draw));
     };
-    // Shelf scan: SIMULATED. Live version sends the photo to a vision model that
-    // reads brands/labels and matches them to the master catalogue.
-    function scanShelf() {
-      const inp = document.createElement("input");
-      inp.type = "file"; inp.accept = "image/*"; inp.capture = "environment";
-      inp.onchange = () => {
-        if (!inp.files.length) return;
-        U.openSheet(`<div class="eyebrow">Shelf scan</div><div class="title">Reading your shelf<span class="typing"></span></div><p class="quiet small">Looking for brands and labels…</p>`);
-        setTimeout(() => {
-          const listed = new Set(s.items.map((i) => A.slug(i.name)));
-          const found = A.catalogFor(s.cat).filter((c) => !listed.has(A.slug(c.name))).sort(() => Math.random() - 0.5).slice(0, 4);
-          U.openSheet(`<div class="eyebrow">Shelf scan · demo</div><div class="title">Found ${found.length} items</div>
-            <p class="quiet small">Untick anything that's wrong.</p>
-            <div class="entries">${found.map((c, i) => `<label class="entry"><input type="checkbox" checked data-f="${i}" style="accent-color:var(--teal);width:20px;height:20px"><div class="body"><div class="name">${esc(c.name)}</div><div class="note">${esc(c.brand)}</div></div></label>`).join("")}</div>
-            <div class="opts"><button class="btn" id="addf">Add to my shop</button></div>`, (el) => {
-            $("#addf", el).onclick = () => {
-              $$("[data-f]", el).forEach((cb) => { if (cb.checked) A.addItem(s.id, found[+cb.dataset.f].tmpl, s.cat); });
-              U.closeSheet(); U.toast("Added — marked in stock"); draw();
-            };
-          });
-        }, 1800);
-      };
-      inp.click();
-    }
     draw();
-    if (params.get("scan") === "1") setTimeout(() => $("#scan")?.click(), 100);
   }
 
   // ---------- scanned a code this shop doesn't know yet ----------
@@ -605,6 +581,77 @@
       $("#lnew", el).onclick = () => { U.closeSheet(); newItemSheet(s, (it) => { if (it) { A.setItem(s.id, it.id, { code }); then && then(it); } }); };
     };
     U.openSheet("", draw);
+  }
+
+  // ---------- find & add products: built-in list + shared catalogue + online ----------
+  function addItemsSheet(s, q0 = "", after) {
+    let q = q0, shared = [], online = null, offBusy = false, timer = null, seq = 0;
+    const added = new Set();
+    const have = (name) => s.items.some((i) => i.name.toLowerCase() === String(name).toLowerCase()) || added.has(String(name).toLowerCase());
+    const photoUrl = (pp) => window.MM_CLOUD?.photoUrl(pp);
+    const row = (key, img, name, sub, cat) => `<button class="entry pick-row ${have(name) ? "on" : ""}" data-k="${esc(key)}" style="width:100%;text-align:left">
+        <span class="thumb" style="${U.catVars(cat || s.cat)}">${img ? `<img src="${esc(img)}" alt="" loading="lazy">` : U.art(cat || s.cat, 28)}</span>
+        <div class="body"><div class="name">${esc(name)}</div><div class="note">${esc(sub)}</div></div>
+        <span class="pick-add">${have(name) ? ic("check") : ic("plus")}</span></button>`;
+    const draw = (el) => {
+      const local = q ? A.catalogSearch(q, s.cat) : A.catalogFor(s.cat).map((x) => ({ ...x, cat: s.cat }));
+      const sharedNew = shared.filter((p) => !local.some((l) => l.name.toLowerCase() === p.name.toLowerCase()));
+      const box = $("#pres", el);
+      box.innerHTML = `
+        ${local.length ? `<div class="eyebrow" style="margin-top:6px">${q ? "From the My Market list" : "Popular in " + esc(C[s.cat].name)}</div>${local.map((x, i) => row("l" + i, x.img, x.name, `${x.brand !== "Generic" ? x.brand + " · " : ""}${C[x.cat]?.name || ""}`, x.cat)).join("")}` : ""}
+        ${sharedNew.length ? `<div class="eyebrow" style="margin-top:14px">Added by shops on My Market</div>${sharedNew.map((p, i) => row("s" + i, p.photo_path ? photoUrl(p.photo_path) : p.photo_url, p.name, [p.brand, p.size, C[p.cat]?.name].filter(Boolean).join(" · "), p.cat)).join("")}` : ""}
+        ${online && online.length ? `<div class="eyebrow" style="margin-top:14px">Online product databases</div>${online.map((p, i) => row("o" + i, p.img, p.name, [p.brand, p.size, p.label].filter(Boolean).join(" · "), p.cat || s.cat)).join("")}` : ""}
+        ${q ? `<div class="pick-more">
+          ${online == null ? `<button class="btn line" id="ponl">${ic("search")} Search online for “${esc(q)}”</button>` : online.length ? "" : offBusy ? `<p class="quiet small" style="margin:0 0 8px">Online search is busy — try again in a minute.</p><button class="btn line" id="ponl">Try again</button>` : `<p class="quiet small" style="margin:0 0 8px">Nothing online for “${esc(q)}”.</p>`}
+          <button class="btn" id="pnew">+ Add “${esc(q)}” as a new item</button></div>` : `<p class="faint tiny" style="margin:12px 0 0">Type to search every product — or scan a barcode in New item.</p>`}`;
+      const L = local, S = sharedNew, O = online || [];
+      $$("[data-k]", box).forEach((x) => x.onclick = async () => {
+        const k = x.dataset.k, i = +k.slice(1);
+        if (x.classList.contains("on")) return;
+        x.classList.add("on"); x.querySelector(".pick-add").innerHTML = ic("check");
+        try {
+          if (k[0] === "l") { const it = L[i]; A.addItem(s.id, it.tmpl, it.cat); added.add(it.name.toLowerCase()); }
+          else if (k[0] === "s") {
+            const p = S[i];
+            A.addOwnItem(s.id, { name: p.name, brand: p.brand || "", cat: p.cat || s.cat, price: null, details: A.productDetails(p, photoUrl, s.id) });
+            added.add(p.name.toLowerCase());
+          } else {
+            const p = O[i];
+            // the same barcode may already be in the shared catalogue: link to it
+            const hit = window.MM_CLOUD ? await window.MM_CLOUD.lookupBarcode(p.code).catch(() => null) : null;
+            const det = hit && hit.source === "catalog" ? A.productDetails(hit.product, photoUrl, s.id)
+              : { barcode: p.code, size: p.size, productPhoto: p.photo, photoCredit: p.photo ? `Photo: ${p.label} contributors (CC BY-SA)` : "", source: "openfoodfacts" };
+            A.addOwnItem(s.id, { name: p.name, brand: p.brand || "", cat: p.cat || s.cat, price: null, details: det });
+            added.add(p.name.toLowerCase());
+          }
+          U.toast("Added — set its price in Stock (or when you first bill it)");
+        } catch (e) { x.classList.remove("on"); U.toast(e.message || "Couldn't add"); }
+      });
+      $("#ponl", box) && ($("#ponl", box).onclick = async (ev) => {
+        if (!window.MM_CLOUD) return U.toast("Needs the internet");
+        ev.currentTarget.disabled = true; ev.currentTarget.textContent = "Searching online…";
+        try { online = await window.MM_CLOUD.searchOnline(q); offBusy = false; } catch { online = []; offBusy = true; }
+        draw(el);
+      });
+      $("#pnew", box) && ($("#pnew", box).onclick = () => { U.closeSheet(); newItemSheet(s, (it) => { after && after(it); }, q); });
+    };
+    U.openSheet(`<div class="eyebrow">Stock</div><div class="title">Find & add products</div>
+      <div class="inshop" style="margin-top:10px">${ic("search")}<input id="pq" placeholder="e.g. hammer, LED bulb 9W, atta" autocomplete="off" value="${esc(q)}"></div>
+      <div id="pres" class="pick-list"></div>
+      <div class="opts" style="margin-top:14px"><button class="link" id="pdone">Done</button></div>`, (el) => {
+      el.classList.add("pick-sheet");
+      draw(el);
+      const run = async () => {
+        const my = ++seq; shared = []; online = null;
+        if (q && window.MM_CLOUD && window.MM_CLOUD.searchCatalog) { try { const r = await window.MM_CLOUD.searchCatalog(q); if (my === seq) shared = r; } catch {} }
+        if (my === seq) draw(el);
+      };
+      $("#pq", el).oninput = (e) => { q = e.target.value.trim(); clearTimeout(timer); draw(el); timer = setTimeout(run, 350); };
+      $("#pdone", el).onclick = () => { U.closeSheet(); after && after(); };
+      if (q) run();
+      setTimeout(() => $("#pq", el)?.focus(), 50);
+    });
+    U.addCleanup(() => $("#sheet")?.classList.remove("pick-sheet"));
   }
 
   // ---------- billing: tap items, set quantity, the app does the maths ----------

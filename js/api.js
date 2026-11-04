@@ -767,8 +767,9 @@ window.MM_API = (function () {
     sh.items.push(it);
     q(shopId, { op: "insert", table: "items", row: itemRow(shopId, it) });
     const photoOp = photo ? { op: "photo", shopId, itemId: it.id, dataUrl: photo } : null;
-    if (details && Object.values(details).some((v) => v && (!Array.isArray(v) || v.length) && (typeof v !== "object" || Array.isArray(v) || Object.keys(v).length)))
-      saveDetails(shopId, it.id, details);
+    // every new item also goes into the shared catalogue, so the next shop finds it by name
+    if (sh.cloud || (details && Object.values(details).some((v) => v && (!Array.isArray(v) || v.length) && (typeof v !== "object" || Array.isArray(v) || Object.keys(v).length))))
+      saveDetails(shopId, it.id, details || {});
     if (photoOp) q(shopId, { ...photoOp, productId: it.productMine ? it.productId : null }); // after the product exists
     if (!sh.cats.includes(it.cat)) sh.cats.push(it.cat);
     if (qty != null) moveStock(shopId, it.id, { set: qty, reason: "received" });
@@ -791,6 +792,16 @@ window.MM_API = (function () {
     return p;
   }
   const purchasesFor = (shopId) => store.get("purchases", []).filter((p) => p.shopId === shopId);
+  function catalogSearch(q, firstCat) {
+    const words = String(q || "").toLowerCase().split(/\s+/).filter((w) => w.length > 1);
+    if (!words.length) return [];
+    const out = [];
+    for (const [cat, list] of Object.entries(D.CATALOG)) for (const [n, b, p] of list) {
+      const hay = `${n} ${b} ${D.CATEGORIES[cat]?.name || ""}`.toLowerCase();
+      if (words.every((w) => hay.includes(w))) out.push({ tmpl: [n, b, p], name: n, brand: b, cat, img: PHOTOS.has(slug(n)) ? `img/items/${slug(n)}.jpg` : null });
+    }
+    return out.sort((x, y) => (y.cat === firstCat) - (x.cat === firstCat)).slice(0, 40);
+  }
   const catalogFor = (cat) => D.CATALOG[cat].map(([n, b, p]) => ({ tmpl: [n, b, p], name: n, brand: b, price: p, img: PHOTOS.has(slug(n)) ? `img/items/${slug(n)}.jpg` : null }));
 
   // "People searched for X near you and nobody had it" — the hook that tells a shop what to stock.
@@ -1096,7 +1107,7 @@ window.MM_API = (function () {
     RANGES, getRange, setRange, trip, fmtTrip, nearArea, nearSearch, marketFor,
     REASONS, moveStock, stockLog, inventory, lowAt,
     billTotals, saveBill, cancelBill, billsFor, getBill, daySummary,
-    itemByCode, billToken, addDetails, photoSent, FULL, billNosLeft, addBillNos, registerShop, login, updateShop, normPhone, weakPin, addOwnItem, savePurchase, purchasesFor, hydrateShop, mergePublic, uuid, shopHas, saveDetails, productDetails, addPhoto, setBillLink, setShopPhoto, removeGalleryPhoto, getShop, getMarket, isOpen, itemStatus,
+    catalogSearch, itemByCode, billToken, addDetails, photoSent, FULL, billNosLeft, addBillNos, registerShop, login, updateShop, normPhone, weakPin, addOwnItem, savePurchase, purchasesFor, hydrateShop, mergePublic, uuid, shopHas, saveDetails, productDetails, addPhoto, setBillLink, setShopPhoto, removeGalleryPhoto, getShop, getMarket, isOpen, itemStatus,
     search, ask, getAsk, replyAsk, pendingAsks, feedback, logSearch, addView,
     ownerShopId, ownerShop, isOwnerShop, claimShop, releaseShop, addShop, persistAddedShop, setItem, addItem, catalogFor, missedSales,
     getBag, addToBag, setQty, bagCount, bagLines, STEPS, placeOrder, getOrders, getOrder, advanceOrder, cancelOrder, ordersFor,

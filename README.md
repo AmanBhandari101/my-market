@@ -17,7 +17,7 @@ Three tabs, built so a shopkeeper can bill as fast as a calculator.
 | Tab | What it does |
 |---|---|
 | **Bill** | Tap or **scan** items (any barcode or QR — scan item after item, the camera stays open) to add them to the **cart** (top-bar cart icon shows the count). The cart is saved on the phone, so it survives moving between tabs or closing the app. **Cart page**: quantity −/+, remove, change price, discount, cash / UPI / card / khata, cash received and change, customer WhatsApp number → **Generate bill**. |
-| **Stock** | Items with stock count, low / out of stock, *Stock arrived* (purchases from suppliers — tap or scan each piece), add items by **barcode** (shared catalogue → Open Food Facts → Open Products Facts) with photo and details. |
+| **Stock** | Items with stock count, low / out of stock, *Stock arrived* (purchases from suppliers — tap or scan each piece), add items by **barcode** (shared catalogue → Open Food Facts → Open Products Facts) with photo and details, or **Find & add products**: one search over ~600 common Indian shop products (Hindi names too), everything other shops have added, and — on request — products sold in India from Open Food / Products Facts. Every new item joins the shared catalogue. |
 | **Reports** | Sales today / week / month with profit, daily chart, running low, not selling, what customers nearby searched for, all bills. |
 
 Also in the shop app:
@@ -75,6 +75,7 @@ GPS needs `localhost` or `https`. After changing JS/CSS, bump the `?v=` numbers 
 
 - `js/config.js` — Supabase URL + publishable key
 - `js/data.js` — categories and the starter product catalogue
+- `js/catalog-more.js` — ~450 more common products for Find & add
 - `js/api.js` — data layer on the phone: shops, items, stock ledger, cart/bills, bill numbers, search, storage safety
 - `js/cloud.js` — server sync: outbox, login, download a shop, nearby shops for customers, bill PDFs and their clean-up
 - `js/app.js` — shared UI, router, customer screens, shop website page
