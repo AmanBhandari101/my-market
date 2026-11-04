@@ -505,10 +505,20 @@ window.MM_API = (function () {
     return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
   }
   const accountFor = (phone) => store.get("accounts", []).find((a) => a.phone === normPhone(phone));
-  async function registerShop(f, loc, addr, { phone, pin }) {
-    const ph = normPhone(phone);
+  // PINs that are too easy to guess
+  function weakPin(pin, phone = "") {
+    if (!/^\d{6}$/.test(pin)) return "PIN must be exactly 6 digits";
+    if (/^(\d)\1{5}$/.test(pin) || "0123456789012".includes(pin) || "9876543210987".includes(pin) || /^(\d\d)\1\1$/.test(pin) || /^(\d{3})\1$/.test(pin))
+      return "That PIN is too easy to guess — choose 6 mixed digits";
+    if (phone && normPhone(phone).endsWith(pin)) return "Don't use the end of your mobile number as your PIN";
+    return "";
+  }
+  async function registerShop(f, loc, addr, { phone, pin, backup = "" }) {
+    const ph = normPhone(phone), bk = normPhone(backup);
     if (ph.length !== 10) throw new Error("Enter a 10-digit mobile number");
-    if (!/^\d{6}$/.test(pin)) throw new Error("PIN must be 6 digits");
+    const weak = weakPin(pin, ph); if (weak) throw new Error(weak);
+    if (backup && bk.length !== 10) throw new Error("Backup number must be 10 digits");
+    if (bk && bk === ph) throw new Error("The backup number must be a different number");
     if (cloudOn()) {
       // server account first: if the number is taken, nothing is created here
       const uid = await window.MM_CLOUD.signUp(ph, pin);
@@ -518,6 +528,9 @@ window.MM_API = (function () {
       q(shop.id, { op: "insert", table: "shops", row: shopRow(shop, uid) });
       await window.MM_CLOUD.flush();
       store.set("lastPull", Date.now());
+      // the backup number can open the same shop if this phone or SIM is lost
+      if (bk) { try { await window.MM_CLOUD.addLoginNumber(shop.id, bk, pin); shop.backupAdded = bk; }
+                catch (x) { shop.backupError = x.message; } }
       return shop;
     }
     if (accountFor(ph)) throw new Error("This number already has a shop — log in instead");
@@ -948,7 +961,7 @@ window.MM_API = (function () {
     RANGES, getRange, setRange, trip, fmtTrip, nearArea, nearSearch, marketFor,
     REASONS, moveStock, stockLog, inventory, lowAt,
     billTotals, saveBill, cancelBill, billsFor, getBill, daySummary,
-    registerShop, login, updateShop, normPhone, addOwnItem, savePurchase, purchasesFor, hydrateShop, mergePublic, uuid, shopHas, saveDetails, productDetails, addPhoto, setBillLink, setShopPhoto, removeGalleryPhoto, getShop, getMarket, isOpen, itemStatus,
+    registerShop, login, updateShop, normPhone, weakPin, addOwnItem, savePurchase, purchasesFor, hydrateShop, mergePublic, uuid, shopHas, saveDetails, productDetails, addPhoto, setBillLink, setShopPhoto, removeGalleryPhoto, getShop, getMarket, isOpen, itemStatus,
     search, ask, getAsk, replyAsk, pendingAsks, feedback, logSearch, addView,
     ownerShopId, ownerShop, isOwnerShop, claimShop, releaseShop, addShop, persistAddedShop, setItem, addItem, catalogFor, missedSales,
     getBag, addToBag, setQty, bagCount, bagLines, STEPS, placeOrder, getOrders, getOrder, advanceOrder, cancelOrder, ordersFor,

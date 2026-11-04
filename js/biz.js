@@ -14,6 +14,7 @@
     if (sub === "stockin") return stockInView();
     if (sub === "reports") return reportsView(params);
     if (sub === "site") return siteView(params);
+    if (sub === "security") return securityView();
     if (sub === "inbox") return dashView();
     if (sub === "bill" && parts[2]) return receiptView(parts[2]);
     if (sub === "bills") return billsView();
@@ -37,6 +38,7 @@
           <label>6-digit PIN<input class="field" name="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="6" placeholder="••••••" required></label>
           <p class="small" id="lerr" style="color:var(--out);margin:0;min-height:1em"></p>
           <button class="btn" type="submit">Log in</button>
+          <button class="link" type="button" id="lhelp" style="justify-self:center">Forgot PIN or lost your phone?</button>
         </form></div>
       <div class="pad" style="margin:26px 0 14px;display:grid;gap:10px;justify-items:center">
         <span class="quiet small">New to My Market?</span>
@@ -61,6 +63,12 @@
       U.toast("Welcome back"); U.go("#/biz");
     };
     $$("#lf input").forEach((i) => i.addEventListener("input", () => { $("#lerr").textContent = ""; }));
+    $("#lhelp").onclick = () => U.openSheet(`<div class="eyebrow">Can't get in?</div><div class="title">Getting back into your shop</div>
+      <div class="help">
+        <div><b>Lost your phone or SIM?</b><p>Your shop is safe on the server. On any phone, log in with your <b>main number</b> or your <b>backup number</b> and your PIN. Then open ☰ → <b>Login & security</b> → <b>Log out all other devices</b>, so the lost phone can't open your shop.</p></div>
+        <div><b>Forgot your PIN?</b><p>Log in with your <b>backup number</b> (it has the same PIN unless you changed it). Then ☰ → <b>Login & security</b> → change your PIN.</p></div>
+        <div><b>Neither works?</b><p>Contact My Market support with your shop name and GSTIN or shop documents — we'll check it's your shop and help you back in. (A reset code by WhatsApp/SMS is coming.)</p></div>
+      </div>`);
   }
 
   function newShopView() {
@@ -75,6 +83,7 @@
         <label>Mobile number <span class="faint tiny">— your login, and the shop's WhatsApp for bills</span><input class="field" name="phone" inputmode="tel" autocomplete="username" required placeholder="98765 43210"></label>
         <div class="two"><label>Create a 6-digit PIN<input class="field" name="pin" type="password" inputmode="numeric" autocomplete="new-password" maxlength="6" required placeholder="••••••"></label>
           <label>Repeat PIN<input class="field" name="pin2" type="password" inputmode="numeric" autocomplete="new-password" maxlength="6" required></label></div>
+        <label>Backup mobile number <span class="faint tiny">— recommended: a family member or second SIM. If your phone is lost, log in with this number and the same PIN.</span><input class="field" name="backup" inputmode="tel" placeholder="98765 43211"></label>
         <label>What do you sell?</label>
         <div class="words" id="cats">${Object.entries(C).map(([k, c]) => `<button type="button" class="word ${k === cat ? "on" : ""}" data-cat="${k}" style="${U.catVars(k)}">${esc(c.name)}</button>`).join("")}</div>
         <label>Market or area<input class="field" name="area" placeholder="e.g. Beadonpura Bazaar"></label>
@@ -121,17 +130,19 @@
       const err = (m) => { $("#ferr").textContent = m; e.submitter && (e.submitter.disabled = false, e.submitter.textContent = "Create my shop"); };
       if (!f.name.trim()) return err("Enter your shop's name");
       if (A.normPhone(f.phone).length !== 10) return err("Enter a 10-digit mobile number");
-      if (!/^\d{6}$/.test(f.pin)) return err("PIN must be exactly 6 digits");
+      const weak = A.weakPin(f.pin, f.phone); if (weak) return err(weak);
       if (f.pin !== f.pin2) return err("The two PINs don't match");
+      if (f.backup.trim() && A.normPhone(f.backup).length !== 10) return err("Backup number must be 10 digits");
+      if (f.backup.trim() && A.normPhone(f.backup) === A.normPhone(f.phone)) return err("The backup number must be a different number");
       const p = pin.getLatLng();
       e.submitter && (e.submitter.disabled = true, e.submitter.textContent = "Creating your shop…");
       // pincode + locality for the address; give up after 4 s (works offline too)
       const addr = await Promise.race([U.reverseName(p.lat, p.lng), new Promise((r) => setTimeout(() => r({}), 4000))]);
       let shop;
       try {
-        shop = await A.registerShop({ ...f, name: f.name.trim(), owner: f.owner.trim(), promo: f.promo.trim(), gst: f.gst.trim().toUpperCase(), cat }, { lat: p.lat, lng: p.lng }, addr, { phone: f.phone, pin: f.pin });
+        shop = await A.registerShop({ ...f, name: f.name.trim(), owner: f.owner.trim(), promo: f.promo.trim(), gst: f.gst.trim().toUpperCase(), cat }, { lat: p.lat, lng: p.lng }, addr, { phone: f.phone, pin: f.pin, backup: f.backup.trim() });
       } catch (x) { return err(x.message); }
-      U.toast(shop.needsCheck ? "Shop registered — we'll double-check the pin" : "Shop registered — you're logged in");
+      U.toast(shop.backupError ? `Shop registered — but the backup number wasn't added: ${shop.backupError}. Add it in ☰ → Login & security.` : shop.backupAdded ? "Shop registered — backup number added" : "Shop registered — you're logged in");
       U.go("#/biz/items?setup=1");
     };
   }
@@ -164,6 +175,7 @@
         <a class="entry" href="#/biz/inbox"><div class="body"><div class="name">Orders and questions</div><div class="note">${waiting(s)} waiting</div></div>${ic("arrow")}</a>
         ${s.cloud ? `<button class="entry" id="m-sync"><div class="body"><div class="name">Sync now</div><div class="note">Send this phone's changes and get your other phones' — ${window.MM_CLOUD.pending()} waiting</div></div>${ic("arrow")}</button>` : ""}
         <a class="entry" href="#/biz/site"><div class="body"><div class="name">My website</div><div class="note">Your shop's page: share it, QR poster, add to Google Maps</div></div>${ic("arrow")}</a>
+        ${s.cloud ? `<a class="entry" href="#/biz/security"><div class="body"><div class="name">Login & security</div><div class="note">Backup number, change PIN, log out other phones</div></div>${ic("arrow")}</a>` : ""}
         <button class="entry" id="m-bs"><div class="body"><div class="name">Bill settings</div><div class="note">Advert, phone and GSTIN on your bills</div></div>${ic("arrow")}</button>
         <a class="entry" href="index.html#/shop/${s.id}" target="_blank" rel="noopener"><div class="body"><div class="name">See my shop as customers do</div><div class="note">Opens the My Market customer app</div></div>${ic("arrow")}</a>
         <a class="entry" href="#/biz/insights"><div class="body"><div class="name">What people searched for</div><div class="note">Items nobody near you had</div></div>${ic("arrow")}</a>
@@ -526,6 +538,87 @@
   }
 
   const siteLink = (s, src) => (window.MM_CLOUD ? window.MM_CLOUD.shopLink(s.id, src) : "");
+
+  // ---------- Login & security ----------
+  function securityView() {
+    const s = A.ownerShop(), C2 = window.MM_CLOUD;
+    const mask = (p) => (p && p.length === 10 ? `+91 ${p.slice(0, 2)}••• ••${p.slice(7)}` : "—");
+    U.app.innerHTML = `
+      ${bizTop("Login & security")}
+      <div class="rsec"><div class="rhd"><b>Login numbers</b></div>
+        <p class="small quiet" style="margin:0 0 8px">Any of these numbers can open your shop with its PIN. Keep a backup number so a lost phone or SIM never locks you out.</p>
+        <div class="entries" id="nums"><p class="quiet small">Loading…</p></div>
+      </div>
+      <div class="rsec" id="addbox"><div class="rhd"><b>Add a backup number</b></div>
+        <div class="form" style="margin-top:0">
+          <label>Mobile number<input class="field" id="bnum" inputmode="tel" placeholder="98765 43211"></label>
+          <label>PIN for that number <span class="faint tiny">— use your same PIN so it's easy to remember</span><input class="field" id="bpin" type="password" inputmode="numeric" maxlength="6" placeholder="••••••"></label>
+          <p class="small" id="berr" style="color:var(--out);margin:0;min-height:1em"></p>
+          <button class="btn" id="badd" type="button">Add backup number</button></div>
+      </div>
+      <div class="rsec"><div class="rhd"><b>Change my PIN</b></div>
+        <div class="form" style="margin-top:0">
+          <label>Current PIN<input class="field" id="opin" type="password" inputmode="numeric" maxlength="6"></label>
+          <div class="two"><label>New PIN<input class="field" id="npin" type="password" inputmode="numeric" maxlength="6"></label>
+            <label>Repeat new PIN<input class="field" id="npin2" type="password" inputmode="numeric" maxlength="6"></label></div>
+          <p class="small" id="perr" style="color:var(--out);margin:0;min-height:1em"></p>
+          <button class="btn line" id="pchg" type="button">Change PIN</button></div>
+      </div>
+      <div class="rsec"><div class="rhd"><b>Lost or old phone?</b></div>
+        <p class="small quiet" style="margin:0 0 10px">Logs your shop out of every other phone. This phone stays logged in.</p>
+        <button class="btn line" id="lout">Log out all other devices</button>
+      </div>
+      <div class="rsec danger"><div class="rhd"><b>Delete my shop</b></div>
+        <p class="small quiet" style="margin:0 0 10px">Removes your shop, items, stock, bills and website for good. This can't be undone.</p>
+        <button class="btn line" id="del" style="color:var(--out);border-color:#e9b8b0">Delete my shop…</button>
+      </div>
+      <div style="height:30px"></div>`;
+    bindTop();
+    if (!C2 || !s.cloud) { $("#nums").innerHTML = '<p class="quiet small">Log in with your number and PIN to manage this.</p>'; return; }
+    const loadNums = () => C2.loginNumbers(s.id).then((list) => {
+      $("#nums").innerHTML = list.map((m, i) => `<div class="entry"><div class="body"><div class="name">${mask(m.phone)}</div>
+        <div class="note">${i === 0 ? "Main number" : "Backup number"}${m.me ? " · this phone" : ""}</div></div>
+        ${m.me ? '<span class="tag ok">You</span>' : `<button class="link accent" data-rm="${m.user_id}">Remove</button>`}</div>`).join("");
+      $("#addbox").classList.toggle("hidden", list.length >= 4);
+      $$("[data-rm]").forEach((b) => b.onclick = async () => {
+        if (!confirm("Remove this number? It won't be able to open your shop any more.")) return;
+        try { await C2.removeLoginNumber(s.id, b.dataset.rm); U.toast("Number removed"); loadNums(); } catch (x) { U.toast(x.message); }
+      });
+    }).catch((x) => { $("#nums").innerHTML = `<p class="quiet small">${esc(x.message)}</p>`; });
+    loadNums();
+    $("#badd").onclick = async () => {
+      const ph = A.normPhone($("#bnum").value), pin = $("#bpin").value, err = (m) => ($("#berr").textContent = m);
+      if (ph.length !== 10) return err("Enter a 10-digit mobile number");
+      const weak = A.weakPin(pin, ph); if (weak) return err(weak);
+      err(""); $("#badd").disabled = true; $("#badd").textContent = "Adding…";
+      try { await C2.addLoginNumber(s.id, ph, pin); U.toast("Backup number added"); $("#bnum").value = ""; $("#bpin").value = ""; loadNums(); }
+      catch (x) { err(x.message); }
+      $("#badd").disabled = false; $("#badd").textContent = "Add backup number";
+    };
+    $("#pchg").onclick = async () => {
+      const o = $("#opin").value, n = $("#npin").value, err = (m) => ($("#perr").textContent = m);
+      const me = await C2.myNumber();
+      const weak = A.weakPin(n, me); if (weak) return err(weak);
+      if (n !== $("#npin2").value) return err("The new PINs don't match");
+      if (!(await C2.checkPin(me, o))) return err("Current PIN is wrong");
+      try { await C2.changePin(n); err(""); U.toast("PIN changed for this number"); ["#opin", "#npin", "#npin2"].forEach((k) => ($(k).value = "")); }
+      catch (x) { err(x.message); }
+    };
+    $("#lout").onclick = async () => {
+      if (!confirm("Log out your shop on every other phone?")) return;
+      try { await C2.logoutOthers(); U.toast("Other phones are logged out"); } catch (x) { U.toast(x.message); }
+    };
+    $("#del").onclick = () => U.openSheet(`<div class="eyebrow" style="color:var(--out)">Delete for good</div><div class="title">Delete ${esc(s.name)}?</div>
+      <p class="small quiet">Everything is removed: items, stock, bills, reports and your website. Type the shop name to confirm.</p>
+      <div class="form"><input class="field" id="dname" placeholder="${esc(s.name)}"><button class="btn" id="dgo" style="background:#b0392b;border-color:#b0392b">Delete my shop</button></div>`, (el) => {
+      $("#dgo", el).onclick = async () => {
+        if ($("#dname", el).value.trim().toLowerCase() !== s.name.trim().toLowerCase()) return U.toast("Type the shop name exactly");
+        try { await C2.deleteShop(s.id); } catch (x) { return U.toast(x.message); }
+        A.releaseShop(); try { Object.keys(localStorage).filter((k) => k.startsWith("mm.") && k !== "mm.loc").forEach((k) => localStorage.removeItem(k)); } catch {}
+        U.closeSheet(); location.hash = "#/biz"; location.reload();
+      };
+    });
+  }
 
   // ---------- My website: the shop's page, sharing, QR poster, Google Maps ----------
   let qrLoad = null;

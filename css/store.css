@@ -538,3 +538,8 @@ body.site-mode.tabs-on #app { padding-bottom: 0; }
 .ph-gal .add { display: grid; place-items: center; border: 1.5px dashed #a6a6a6; cursor: pointer; color: var(--ink-2); }
 .ph-gal .add .i { width: 28px; height: 28px; }
 .s-cta .solo { grid-column: 1 / -1; }
+
+.help { display: grid; gap: 14px; margin-top: 8px; }
+.help b { font-size: 15px; }
+.help p { margin: 4px 0 0; font-size: 14px; line-height: 1.5; color: var(--ink-2); }
+.rsec.danger { border-color: #f0c9c2; }

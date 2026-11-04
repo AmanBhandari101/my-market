@@ -120,8 +120,10 @@
   async function pullShop() {
     const uid = await userId(); if (!uid) throw new Error("Not logged in");
     const one = async (q) => { const r = await q; if (r.error) throw new Error(friendly(r.error)); return r.data; };
-    const shop = await one(sb.from("shops").select("*").eq("owner_id", uid).maybeSingle());
-    if (!shop) throw new Error("No shop is registered with this number");
+    const mem = await one(sb.from("shop_members").select("shop_id").eq("user_id", uid).limit(1));
+    const shop = mem.length ? await one(sb.from("shops").select("*").eq("id", mem[0].shop_id).maybeSingle())
+      : await one(sb.from("shops").select("*").eq("owner_id", uid).maybeSingle()); // before members existed
+    if (!shop) throw new Error("No shop is linked to this number");
     const since = new Date(Date.now() - 120 * 86400000).toISOString();
     const [items, bills, purchases, markets] = await Promise.all([
       one(sb.from("items").select("*").eq("shop_id", shop.id)),
@@ -219,7 +221,41 @@
   // the shop's public web page (customer app), with where the link was used
   const shopLink = (shopId, src) => new URL("index.html", location.href).href.split("#")[0] + `#/shop/${shopId}${src ? `?src=${src}` : ""}`;
 
-  window.MM_CLOUD = { ready: true, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, sb, enqueue, flush, status, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
+  // ---------- login numbers (main + backup), PIN, devices ----------
+  // A second client that keeps no session, so adding a number never logs this phone out.
+  const tempClient = () => window.supabase.createClient(C.supabaseUrl, C.supabaseKey,
+    { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: "mm.tmp" } });
+  async function addLoginNumber(shopId, ph, pin) {
+    const { data: code, error } = await sb.rpc("create_member_invite", { p_shop: shopId, p_phone: ph });
+    if (error) throw new Error(friendly(error));
+    const tmp = tempClient();
+    let r = await tmp.auth.signUp({ email: emailFor(ph), password: pin });
+    if (r.error && /already registered|already exists/i.test(r.error.message)) r = await tmp.auth.signInWithPassword({ email: emailFor(ph), password: pin });
+    if (r.error) throw new Error(/invalid login/i.test(r.error.message) ? "This number already has a My Market login with a different PIN — use that PIN" : friendly(r.error));
+    const j = await tmp.rpc("join_shop", { p_code: code });
+    try { await tmp.auth.signOut(); } catch {}
+    if (j.error) throw new Error(friendly(j.error));
+  }
+  async function loginNumbers(shopId) {
+    const uid = await userId();
+    const { data, error } = await sb.from("shop_members").select("user_id, phone, role, added_at").eq("shop_id", shopId).order("added_at");
+    if (error) throw new Error(friendly(error));
+    return (data || []).map((m) => ({ ...m, me: m.user_id === uid }));
+  }
+  async function removeLoginNumber(shopId, user) {
+    const { error } = await sb.rpc("remove_member", { p_shop: shopId, p_user: user }); if (error) throw new Error(friendly(error));
+  }
+  async function checkPin(ph, pin) { // is this the right PIN? (without touching this phone's login)
+    const tmp = tempClient(); const r = await tmp.auth.signInWithPassword({ email: emailFor(ph), password: pin });
+    try { await tmp.auth.signOut(); } catch {}
+    return !r.error;
+  }
+  async function changePin(pin) { const { error } = await sb.auth.updateUser({ password: pin }); if (error) throw new Error(friendly(error)); }
+  async function logoutOthers() { const { error } = await sb.auth.signOut({ scope: "others" }); if (error) throw new Error(friendly(error)); }
+  async function myNumber() { const { data } = await sb.auth.getSession(); const m = (data.session?.user?.email || "").match(/^91(\d{10})@/); return m ? m[1] : ""; }
+  async function deleteShop(shopId) { const { error } = await sb.rpc("delete_my_shop", { p_shop: shopId }); if (error) throw new Error(friendly(error)); }
+
+  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, sb, enqueue, flush, status, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
     pending: () => Q.get().length, failedOps: () => Q.failed() };
 
   // start-up

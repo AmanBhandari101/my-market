@@ -24,6 +24,7 @@ Running it again later is safe.
 5. Then `supabase/catalog.sql` (shared product catalogue) and `supabase/bills.sql` (bill PDFs sent to customers on WhatsApp).
 6. Then `supabase/visits.sql` (visits to each shop's website page, for the shop's Reports).
 7. Then `supabase/shopsite.sql` (logo, cover photo, gallery, about, payments and delivery on each shop's website).
+8. Then `supabase/members.sql` (main + backup login numbers per shop, change PIN, delete shop).
 
 ## 3. Login settings
 
