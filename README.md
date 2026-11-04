@@ -16,14 +16,15 @@ Three tabs, built so a shopkeeper can bill as fast as a calculator.
 
 | Tab | What it does |
 |---|---|
-| **Bill** | Tap items to add them to the **cart** (top-bar cart icon shows the count). The cart is saved on the phone, so it survives moving between tabs or closing the app. **Cart page**: quantity −/+, remove, change price, discount, cash / UPI / card / khata, cash received and change, customer WhatsApp number → **Generate bill**. |
-| **Stock** | Items with stock count, low / out of stock, *Stock arrived* (purchases from suppliers), add items by **barcode** (shared catalogue → Open Food Facts → Open Products Facts) with photo and details. |
+| **Bill** | Tap or **scan** items (any barcode or QR — scan item after item, the camera stays open) to add them to the **cart** (top-bar cart icon shows the count). The cart is saved on the phone, so it survives moving between tabs or closing the app. **Cart page**: quantity −/+, remove, change price, discount, cash / UPI / card / khata, cash received and change, customer WhatsApp number → **Generate bill**. |
+| **Stock** | Items with stock count, low / out of stock, *Stock arrived* (purchases from suppliers — tap or scan each piece), add items by **barcode** (shared catalogue → Open Food Facts → Open Products Facts) with photo and details. |
 | **Reports** | Sales today / week / month with profit, daily chart, running low, not selling, what customers nearby searched for, all bills. |
 
 Also in the shop app:
-- **Bills** — A4 PDF with the shop's details and a small advert. With a customer number, WhatsApp opens on that customer's chat with a link to the bill. Cancelling a bill puts the stock back.
+- **Bills are saved in the database** — every bill (items, prices, totals) is stored on the server with a private link code. With a customer number, WhatsApp opens on that customer's chat with the link; the bill page shows the bill straight from the database and makes the A4 PDF on the customer's phone when they tap *Download PDF*. No PDF file is stored, and links keep working. Cancelling a bill puts the stock back.
+- **Scan codes** — a code the shop hasn't seen (its own QR sticker, an unlisted barcode) is linked to an item once; every later scan finds it.
 - **Bill numbers** — each phone gets its own block of numbers from the server, so a shop billing from two phones never prints the same number, even offline.
-- **Bill PDFs online for 2 days** — the customer's bill link works for 2 days, then the shop app deletes the PDF to keep storage free. The bill itself stays on the server and the phone; sending it again makes a fresh link.
+- **Older PDF links** — bills sent before the database links were stored as PDF files; the shop app deletes those after 2 days.
 - **Back up bills to Google Drive** — one PDF with every bill plus a sheet (CSV) for Google Sheets / Excel, shared to Drive from the phone. Reports reminds the owner after 7 days without a backup.
 - **My website** — the shop's own page in the customer app: logo, cover, gallery, about, payments, delivery, link + QR poster, visits by source. **Google Maps**: step-by-step with every detail ready to copy (Google only lets the owner add or claim a shop).
 - **Login & security** — main number + backup number (a lost phone or SIM never locks the shop out), change PIN, log out other phones, delete shop.
@@ -49,7 +50,7 @@ moving more than 5 km loads the new area.
 Set up once in the Supabase SQL editor — the files in `supabase/`, in the order given in
 [`supabase/SETUP.md`](supabase/SETUP.md):
 
-`schema.sql` → `searches.sql` → `catalog.sql` → `bills.sql` → `visits.sql` → `shopsite.sql` → `members.sql` → `billno.sql` → `nearby.sql` → `bills_cleanup.sql`
+`schema.sql` → `searches.sql` → `catalog.sql` → `bills.sql` → `visits.sql` → `shopsite.sql` → `members.sql` → `billno.sql` → `nearby.sql` → `bills_cleanup.sql` → `bill_share.sql` → `scan_codes.sql`
 
 Row-level security keeps each shop's data private; customers read only the public views
 (`public_shops`, `public_items` — stock as a label, never a count). The app holds only the publishable key.
@@ -75,8 +76,9 @@ GPS needs `localhost` or `https`. After changing JS/CSS, bump the `?v=` numbers 
 - `js/cloud.js` — server sync: outbox, login, download a shop, nearby shops for customers, bill PDFs and their clean-up
 - `js/app.js` — shared UI, router, customer screens, shop website page
 - `js/shop.js` — product page
-- `js/biz.js` — the shop app (bill, cart, stock, reports, website, backup, security)
-- `bill.html` — the page a customer's bill link opens
+- `js/biz.js` — the shop app (bill, cart, scanning, stock, reports, website, backup, security)
+- `js/billpdf.js` — the A4 bill PDF, shared by the shop app and the customer's bill page
+- `bill.html` — the customer's bill page: reads the bill from the database, Download PDF
 - `css/` — `app.css` (base), `commerce.css`, `store.css` (newer screens)
 - `supabase/` — database setup and `SETUP.md`
 
@@ -84,7 +86,6 @@ GPS needs `localhost` or `https`. After changing JS/CSS, bump the `?v=` numbers 
 
 - PIN reset by OTP (needs an SMS / WhatsApp provider)
 - A support contact for shopkeepers
-- Server-side bills (bill link drawn from data, no PDF stored)
 - Khata (credit) ledger, Play Store apps
 
 ## Licence

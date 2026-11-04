@@ -418,6 +418,28 @@
     if (params.get("scan") === "1") setTimeout(() => $("#scan")?.click(), 100);
   }
 
+  // ---------- scanned a code this shop doesn't know yet ----------
+  // Pick the item it belongs to — the code is saved on it, so the next scan finds it.
+  function linkCodeSheet(s, code, then) {
+    let q = "";
+    const draw = (el) => {
+      const list = s.items.filter((it) => !q || `${it.name} ${it.brand}`.toLowerCase().includes(q)).slice(0, 40);
+      el.innerHTML = `<div class="eyebrow">New code</div><div class="title" style="overflow-wrap:anywhere">${esc(code.length > 40 ? code.slice(0, 40) + "…" : code)}</div>
+        <p class="small quiet" style="margin:4px 0 10px">Which item is this? Pick it once — next time the scan finds it straight away.</p>
+        <div class="inshop">${ic("search")}<input id="lq" placeholder="Find the item" autocomplete="off" value="${esc(q)}"></div>
+        <div class="entries" style="margin-top:8px;max-height:46vh;overflow:auto">${list.map((it) => `<button class="entry" data-li="${it.id}" style="width:100%;text-align:left">
+          <div class="body"><div class="name">${esc(it.name)}</div><div class="note">${it.price ? rupee(it.price) : "no price yet"}${it.code ? " · has a code already" : ""}</div></div></button>`).join("") || '<p class="quiet small">No item matches.</p>'}</div>
+        <div class="opts"><button class="btn line" id="lnew">+ It's a new item</button></div>`;
+      const inp = $("#lq", el); inp.oninput = (e) => { q = e.target.value.trim().toLowerCase(); draw(el); const n = $("#lq", el); n.focus(); n.setSelectionRange(n.value.length, n.value.length); };
+      $$("[data-li]", el).forEach((x) => x.onclick = () => {
+        const it = s.items.find((y) => y.id === x.dataset.li);
+        A.setItem(s.id, it.id, { code }); U.closeSheet(); U.toast(`Code saved on ${it.name}`); then && then(it);
+      });
+      $("#lnew", el).onclick = () => { U.closeSheet(); newItemSheet(s, (it) => { if (it) { A.setItem(s.id, it.id, { code }); then && then(it); } }); };
+    };
+    U.openSheet("", draw);
+  }
+
   // ---------- billing: tap items, set quantity, the app does the maths ----------
   const PAYS = { cash: "Cash", upi: "UPI", card: "Card", khata: "Khata (pay later)" };
   function billView() {
@@ -488,8 +510,8 @@
 
     U.app.innerHTML = `
       ${bizTop()}
-      <div class="pad billhead"><b>New bill</b><span class="quiet small">Tap items · the app adds it up</span></div>
-      <div class="pad"><div class="inshop">${ic("search")}<input id="bq" placeholder="Find an item" autocomplete="off"></div></div>
+      <div class="pad billhead"><b>New bill</b><span class="quiet small">Tap or scan items · the app adds it up</span></div>
+      <div class="pad scanrow"><div class="inshop">${ic("search")}<input id="bq" placeholder="Find an item" autocomplete="off"></div><button class="btn auto scanbtn" id="scanb">${ic("camera")} Scan</button></div>
       <div class="bgrid" id="bgrid"></div>
       <div class="pad" style="margin:12px 0 0"><button class="btn line" id="other">+ Item not in list</button></div>
       ${s.items.length ? "" : '<div class="banner" style="margin:14px var(--gut) 0"><div class="serif">No items yet</div><p>Add your items on the Stock page first — then tap them here to bill.</p><a class="link accent" href="#/biz/items">Go to Stock</a></div>'}
@@ -498,6 +520,19 @@
     bindTop();
     $("#bq").addEventListener("input", (e) => { q = e.target.value.trim().toLowerCase(); paint(); });
     $("#other").onclick = otherItem;
+    // scan item after item into the cart; an unknown code or an item without a price closes the camera to ask
+    $("#scanb").onclick = async () => {
+      const code = await scanBarcode({ any: true, title: "Scan to sell", hint: "Point at the barcode or QR on each item", onCode: (c) => {
+        const it = A.itemByCode(s.id, c);
+        if (!it || !it.price) return false;
+        add(it, 1); const l = lineOf(it.id);
+        return `${it.name} · ${l ? l.qty : 1} in cart · ${rupee(totals().total)}`;
+      } });
+      if (!code) return;
+      const it = A.itemByCode(s.id, code);
+      if (it) add(it, 1); // no price yet: add() asks for it
+      else linkCodeSheet(s, code, (x) => { add(x, 1); });
+    };
     paint();
   }
 
@@ -825,124 +860,8 @@
   // no ₹ sign, so amounts print as "Rs.". Long bills continue on more pages.
   const rs = (n) => "Rs. " + Math.round(n).toLocaleString("en-IN");
   const billName = (b, s) => `${s.name.replace(/[^\w]+/g, "-").replace(/^-|-$/g, "")}-bill-${b.no}.pdf`;
-  const ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
-  const TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
-  const two = (n) => (n < 20 ? ONES[n] : TENS[Math.floor(n / 10)] + (n % 10 ? " " + ONES[n % 10] : ""));
-  const three = (n) => (n >= 100 ? ONES[Math.floor(n / 100)] + " Hundred" + (n % 100 ? " " : "") : "") + (n % 100 ? two(n % 100) : "");
-  function inWords(n) { // Indian system: thousand, lakh, crore
-    n = Math.round(n); if (!n) return "Zero";
-    const cr = Math.floor(n / 1e7); n %= 1e7; const la = Math.floor(n / 1e5); n %= 1e5; const th = Math.floor(n / 1000); n %= 1000;
-    return [cr && inWords(cr) + " Crore", la && two(la) + " Lakh", th && two(th) + " Thousand", n && three(n)].filter(Boolean).join(" ");
-  }
-  function makeBillPdf(b, s, into) {
-    const { jsPDF } = window.jspdf;
-    const doc = into || new jsPDF({ unit: "mm", format: "a4", compress: true });
-    const firstPage = into ? (into.addPage(), into.getNumberOfPages()) : 1;
-    const W = 210, L = 15, R = 195;
-    const m = A.getMarket(s.marketId), d = new Date(b.at);
-    const NAVY = [23, 35, 49], ORANGE = [255, 164, 28], GREY = [96, 100, 100], LINE = [222, 226, 226], INK = [15, 17, 17], ZEBRA = [247, 249, 249];
-    const money = (n) => Math.round(n).toLocaleString("en-IN");
-    const addr = [s.shopNo && s.shopNo !== "—" ? `Shop ${s.shopNo}` : "", s.floor && s.floor !== "Ground floor" ? s.floor : "", s.landmark || "", m?.name || "",
-      [s.locality || m?.locality || "", s.pincode || m?.pincode || ""].filter(Boolean).join(" ")].filter(Boolean).join(", ");
-    const header = (first) => {
-      doc.setFillColor(...NAVY); doc.rect(0, 0, W, 40, "F");
-      doc.setFillColor(...ORANGE); doc.rect(0, 40, W, 1.6, "F");
-      doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(19);
-      doc.text(doc.splitTextToSize(s.name, 118)[0], L, 16);
-      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(205, 216, 226);
-      const al = doc.splitTextToSize(addr, 118).slice(0, 2);
-      doc.text(al, L, 23);
-      doc.text([s.phone ? `Phone / WhatsApp: ${s.phone}` : "", s.gst ? `GSTIN: ${s.gst}` : ""].filter(Boolean).join("     "), L, 23 + al.length * 4.2 + 1.5);
-      doc.setTextColor(...ORANGE); doc.setFont("helvetica", "bold"); doc.setFontSize(22);
-      doc.text("BILL", R, 16, { align: "right" });
-      doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
-      doc.text(`No. ${b.no}`, R, 23, { align: "right" });
-      doc.text(d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }), R, 28, { align: "right" });
-      doc.text(d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }), R, 33, { align: "right" });
-      if (!first) { doc.setFontSize(8.5); doc.setTextColor(205, 216, 226); doc.text("(continued)", R, 37.5, { align: "right" }); }
-    };
-    const tableHead = (y) => {
-      doc.setFillColor(...NAVY); doc.rect(L, y, R - L, 8.5, "F");
-      doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(8.5);
-      doc.text("#", L + 3, y + 5.6); doc.text("ITEM", L + 12, y + 5.6);
-      doc.text("QTY", 132, y + 5.6, { align: "right" }); doc.text("RATE", 160, y + 5.6, { align: "right" }); doc.text("AMOUNT", R - 3, y + 5.6, { align: "right" });
-      return y + 8.5;
-    };
-    header(true);
-    let y = 50;
-    // billed to / payment
-    doc.setDrawColor(...LINE); doc.setLineWidth(0.3);
-    doc.roundedRect(L, y, 86, 21, 2, 2, "S"); doc.roundedRect(109, y, 86, 21, 2, 2, "S");
-    doc.setFont("helvetica", "bold"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
-    doc.text("BILLED TO", L + 4, y + 6); doc.text("PAYMENT", 113, y + 6);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(...INK);
-    const ph = A.normPhone(b.phone);
-    doc.text(ph.length === 10 ? `Customer: +91 ${ph.slice(0, 5)} ${ph.slice(5)}` : "Walk-in customer", L + 4, y + 13);
-    doc.text({ cash: "Cash", upi: "UPI", card: "Card", khata: "Khata (pay later)" }[b.pay] || b.pay, 113, y + 13);
-    if (b.received) { doc.setFontSize(8.5); doc.setTextColor(...GREY); doc.text(`Received ${rs(b.received)} · Returned ${rs(Math.max(0, b.received - b.total))}`, 113, y + 18); }
-    if (b.cancelled) { doc.setTextColor(177, 39, 4); doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.text("CANCELLED", R - 4, y + 13, { align: "right" }); }
-    y = tableHead(y + 29);
-    // rows
-    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
-    b.lines.forEach((l, i) => {
-      const nameL = doc.splitTextToSize(l.name + (l.brand && l.brand !== "Generic" ? ` (${l.brand})` : ""), 98);
-      const rh = nameL.length * 4.4 + 4.2;
-      if (y + rh > 262) { // new page
-        doc.setFontSize(8); doc.setTextColor(...GREY); doc.text("Continued on next page", R, 270, { align: "right" });
-        doc.addPage(); header(false); y = tableHead(50); doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
-      }
-      if (i % 2) { doc.setFillColor(...ZEBRA); doc.rect(L, y, R - L, rh, "F"); }
-      doc.setTextColor(...GREY); doc.text(String(i + 1), L + 3, y + 5.6);
-      doc.setTextColor(...INK); doc.text(nameL, L + 12, y + 5.6);
-      doc.text(String(l.qty), 132, y + 5.6, { align: "right" });
-      doc.text(money(l.price), 160, y + 5.6, { align: "right" });
-      doc.text(money(l.qty * l.price), R - 3, y + 5.6, { align: "right" });
-      y += rh; doc.setDrawColor(...LINE); doc.setLineWidth(0.2); doc.line(L, y, R, y);
-    });
-    // totals (right) and amount in words (left)
-    if (y + 52 > 270) { doc.addPage(); header(false); y = 50; }
-    y += 6;
-    const tx = 120, row = (label, val, yy, bold) => {
-      doc.setFont("helvetica", bold ? "bold" : "normal"); doc.setFontSize(9.5); doc.setTextColor(...(bold ? INK : GREY));
-      doc.text(label, tx + 3, yy); doc.text(val, R - 3, yy, { align: "right" });
-    };
-    row(`Items (${b.units})`, rs(b.sub), y + 4);
-    let ty = y + 4;
-    if (b.discount) { ty += 6; row("Discount", "- " + rs(b.discount), ty); }
-    ty += 4;
-    doc.setFillColor(...NAVY); doc.roundedRect(tx, ty, R - tx, 11, 1.5, 1.5, "F");
-    doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(12.5);
-    doc.text("TOTAL", tx + 4, ty + 7.4); doc.text(rs(b.total), R - 4, ty + 7.4, { align: "right" });
-    doc.setFont("helvetica", "bold"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
-    doc.text("AMOUNT IN WORDS", L, y + 4);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...INK);
-    doc.text(doc.splitTextToSize(`Rupees ${inWords(b.total)} Only`, 95), L, y + 9.5);
-    y = ty + 20;
-    // the shop's message / small advert
-    const promo = s.promo || `Visit ${s.name} again — new stock every week.`;
-    doc.setFontSize(10); const pl = doc.splitTextToSize(promo, R - L - 26);
-    const bh = 10 + pl.length * 4.6;
-    doc.setFillColor(255, 243, 223); doc.setDrawColor(...ORANGE); doc.setLineWidth(0.4);
-    doc.roundedRect(L, y, R - L, bh, 2, 2, "FD");
-    doc.setFillColor(...ORANGE); doc.circle(L + 8, y + bh / 2, 4, "F");
-    doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.text("%", L + 8, y + bh / 2 + 1.3, { align: "center" });
-    doc.setTextColor(112, 63, 0); doc.text(pl, L + 16, y + 6.5);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(140, 90, 20);
-    doc.text(s.cloud ? "See our full stock and prices online: tap here (My Market)" : `See our stock & prices on My Market: search "${s.name}"`, L + 16, y + 6.5 + pl.length * 4.6);
-    if (s.cloud) doc.link(L, y, R - L, bh, { url: siteLink(s, "bill") });
-    // footer on every page
-    const last = doc.getNumberOfPages(), pages = last - firstPage + 1;
-    for (let p = firstPage; p <= last; p++) {
-      doc.setPage(p);
-      doc.setDrawColor(...LINE); doc.setLineWidth(0.3); doc.line(L, 276, R, 276);
-      doc.setTextColor(...INK); doc.setFont("helvetica", "bold"); doc.setFontSize(11);
-      doc.text("Thank you! Visit again.", L, 283);
-      doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
-      doc.text("This is a computer-generated bill and does not need a signature.", L, 288);
-      doc.text(`Powered by My Market${pages > 1 ? `  ·  Page ${p - firstPage + 1} of ${pages}` : ""}`, R, 288, { align: "right" });
-    }
-    return doc;
-  }
+  // the A4 bill (js/billpdf.js — the customer's bill page draws the same one)
+  const makeBillPdf = (b, s, into) => window.MM_BILLPDF.make(b, s, { market: A.getMarket(s.marketId), shopUrl: s.cloud ? siteLink(s, "bill") : "", into });
   // Send the bill to the customer's WhatsApp number — call straight from the tap.
   // With a number: the bill's link is decided now, WhatsApp opens at once on that
   // customer's chat (no contacts needed) and the PDF uploads in the background
@@ -950,17 +869,14 @@
   async function sendBill(b, s) {
     const num = A.normPhone(b.phone);
     if (num.length === 10) {
-      let link = b.pdfLink && Date.now() - (b.pdfAt || b.at) < 40 * 3600000 ? b.pdfLink : null; // PDFs stay online 2 days
-      if (!link && window.jspdf && window.MM_CLOUD && s.cloud) {
-        const t = window.MM_CLOUD.billLink(s.id, b.id);
-        link = t.link; b.pdfLink = link; A.setBillLink(b.id, link);
-        window.MM_CLOUD.enqueue({ op: "billpdf", path: t.path, dataUrl: makeBillPdf(b, s).output("datauristring") });
-      }
+      // the bill is saved in the database; the link shows it from there (no PDF file is uploaded)
+      const tok = s.cloud && window.MM_CLOUD ? A.billToken(b.id) : null;
+      const link = tok ? window.MM_CLOUD.billShareLink(tok) : null;
       const msg = link
-        ? `*${s.name}*\nBill #${b.no} · ${rs(b.total)} · ${PAYS[b.pay]}\nYour bill (PDF): ${link}\nOur stock & prices: ${siteLink(s, "bill")}\nThank you! Visit again.`
+        ? `*${s.name}*\nBill #${b.no} · ${rs(b.total)} · ${PAYS[b.pay]}\nYour bill: ${link}\nOur stock & prices: ${siteLink(s, "bill")}\nThank you! Visit again.`
         : billText(b, s);
       U.openWhatsApp(num, msg);
-      if (!link) U.toast("Sent as text — log in so bills go out as PDF links");
+      if (!link) U.toast("Sent as text — log in so bills go out as links");
       return link ? "link" : "text";
     }
     if (!window.jspdf) { U.toast("PDF needs the internet once"); return "none"; }
@@ -1117,8 +1033,8 @@
     }
     U.app.innerHTML = `
       ${bizTop("Stock arrived")}
-      <div class="pad billhead"><b>What arrived?</b><span class="quiet small">Tap each item once per piece</span></div>
-      <div class="pad"><div class="inshop">${ic("search")}<input id="bq" placeholder="Find an item" autocomplete="off"></div></div>
+      <div class="pad billhead"><b>What arrived?</b><span class="quiet small">Tap or scan each piece</span></div>
+      <div class="pad scanrow"><div class="inshop">${ic("search")}<input id="bq" placeholder="Find an item" autocomplete="off"></div><button class="btn auto scanbtn" id="scanb">${ic("camera")} Scan</button></div>
       <div class="bgrid" id="bgrid"></div>
       <div class="pad" style="margin:12px 0 0"><button class="btn line" id="newit">${ic("camera")} New item (with photo)</button></div>
       <div style="height:110px"></div>
@@ -1126,6 +1042,16 @@
     bindTop();
     $("#bq").addEventListener("input", (e) => { q = e.target.value.trim().toLowerCase(); paint(); });
     $("#newit").onclick = () => newItemSheet(s, (it) => { if (it) add(it, 0); paint(); });
+    $("#scanb").onclick = async () => {
+      const code = await scanBarcode({ any: true, title: "Scan stock in", hint: "Scan each piece as you unpack it", onCode: (c) => {
+        const it = A.itemByCode(s.id, c); if (!it) return false;
+        add(it, 1); const l = lineOf(it.id);
+        return `${it.name} · ${l ? l.qty : 1} arrived`;
+      } });
+      if (!code) return;
+      const it = A.itemByCode(s.id, code);
+      if (it) add(it, 1); else linkCodeSheet(s, code, (x) => add(x, 1));
+    };
     $("#bgo").onclick = review;
     paint();
   }
@@ -1155,40 +1081,62 @@
     sc.onload = () => res(window.ZXing); sc.onerror = () => { zxingLoad = null; rej(new Error("Scanner needs the internet once")); };
     document.head.appendChild(sc);
   }));
-  function scanBarcode() {
+  // opts.any: accept any code (QR, Code 39, the shop's own sticker…), not only product barcodes.
+  // opts.onCode(code): keep the camera open and scan item after item; return a line to show,
+  // or false to close the scanner and hand that code back (e.g. a code nobody knows yet).
+  function scanBarcode(opts = {}) {
     return new Promise((resolve) => {
-      let stream = null, stop = () => {}, done = false;
+      let stream = null, stop = () => {}, done = false, lastCode = "", lastAt = 0, count = 0;
+      const ok = (c) => (opts.any ? c && c.trim().length >= 3 && c.length <= 200 : /^\d{6,14}$/.test(c));
       const finish = (code) => {
         if (done) return; done = true; stop();
         try { stream && stream.getTracks().forEach((t) => t.stop()); } catch {}
         document.getElementById("scanbox")?.remove(); resolve(code || null);
       };
+      const hint = opts.hint || "Point the camera at the barcode on the pack";
       const box = document.createElement("div"); box.id = "scanbox";
-      box.innerHTML = `<div class="scanin"><div class="scanhd"><b>Scan barcode</b><button class="link" data-x>Cancel</button></div>
+      box.innerHTML = `<div class="scanin"><div class="scanhd"><b>${esc(opts.title || "Scan barcode")}</b><button class="link" data-x>${opts.onCode ? "Done" : "Cancel"}</button></div>
         <video playsinline muted></video><div class="scanline"></div>
-        <p class="small" id="scanmsg">Point the camera at the barcode on the pack</p>
-        <div class="two"><input class="field" id="scantype" inputmode="numeric" placeholder="Or type the number"><button class="btn auto" data-ok>Use</button></div></div>`;
+        <p class="small" id="scanmsg">${esc(hint)}</p>
+        <div class="two"><input class="field" id="scantype" ${opts.any ? "" : 'inputmode="numeric"'} placeholder="Or type the ${opts.any ? "code" : "number"}"><button class="btn auto" data-ok>Use</button></div></div>`;
       document.body.appendChild(box);
       const video = box.querySelector("video"), msg = box.querySelector("#scanmsg");
+      const got = (raw) => {
+        const code = String(raw || "").trim();
+        if (done || !ok(code)) return;
+        if (!opts.onCode) return finish(code);
+        if (code === lastCode && Date.now() - lastAt < 2000) return; // the same pack still in front of the camera
+        lastCode = code; lastAt = Date.now();
+        const r = opts.onCode(code);
+        if (r === false) return finish(code);
+        count++; try { navigator.vibrate && navigator.vibrate(60); } catch {}
+        msg.innerHTML = `<b>✓ ${esc(r)}</b><br><span class="faint">${count} scanned · scan the next one, or tap Done</span>`;
+        box.querySelector(".scanin").classList.remove("hit"); void box.offsetWidth; box.querySelector(".scanin").classList.add("hit");
+      };
       box.querySelector("[data-x]").onclick = () => finish(null);
-      box.querySelector("[data-ok]").onclick = () => { const v = box.querySelector("#scantype").value.replace(/\D/g, ""); if (v.length >= 6) finish(v); else msg.textContent = "Type the 8–13 digit number under the barcode"; };
+      box.querySelector("[data-ok]").onclick = () => {
+        const inp = box.querySelector("#scantype"), v = opts.any ? inp.value.trim() : inp.value.replace(/\D/g, "");
+        if (ok(v)) { inp.value = ""; got(v); } else msg.textContent = opts.any ? "Type the code printed under the barcode or QR" : "Type the 8–13 digit number under the barcode";
+      };
       (async () => {
         try {
           if ("BarcodeDetector" in window) {
-            const det = new window.BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128"] });
+            const want = ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", ...(opts.any ? ["qr_code", "code_39", "code_93", "itf", "codabar", "data_matrix"] : [])];
+            const have = await window.BarcodeDetector.getSupportedFormats().catch(() => want);
+            const det = new window.BarcodeDetector({ formats: want.filter((f) => have.includes(f)) });
             stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
             video.srcObject = stream; await video.play();
-            const tick = async () => { if (done) return; try { const r = await det.detect(video); const c = r.find((x) => /^\d{6,14}$/.test(x.rawValue)); if (c) return finish(c.rawValue); } catch {} requestAnimationFrame(tick); };
+            const tick = async () => { if (done) return; try { const r = await det.detect(video); const c = r.find((x) => ok(String(x.rawValue || "").trim())); if (c) got(c.rawValue); } catch {} if (!done) requestAnimationFrame(tick); };
             tick();
           } else {
             msg.textContent = "Starting the camera…";
             const ZX = await loadZXing();
-            const reader = new ZX.BrowserMultiFormatReader();
+            const reader = new ZX.BrowserMultiFormatReader(); // reads barcodes and QR codes
             stop = () => { try { reader.reset(); } catch {} };
-            msg.textContent = "Point the camera at the barcode on the pack";
-            reader.decodeFromConstraints({ video: { facingMode: "environment" } }, video, (res) => { if (res && /^\d{6,14}$/.test(res.getText())) finish(res.getText()); });
+            msg.textContent = hint;
+            await reader.decodeFromConstraints({ video: { facingMode: "environment" } }, video, (res) => { if (res) got(res.getText()); }); // a blocked camera lands in catch below
           }
-        } catch (e) { msg.textContent = /Permission|NotAllowed/i.test(e.name + e.message) ? "Camera blocked — allow the camera, or type the number below" : (e.message || "No camera here — type the number below"); }
+        } catch (e) { msg.textContent = /Permission|NotAllowed/i.test(e.name + e.message) ? "Camera blocked — allow the camera, or type the code below" : (e.message || "No camera here — type the code below"); }
       })();
     });
   }

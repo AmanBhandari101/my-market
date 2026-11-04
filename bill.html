@@ -7,51 +7,153 @@
   <title>Your bill · My Market</title>
   <link rel="icon" href="icons/icon-192.png">
   <style>
-    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #e9eded; color: #0f1111; }
-    header { background: #172331; color: #fff; padding: 14px 18px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
-    header img { width: 28px; height: 28px; border-radius: 6px; }
-    main { max-width: 480px; margin: 0 auto; padding: 18px; }
+    :root { --navy: #172331; --orange: #ffa41c; --ink: #0f1111; --grey: #606464; --line: #dee2e2; --zebra: #f7f9f9; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #e9eded; color: var(--ink); }
+    header.top { background: var(--navy); color: #fff; padding: 14px 18px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+    header.top img { width: 28px; height: 28px; border-radius: 6px; }
+    main { max-width: 640px; margin: 0 auto; padding: 16px; }
     .card { background: #fff; border-radius: 10px; padding: 20px; text-align: center; }
     h1 { font-size: 20px; margin: 6px 0 4px; }
     p { color: #565959; line-height: 1.5; margin: 6px 0; }
-    a.btn { display: block; margin-top: 16px; padding: 14px; border-radius: 100px; background: #ffd814; border: 1px solid #f2c200; color: #0f1111; font-weight: 600; text-decoration: none; }
-    a.line { background: #fff; border-color: #d5d9d9; font-weight: 500; }
-    small { display: block; margin-top: 18px; color: #8a9191; }
+    a.btn, button.btn { display: block; width: 100%; margin-top: 12px; padding: 14px; border-radius: 100px; background: #ffd814; border: 1px solid #f2c200;
+      color: var(--ink); font: 600 16px system-ui, sans-serif; text-decoration: none; text-align: center; cursor: pointer; }
+    .line { background: #fff !important; border-color: #d5d9d9 !important; font-weight: 500 !important; }
+    small { display: block; margin-top: 18px; color: #8a9191; text-align: center; }
+
+    /* the bill, drawn from the database */
+    .bill { background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .bh { background: var(--navy); color: #fff; padding: 18px 18px 16px; display: flex; gap: 14px; justify-content: space-between; border-bottom: 4px solid var(--orange); }
+    .bh .shop { min-width: 0; display: flex; gap: 12px; }
+    .bh .logo { width: 46px; height: 46px; border-radius: 8px; object-fit: cover; background: #fff; flex: none; }
+    .bh h2 { margin: 0 0 4px; font-size: 19px; line-height: 1.2; overflow-wrap: anywhere; }
+    .bh .addr { color: #cdd8e2; font-size: 12.5px; line-height: 1.45; }
+    .bh .no { text-align: right; flex: none; font-size: 12.5px; color: #fff; line-height: 1.5; }
+    .bh .no b { display: block; color: var(--orange); font-size: 20px; letter-spacing: .5px; }
+    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 14px 16px 6px; }
+    .meta div { border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; font-size: 14px; }
+    .meta em { display: block; font-style: normal; font-size: 10.5px; font-weight: 700; color: var(--grey); letter-spacing: .4px; margin-bottom: 3px; }
+    .meta .sub { color: var(--grey); font-size: 12px; margin-top: 2px; }
+    .cancel { margin: 10px 16px 0; padding: 9px 12px; border-radius: 8px; background: #fde8e4; color: #b12704; font-weight: 700; text-align: center; }
+    table { width: calc(100% - 32px); margin: 12px 16px 0; border-collapse: collapse; font-size: 14px; }
+    thead th { background: var(--navy); color: #fff; font-size: 11px; letter-spacing: .4px; padding: 8px 6px; text-align: right; }
+    thead th:first-child, thead th:nth-child(2) { text-align: left; }
+    td { padding: 9px 6px; border-bottom: 1px solid var(--line); text-align: right; vertical-align: top; }
+    td:first-child { color: var(--grey); text-align: left; width: 22px; }
+    td.n { text-align: left; overflow-wrap: anywhere; }
+    td.n i { color: var(--grey); font-style: normal; font-size: 12.5px; }
+    tbody tr:nth-child(even) td { background: var(--zebra); }
+    .tot { display: flex; gap: 16px; justify-content: space-between; align-items: flex-start; padding: 14px 16px; flex-wrap: wrap; }
+    .words { flex: 1 1 200px; font-size: 13px; color: var(--ink); }
+    .words em { display: block; font-style: normal; font-size: 10.5px; font-weight: 700; color: var(--grey); letter-spacing: .4px; margin-bottom: 3px; }
+    .sums { flex: 0 1 240px; margin-left: auto; font-size: 14px; }
+    .sums div { display: flex; justify-content: space-between; padding: 3px 2px; color: var(--grey); }
+    .sums .grand { margin-top: 6px; background: var(--navy); color: #fff; border-radius: 6px; padding: 9px 12px; font-weight: 700; font-size: 17px; }
+    .promo { margin: 0 16px 14px; padding: 11px 13px; border: 1px solid var(--orange); background: #fff3df; border-radius: 8px; color: #703f00; font-size: 14px; }
+    .promo a { color: #8c5a14; font-size: 12.5px; display: block; margin-top: 3px; }
+    .foot { border-top: 1px solid var(--line); padding: 12px 16px 16px; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 11.5px; color: var(--grey); }
+    .foot b { color: var(--ink); font-size: 14px; display: block; margin-bottom: 2px; }
+    .acts { margin-top: 14px; }
+    @media (max-width: 420px) { .bh { flex-direction: column; } .bh .no { text-align: left; } .meta { grid-template-columns: 1fr; } }
+    @media print { header.top, .acts, small { display: none; } body { background: #fff; } main { padding: 0; } .bill { box-shadow: none; } }
   </style>
 </head>
 <body>
-  <header><img src="icons/icon-192.png" alt="">My Market</header>
-  <main><div class="card" id="c"><p>Loading your bill…</p></div></main>
+  <header class="top"><img src="icons/icon-192.png" alt="">My Market</header>
+  <main><div id="c"><div class="card"><p>Loading your bill…</p></div></div></main>
   <script src="js/config.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+  <script src="js/billpdf.js?v=46"></script>
   <script>
-    // The link carries the file's place after "#": <shop>/<bill>-<random>.pdf
-    // …and, after "~", when the link was made (bills stay online for 2 days)
-    var parts = decodeURIComponent(location.hash.slice(1)).split("~");
-    var path = parts[0], madeAt = parts[1] ? parseInt(parts[1], 36) : 0;
-    var expired = function () { return madeAt && Date.now() - madeAt > 47 * 3600000; };
-    var shopBtn = '<a class="btn line" href="./#/shop/' + path.split("/")[0] + '?src=bill">See this shop\'s stock and prices</a>';
     var c = document.getElementById("c");
-    if (!/^[0-9a-f-]{36}\/[0-9a-f-]{36}-[0-9a-z]{6,20}\.pdf$/.test(path) || !window.MM_CONFIG) {
-      c.innerHTML = "<h1>Bill not found</h1><p>This link looks incomplete. Ask the shop to send it again.</p>";
-    } else {
-      var url = MM_CONFIG.supabaseUrl + "/storage/v1/object/public/bills/" + path;
-      var show = function () { c.innerHTML = '<div style="font-size:40px">🧾</div><h1>Your bill is ready</h1><p>Thank you for shopping. Open it below, or save it to your phone.</p>' +
-        '<a class="btn" href="' + url + '">Open bill (PDF)</a>' +
-        '<a class="btn line" href="' + url + '?download=bill.pdf">Download</a>' +
-        '<a class="btn line" href="./#/shop/' + path.split("/")[0] + '?src=bill">See this shop\'s stock and prices</a>' +
-        '<a class="btn line" href="./">Find more shops near you on My Market</a>' +
-        '<small>Sent by the shop through My Market. Save it to your phone — the link works for 2 days.</small>'; };
-      // the shop's phone sends the PDF a moment after the message — wait for it
-      var tries = 0;
-      var check = function () {
-        fetch(url, { method: "HEAD", cache: "no-store" }).then(function (r) {
-          if (r.ok) return show();
-          if (expired()) { c.innerHTML = '<div style="font-size:40px">🧾</div><h1>This bill link has expired</h1><p>Bill PDFs stay online for 2 days. Ask the shop to send it again — they keep every bill.</p>' + shopBtn; return; }
-          if (++tries < 10) { c.innerHTML = '<div style="font-size:40px">⏳</div><h1>Your bill is on its way</h1><p>The shop is sending it — this page opens it as soon as it arrives.</p>'; setTimeout(check, 3000); }
-          else c.innerHTML = '<h1>Bill not available</h1><p>The shop\'s phone may be offline — open this link again a little later. Bill links also expire after 2 days: then ask the shop to send it again.</p><a class="btn line" href="./">Find shops near you on My Market</a>';
-        }).catch(function () { show(); });
+    var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (x) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[x]; }); };
+    var card = function (html) { c.innerHTML = '<div class="card">' + html + '</div>'; };
+    var home = '<a class="btn line" href="./">Find shops near you on My Market</a>';
+    var hash = decodeURIComponent(location.hash.slice(1));
+    var CFG = window.MM_CONFIG;
+
+    if (/^b=[A-Za-z0-9]{20,40}$/.test(hash) && CFG) {
+      // ---- the bill is in the database: bill.html#b=<share code> ----
+      var token = hash.slice(2), tries = 0;
+      var PAYS = { cash: "Cash", upi: "UPI", card: "Card", khata: "Khata (pay later)" };
+      var rupee = function (n) { return "₹" + Math.round(n).toLocaleString("en-IN"); };
+      var load = function () {
+        fetch(CFG.supabaseUrl + "/rest/v1/rpc/public_bill", { method: "POST", headers: { apikey: CFG.supabaseKey, "Content-Type": "application/json" },
+          body: JSON.stringify({ p_token: token }) })
+          .then(function (r) { if (!r.ok) throw new Error("server " + r.status); return r.json(); })
+          .then(function (d) {
+            if (d) return draw(d);
+            // the shop's phone saves the bill a moment after sending the message — wait for it
+            if (++tries < 24) { card('<div style="font-size:40px">⏳</div><h1>Your bill is on its way</h1><p>The shop is saving it — this page shows it as soon as it arrives.</p>'); setTimeout(load, 5000); }
+            else card('<h1>Bill not here yet</h1><p>The shop\'s phone may be offline. Open this link again a little later — the bill stays available.</p>' + home);
+          })
+          .catch(function () { if (++tries < 24) setTimeout(load, 5000); else card('<h1>No internet</h1><p>Check your connection and open the link again.</p>'); });
       };
-      check();
+      var draw = function (d) {
+        var b = d.bill, s = d.shop, m = d.market || {}, lines = d.lines || [], dt = new Date(b.at);
+        var addr = [s.shop_no && s.shop_no !== "—" ? "Shop " + s.shop_no : "", s.floor && s.floor !== "Ground floor" ? s.floor : "", s.landmark || "", m.name || "",
+          [s.locality || m.locality || "", s.pincode || m.pincode || ""].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+        var shopUrl = new URL("./", location.href).href + "#/shop/" + s.id + "?src=bill";
+        var logo = s.logo_path ? CFG.supabaseUrl + "/storage/v1/object/public/item-photos/" + s.logo_path : "";
+        document.title = "Bill #" + b.no + " · " + s.name;
+        c.innerHTML =
+          '<div class="bill">' +
+            '<div class="bh"><div class="shop">' + (logo ? '<img class="logo" src="' + esc(logo) + '" alt="">' : '') +
+              '<div><h2>' + esc(s.name) + '</h2><div class="addr">' + esc(addr) +
+              (s.phone ? '<br>Phone / WhatsApp: ' + esc(s.phone) : '') + (s.gst ? '<br>GSTIN: ' + esc(s.gst) : '') + '</div></div></div>' +
+              '<div class="no"><b>BILL</b>No. ' + esc(b.no) + '<br>' + dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) +
+              '<br>' + dt.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) + '</div></div>' +
+            (b.cancelled ? '<div class="cancel">This bill was cancelled</div>' : '') +
+            '<div class="meta"><div><em>BILLED TO</em>' + (b.phone_last4 ? 'Customer +91 xxxxxx' + esc(b.phone_last4) : 'Walk-in customer') + '</div>' +
+              '<div><em>PAYMENT</em>' + esc(PAYS[b.pay] || b.pay) + (b.received ? '<div class="sub">Received ' + rupee(b.received) + ' · Returned ' + rupee(Math.max(0, b.received - b.total)) + '</div>' : '') + '</div></div>' +
+            '<table><thead><tr><th>#</th><th>ITEM</th><th>QTY</th><th>RATE</th><th>AMOUNT</th></tr></thead><tbody>' +
+              lines.map(function (l, i) { return '<tr><td>' + (i + 1) + '</td><td class="n">' + esc(l.name) + (l.brand && l.brand !== "Generic" ? ' <i>(' + esc(l.brand) + ')</i>' : '') +
+                '</td><td>' + l.qty + '</td><td>' + Math.round(l.price).toLocaleString("en-IN") + '</td><td>' + Math.round(l.qty * l.price).toLocaleString("en-IN") + '</td></tr>'; }).join("") +
+            '</tbody></table>' +
+            '<div class="tot"><div class="words"><em>AMOUNT IN WORDS</em>Rupees ' + esc(window.MM_BILLPDF ? MM_BILLPDF.inWords(b.total) : b.total) + ' Only</div>' +
+              '<div class="sums"><div><span>Items (' + b.units + ')</span><span>' + rupee(b.sub) + '</span></div>' +
+              (b.discount ? '<div><span>Discount</span><span>− ' + rupee(b.discount) + '</span></div>' : '') +
+              '<div class="grand"><span>TOTAL</span><span>' + rupee(b.total) + '</span></div></div></div>' +
+            '<div class="promo">' + esc(s.promo || ("Visit " + s.name + " again — new stock every week.")) + '<a href="' + esc(shopUrl) + '">See our full stock and prices online →</a></div>' +
+            '<div class="foot"><div><b>Thank you! Visit again.</b>This is a computer-generated bill and does not need a signature.</div><div>Powered by My Market</div></div>' +
+          '</div>' +
+          '<div class="acts"><button class="btn" id="dl">Download PDF</button>' +
+            '<a class="btn line" href="' + esc(shopUrl) + '">See this shop\'s stock and prices</a>' + home + '</div>' +
+          '<small>This bill is saved by the shop on My Market — this link keeps working.</small>';
+        document.getElementById("dl").onclick = function () {
+          if (!window.jspdf || !window.MM_BILLPDF) { alert("The PDF needs a moment to load — try again."); return; }
+          var pb = { no: b.no, at: Date.parse(b.at), lines: lines, sub: b.sub, discount: b.discount, total: b.total, units: b.units, pay: b.pay,
+            received: b.received, cancelled: b.cancelled, phoneLast4: b.phone_last4 };
+          var ps = { name: s.name, phone: s.phone, gst: s.gst, promo: s.promo, shopNo: s.shop_no, floor: s.floor, landmark: s.landmark, locality: s.locality, pincode: s.pincode };
+          MM_BILLPDF.make(pb, ps, { market: m, shopUrl: shopUrl }).save(MM_BILLPDF.fileName(pb, ps));
+        };
+      };
+      load();
+    } else {
+      // ---- older links: a PDF file, kept online for 2 days: bill.html#<shop>/<bill>-<random>.pdf~<time> ----
+      var parts = hash.split("~");
+      var path = parts[0], madeAt = parts[1] ? parseInt(parts[1], 36) : 0;
+      var expired = function () { return madeAt && Date.now() - madeAt > 47 * 3600000; };
+      var shopBtn = '<a class="btn line" href="./#/shop/' + path.split("/")[0] + '?src=bill">See this shop\'s stock and prices</a>';
+      if (!/^[0-9a-f-]{36}\/[0-9a-f-]{36}-[0-9a-z]{6,20}\.pdf$/.test(path) || !CFG) {
+        card("<h1>Bill not found</h1><p>This link looks incomplete. Ask the shop to send it again.</p>" + home);
+      } else {
+        var url = CFG.supabaseUrl + "/storage/v1/object/public/bills/" + path;
+        var show = function () { card('<div style="font-size:40px">🧾</div><h1>Your bill is ready</h1><p>Thank you for shopping. Open it below, or save it to your phone.</p>' +
+          '<a class="btn" href="' + url + '">Open bill (PDF)</a>' +
+          '<a class="btn line" href="' + url + '?download=bill.pdf">Download</a>' + shopBtn + home +
+          '<small>Sent by the shop through My Market. Save it to your phone — the link works for 2 days.</small>'); };
+        var tries2 = 0;
+        var check = function () {
+          fetch(url, { method: "HEAD", cache: "no-store" }).then(function (r) {
+            if (r.ok) return show();
+            if (expired()) { card('<div style="font-size:40px">🧾</div><h1>This bill link has expired</h1><p>Bill PDFs stay online for 2 days. Ask the shop to send it again — they keep every bill.</p>' + shopBtn); return; }
+            if (++tries2 < 10) { card('<div style="font-size:40px">⏳</div><h1>Your bill is on its way</h1><p>The shop is sending it — this page opens it as soon as it arrives.</p>'); setTimeout(check, 3000); }
+            else card('<h1>Bill not available</h1><p>The shop\'s phone may be offline — open this link again a little later. Bill links also expire after 2 days: then ask the shop to send it again.</p>' + home);
+          }).catch(function () { show(); });
+        };
+        check();
+      }
     }
   </script>
 </body>

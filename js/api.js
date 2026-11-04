@@ -165,6 +165,7 @@ window.MM_API = (function () {
         if (e.price != null) { it.price = e.price; it.mrp = Math.max(it.mrp || 0, e.price); }
         if (e.cost != null) it.cost = e.cost;
         if (e.reorderAt != null) it.reorderAt = e.reorderAt;
+        if ("code" in e) it.code = e.code ? String(e.code).trim().slice(0, 200) : null;
         if (e.inStock != null && (!fb[it.id] || fb[it.id].at < e.at)) {
           if (e.inStock) { it.lastConfirmed = e.at; it.reportedOut = null; }
           else { it.reportedOut = e.at; it.lastConfirmed = null; }
@@ -647,7 +648,7 @@ window.MM_API = (function () {
   const marketRow = (m) => ({ id: m.id, name: m.name, area: m.area || null, locality: m.locality || null, pincode: m.pincode || null,
     lat: m.lat, lng: m.lng, radius_m: m.radiusM || 300, pending: true, tagline: m.tagline || null });
   const itemRow = (shopId, it) => ({ id: it.id, shop_id: shopId, name: String(it.name).slice(0, 120), brand: it.brand || null, cat: it.cat,
-    price: it.price ?? null, mrp: it.mrp ?? null, cost: it.cost ?? null, reorder_at: it.reorderAt ?? 3 });
+    price: it.price ?? null, mrp: it.mrp ?? null, cost: it.cost ?? null, reorder_at: it.reorderAt ?? 3, ...(it.code ? { code: it.code } : {}) });
   // ---------- product details (shared catalogue) ----------
   // details d = { productId?, barcode, model, size, mrp, features[], description, specMap{}, keywords[],
   //               productPhoto (url), photoCredit, source }
@@ -732,10 +733,12 @@ window.MM_API = (function () {
     if (patch.reorderAt != null) row.reorder_at = patch.reorderAt;
     if (patch.mrp != null) row.mrp = patch.mrp;
     if (patch.removed) row.removed = true;
+    if ("code" in patch) row.code = patch.code ? String(patch.code).trim().slice(0, 200) : null;
     if (Object.keys(row).length) q(shopId, { op: "update", table: "items", id: itemId, patch: row });
     const it = getShop(shopId)?.items.find((x) => x.id === itemId); if (!it) return;
     if (patch.price != null) { it.price = patch.price; }
     if (patch.mrp != null) it.mrp = patch.mrp;
+    if ("code" in patch) it.code = row.code;
     if (patch.inStock === true) { it.lastConfirmed = Date.now(); it.reportedOut = null; }
     if (patch.inStock === false) { it.reportedOut = Date.now(); it.lastConfirmed = null; }
     if (patch.removed) { const sh = getShop(shopId); sh.items = sh.items.filter((x) => x.id !== itemId); }
@@ -873,6 +876,14 @@ window.MM_API = (function () {
     const disc = Math.min(Math.max(0, Math.round(discount || 0)), sub);
     return { sub, discount: disc, total: sub - disc, units: lines.reduce((a, l) => a + l.qty, 0) };
   }
+  // ---------- scanning ----------
+  // Barcodes: leading zeros differ between UPC and EAN of the same pack, so ignore them.
+  const codeKey = (c) => { c = String(c || "").trim(); return /^\d+$/.test(c) ? c.replace(/^0+/, "") : c; };
+  function itemByCode(shopId, code) {
+    const k = codeKey(code); if (!k) return null;
+    return getShop(shopId)?.items.find((it) => [it.code, it.barcode].some((x) => x && codeKey(x) === k)) || null;
+  }
+
   // ---------- bill numbers ----------
   // Each phone gets blocks of numbers from the server ([[next, last], …]) so a
   // shop's phones never print the same number, even offline. Without a block
@@ -898,6 +909,15 @@ window.MM_API = (function () {
     list.push([first, first + n - 1]); all[shopId] = list; store.set("billNos", all);
   }
 
+  // a long random code for the customer's bill link (bill.html#b=…)
+  const shareToken = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"; return [...crypto.getRandomValues(new Uint8Array(24))].map((x) => c[x % c.length]).join(""); };
+  // an older bill (made before links) gets its code when it is sent again
+  function billToken(id) {
+    const all = store.get("bills", []); const b = all.find((x) => x.id === id); if (!b) return null;
+    if (!b.shareToken) { b.shareToken = shareToken(); store.set("bills", all); q(b.shopId, { op: "update", table: "bills", id: b.id, patch: { share_token: b.shareToken } }); }
+    return b.shareToken;
+  }
+
   function saveBill(shopId, { lines, discount = 0, pay = "cash", phone = "", received = null }) {
     lines = (lines || []).map((l) => ({ ...l, name: String(l.name || "Item").slice(0, 120), qty: Math.max(1, count(l.qty)), price: money(l.price) ?? 0 })).filter((l) => l.qty > 0);
     if (!lines.length) throw new Error("The cart is empty");
@@ -907,7 +927,7 @@ window.MM_API = (function () {
     const seq = store.get("billSeq", {}), next = takeBillNo(shopId);
     seq[shopId] = Math.max(seq[shopId] || 1000, next.n);
     const b = {
-      id: uuid(), no: next.n, shopId, at: Date.now(),
+      id: uuid(), no: next.n, shopId, shareToken: shareToken(), at: Date.now(),
       lines: lines.map((l) => ({ id: uuid(), itemId: l.itemId || null, name: l.name, brand: l.brand || "", qty: l.qty, price: l.price, cost: l.cost ?? null })),
       ...t, pay, phone: phone || "", received: pay === "cash" && received ? money(received) : null,
     };
@@ -916,9 +936,9 @@ window.MM_API = (function () {
     store.set("billSeq", seq); store.set("billNos", next.all);
     if (getShop(shopId)?.cloud && window.MM_CLOUD?.topUpBillNos) window.MM_CLOUD.topUpBillNos(shopId);
     q(shopId, { op: "insert", table: "bills", row: { id: b.id, shop_id: shopId, no: b.no, at: iso(b.at), sub: b.sub, discount: b.discount, total: b.total,
-      units: b.units, pay, phone: b.phone || null, received: b.received } });
-    for (const l of b.lines) q(shopId, { op: "insert", table: "bill_lines", row: { id: l.id, bill_id: b.id, shop_id: shopId, item_id: l.itemId,
-      name: l.name, brand: l.brand || null, qty: l.qty, price: l.price, cost: l.cost } });
+      units: b.units, pay, phone: b.phone || null, received: b.received, share_token: b.shareToken } });
+    b.lines.forEach((l, i) => q(shopId, { op: "insert", table: "bill_lines", row: { id: l.id, bill_id: b.id, shop_id: shopId, item_id: l.itemId,
+      name: l.name, brand: l.brand || null, qty: l.qty, price: l.price, cost: l.cost, pos: i } }));
     for (const l of b.lines) {
       const it = l.itemId && getShop(shopId)?.items.find((x) => x.id === l.itemId);
       if (it && it.qty != null) moveStock(shopId, l.itemId, { delta: -l.qty, reason: "sold", ref: b.id });
@@ -951,7 +971,7 @@ window.MM_API = (function () {
     };
     store.set("shopsAdded", [...store.get("shopsAdded", []).filter((s) => s.id !== r.id), shop]);
     const its = (items || []).filter((i) => !i.removed).map((i) => ({
-      id: i.id, name: i.name, brand: i.brand || "Generic", cat: i.cat, price: i.price, mrp: i.mrp, cost: i.cost, reorderAt: i.reorder_at,
+      id: i.id, name: i.name, brand: i.brand || "Generic", cat: i.cat, price: i.price, mrp: i.mrp, cost: i.cost, reorderAt: i.reorder_at, code: i.code || null,
       qty: i.qty, qty0: i.qty, stockAt: ms(i.stock_at), stockAt0: ms(i.stock_at), lastConfirmed: i.qty > 0 ? ms(i.stock_at) : null,
       photo: photoUrl(i.photo_path), addedAt: ms(i.created_at),
       ...(prod[i.product_id] ? productDetails(prod[i.product_id], photoUrl, r.id) : {}),
@@ -962,8 +982,8 @@ window.MM_API = (function () {
     store.set("ledger", store.get("ledger", []).filter((e) => e.shopId !== r.id));
     const lb = store.get("ledgerBase", {}); for (const k of Object.keys(lb)) if (lb[k].shopId === r.id) delete lb[k]; store.set("ledgerBase", lb);
     const bl = (bills || []).map((b) => ({ id: b.id, no: b.no, shopId: r.id, at: ms(b.at), sub: b.sub, discount: b.discount, total: b.total, units: b.units,
-      pay: b.pay, phone: b.phone || "", received: b.received, ...(b.cancelled_at ? { cancelled: ms(b.cancelled_at) } : {}),
-      lines: (b.bill_lines || []).map((l) => ({ id: l.id, itemId: l.item_id, name: l.name, brand: l.brand || "", qty: l.qty, price: l.price, cost: l.cost })) }));
+      pay: b.pay, phone: b.phone || "", received: b.received, shareToken: b.share_token || null, ...(b.cancelled_at ? { cancelled: ms(b.cancelled_at) } : {}),
+      lines: (b.bill_lines || []).slice().sort((p, r) => (p.pos ?? 999) - (r.pos ?? 999)).map((l) => ({ id: l.id, itemId: l.item_id, name: l.name, brand: l.brand || "", qty: l.qty, price: l.price, cost: l.cost })) }));
     store.set("bills", [...bl, ...store.get("bills", []).filter((b) => b.shopId !== r.id)].sort((a, b) => b.at - a.at));
     const seq = store.get("billSeq", {}); seq[r.id] = Math.max(seq[r.id] || 1000, ...bl.map((b) => b.no)); store.set("billSeq", seq);
     const pu = (purchases || []).map((p) => ({ id: p.id, shopId: r.id, at: ms(p.at), supplier: p.supplier || "", pay: p.pay, total: p.total,
@@ -1076,7 +1096,7 @@ window.MM_API = (function () {
     RANGES, getRange, setRange, trip, fmtTrip, nearArea, nearSearch, marketFor,
     REASONS, moveStock, stockLog, inventory, lowAt,
     billTotals, saveBill, cancelBill, billsFor, getBill, daySummary,
-    addDetails, photoSent, FULL, billNosLeft, addBillNos, registerShop, login, updateShop, normPhone, weakPin, addOwnItem, savePurchase, purchasesFor, hydrateShop, mergePublic, uuid, shopHas, saveDetails, productDetails, addPhoto, setBillLink, setShopPhoto, removeGalleryPhoto, getShop, getMarket, isOpen, itemStatus,
+    itemByCode, billToken, addDetails, photoSent, FULL, billNosLeft, addBillNos, registerShop, login, updateShop, normPhone, weakPin, addOwnItem, savePurchase, purchasesFor, hydrateShop, mergePublic, uuid, shopHas, saveDetails, productDetails, addPhoto, setBillLink, setShopPhoto, removeGalleryPhoto, getShop, getMarket, isOpen, itemStatus,
     search, ask, getAsk, replyAsk, pendingAsks, feedback, logSearch, addView,
     ownerShopId, ownerShop, isOwnerShop, claimShop, releaseShop, addShop, persistAddedShop, setItem, addItem, catalogFor, missedSales,
     getBag, addToBag, setQty, bagCount, bagLines, STEPS, placeOrder, getOrders, getOrder, advanceOrder, cancelOrder, ordersFor,

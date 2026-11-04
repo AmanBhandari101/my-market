@@ -28,6 +28,8 @@ Running it again later is safe.
 9. Then `supabase/billno.sql` (each phone gets its own block of bill numbers, so two phones never print the same number).
 10. Then `supabase/nearby.sql` (customers download only the shops near them).
 11. Then `supabase/bills_cleanup.sql` (bill PDFs are deleted after 2 days by the shop's own app).
+12. Then `supabase/bill_share.sql` (every bill is kept in the database; the customer's link shows it from there and makes the PDF on their phone).
+13. Then `supabase/scan_codes.sql` (scan any barcode or QR to sell or receive an item).
 
 ## 3. Login settings
 

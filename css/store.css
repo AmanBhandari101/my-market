@@ -573,3 +573,11 @@ body.site-mode.tabs-on #app { padding-bottom: 0; }
 .gc:first-child { border-top: 0; }
 .gc > span { flex: 1; min-width: 0; font-size: 13.5px; overflow-wrap: anywhere; }
 .gc em { display: block; font-style: normal; font-size: 11.5px; color: var(--ink-2); }
+
+/* ---------- scan to sell / scan stock in ---------- */
+.scanrow { display: flex; gap: 8px; align-items: stretch; }
+.scanrow .inshop { flex: 1; min-width: 0; }
+.scanbtn { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 0 16px; }
+.scanbtn .i { width: 18px; height: 18px; }
+.scanin.hit { animation: scanhit .45s ease; }
+@keyframes scanhit { 30% { box-shadow: 0 0 0 4px #1e8e4e; } }
