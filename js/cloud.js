@@ -358,6 +358,18 @@
     if (error) throw new Error(friendly(error)); return data || [];
   }
 
+  // ---------- staff: bank statement → payments done ----------
+  async function isAdmin() { const { data } = await sb.rpc("is_admin"); return data === true; }
+  async function importStatement(rows) {
+    const out = [];
+    for (let i = 0; i < rows.length; i += 400) {
+      const { data, error } = await sb.rpc("import_bank_statement", { p_rows: rows.slice(i, i + 400) });
+      if (error) throw new Error(friendly(error));
+      out.push(...(data || []));
+    }
+    return out;
+  }
+
   // ---------- orders from a shop's website (Hold it for me / Buy) ----------
   async function placeOrder(o) {
     const { data, error } = await sb.rpc("place_order", { p_shop: o.shopId, p_kind: o.kind, p_mode: o.mode, p_name: o.name, p_phone: o.phone,
@@ -429,7 +441,7 @@
   async function myNumber() { const { data } = await sb.auth.getSession(); const m = (data.session?.user?.email || "").match(/^91(\d{10})@/); return m ? m[1] : ""; }
   async function deleteShop(shopId) { const { error } = await sb.rpc("delete_my_shop", { p_shop: shopId }); if (error) throw new Error(friendly(error)); }
 
-  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, searchCatalog, searchOnline, myPlan, claimPayment, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
+  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, isAdmin, importStatement, searchCatalog, searchOnline, myPlan, claimPayment, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
     pending: () => Q.get().length, failedOps: () => Q.failed() };
 
   // start-up

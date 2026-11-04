@@ -32,6 +32,8 @@ Running it again later is safe.
 13. Then `supabase/scan_codes.sql` (scan any barcode or QR to sell or receive an item).
 14. Then `supabase/orders.sql` (customers order from a shop's website: Hold it for me / Buy).
 15. Then `supabase/billing.sql` (2 months free, then ₹150/month: plan status, UPI payments, grace steps). To switch payments on, put your UPI ID in `js/config.js` (`payUpi`). Staff commands to confirm payments or give free months are at the top of the file.
+16. Then `supabase/billing_v2.sql` (stricter missed-payment rules: website and analytics off after 7 days, read-only after 15 — enforced by the server).
+17. Then `supabase/payments_match.sql` (bank statement lines with a shop's payment code mark its plan paid). Add your own number as staff once: `insert into public.admins (phone) values ('98XXXXXXXX');`
 
 ## 3. Login settings
 

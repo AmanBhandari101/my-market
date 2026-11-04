@@ -871,3 +871,8 @@ body.has-scb .s-foot { padding-bottom: 110px; }
 .an-fc i { background: linear-gradient(180deg, #8fb7e8, #c8dcf5); }
 .an-hours span, .an-fc span { font-size: 10px; color: var(--ink-2); height: 12px; white-space: nowrap; }
 .an-wd { margin-top: 12px; }
+
+.paycode { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 10px 12px; border-radius: 12px; background: #f1faf4; border: 1px dashed #8cc9a3; }
+.paycode span { font-size: 12px; color: var(--ink-2); }
+.paycode b { font-size: 18px; letter-spacing: .08em; font-family: ui-monospace, Consolas, monospace; }
+.paycode .link { margin-left: auto; }

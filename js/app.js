@@ -420,9 +420,21 @@
         : '<div class="empty"><div class="serif">This shop isn\'t on My Market (any more).</div><p><a class="link" href="#/">Find shops near you</a></p></div>';
       return;
     }
+    const m = A.getMarket(s.marketId);
+    if (!ordersOn(s)) { // the shop's plan is overdue: its website is switched off
+      const ph = String(s.phone || "").replace(/\D/g, "").slice(-10);
+      app.innerHTML = `<div class="empty s-off">
+        <div class="serif">${esc(s.name)}</div>
+        <p>This shop's website is paused right now. You can still reach them:</p>
+        <div class="btn-row" style="justify-content:center;flex-wrap:wrap;gap:8px;margin-top:12px">
+          ${ph ? `<button class="btn auto" id="offwa">${ic("chat")} WhatsApp</button><a class="btn auto line" href="tel:+91${ph}">${ic("phone")} Call</a>` : ""}
+          <a class="btn auto line" href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}" target="_blank" rel="noopener">${ic("pin")} Directions</a></div>
+        <p style="margin-top:18px"><a class="link" href="#/">Find other shops near you</a></p></div>`;
+      $("#offwa") && ($("#offwa").onclick = () => waShop(s, `Hi ${s.name}, I found your shop on My Market.`));
+      return;
+    }
     document.body.classList.add("site-mode");
     cleanups.push(() => document.body.classList.remove("site-mode"));
-    const m = A.getMarket(s.marketId);
     const isSaved = saved.includes(id);
     const hl = params.get("item");
     const src = params.get("src") || visitSrc[id] || "app";
@@ -938,7 +950,7 @@
   // ---------- bottom tabs (customer screens only) ----------
   const TAB_ON = { "": "home", item: "home", search: "search", ask: "search", me: "me", orders: "me", order: "me", bag: "bag" };
   // Shop app: three pages — Bill (home), Stock, Reports.
-  const BIZ_ON = { "": "bill", bill: "bill", cart: "bill", inbox: "bill", items: "stock", stockin: "stock", reports: "reports", bills: "reports", insights: "reports", site: "reports", security: "reports", backup: "reports", plan: "reports", analytics: "reports" };
+  const BIZ_ON = { "": "bill", bill: "bill", cart: "bill", inbox: "bill", items: "stock", stockin: "stock", reports: "reports", bills: "reports", insights: "reports", site: "reports", security: "reports", backup: "reports", plan: "reports", analytics: "reports", admin: "reports" };
   function syncTabs(r, parts = []) {
     const nav = $("#tabs"); if (!nav) return;
     if (BIZ) {

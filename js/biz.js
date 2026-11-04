@@ -20,6 +20,7 @@
     if (sub === "cart") return cartView();
     if (sub === "backup") return backupView(params);
     if (sub === "plan") return planView();
+    if (sub === "admin") return adminView();
     if (sub === "bills") return billsView();
     if (sub === "insights") return insightsView();
     if (sub === "analytics") return analyticsView(params);
@@ -162,9 +163,12 @@
   const planOf = (s) => A.store.get("plan:" + s.id, null);
   function planStage(s) {
     const p = planOf(s); if (!p || !s.cloud) return { state: "unknown" };
-    const end = Date.parse(p.access_until), now = Date.now(), paid = Math.max(Date.parse(p.paid_until || 0) || 0, Date.parse(p.provisional_until || 0) || 0);
-    const state = now < end ? (paid > now ? "active" : "trial") : now < end + 7 * DAYMS ? "due" : now < end + 14 * DAYMS ? "orders_off" : "read_only";
-    return { ...p, state, end, daysLeft: Math.ceil((end - now) / DAYMS), daysOver: Math.floor((now - end) / DAYMS) };
+    // a phone set to an earlier date can't go back before the server's last known time
+    const now = Math.max(Date.now(), Date.parse(p.server_now || 0) || 0, A.store.get("planClock:" + s.id, 0));
+    A.store.set("planClock:" + s.id, now);
+    const end = Date.parse(p.access_until), paid = Math.max(Date.parse(p.paid_until || 0) || 0, Date.parse(p.provisional_until || 0) || 0);
+    const state = now < end ? (paid > now ? "active" : "trial") : now < end + 7 * DAYMS ? "due" : now < end + 15 * DAYMS ? "orders_off" : "read_only";
+    return { ...p, state, end, now, daysLeft: Math.ceil((end - now) / DAYMS), daysOver: Math.floor((now - end) / DAYMS) };
   }
   // read-only only bites when payments are switched on (a UPI ID is set)
   const planLocked = (s) => !!PAY() && planStage(s).state === "read_only";
@@ -180,14 +184,17 @@
     try { const p = await window.MM_CLOUD.myPlan(s.id); if (p) { A.store.set("plan:" + s.id, p); planAt = Date.now(); $$("[data-planbar]").forEach((el) => { el.outerHTML = planBar(s); }); } return p; }
     catch { return null; }
   }
-  if (window.MM_APP === "business") { setTimeout(() => refreshPlan(true), 2500); setInterval(() => refreshPlan(), 3600000); }
+  if (window.MM_APP === "business") {
+    setTimeout(() => refreshPlan(true), 2500); setInterval(() => refreshPlan(), 3600000);
+    setTimeout(() => { const s0 = A.ownerShop(); if (s0 && s0.cloud && window.MM_CLOUD?.isAdmin) window.MM_CLOUD.isAdmin().then((y) => A.store.set("isAdmin", y)).catch(() => {}); }, 4000);
+  }
   function planBar(s) {
     const st = planStage(s), fmt = (t) => new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
     let cls = "", msg = "";
     if (st.state === "trial" && st.daysLeft <= 10) { cls = "soon"; msg = `Free plan: ${st.daysLeft} day${st.daysLeft === 1 ? "" : "s"} left (till ${fmt(st.end)}) — then ₹150/month`; }
     else if (st.state === "active" && st.daysLeft <= 5) { cls = "soon"; msg = `Your plan ends on ${fmt(st.end)} — renew ₹150`; }
-    else if (st.state === "due") { cls = "due"; msg = PAY() ? `₹150 due — pay now to keep everything running` : `Your free months are over`; }
-    else if (st.state === "orders_off") { cls = "bad"; msg = `Website orders are paused — pay ₹150 to turn them back on`; }
+    else if (st.state === "due") { cls = "due"; msg = PAY() ? `₹150 due — pay within ${7 - st.daysOver} day${7 - st.daysOver === 1 ? "" : "s"} to keep your website and analytics on` : `Your free months are over`; }
+    else if (st.state === "orders_off") { cls = "bad"; msg = `Website and analytics paused — billing stops in ${15 - st.daysOver} day${15 - st.daysOver === 1 ? "" : "s"}. Pay ₹150`; }
     else if (st.state === "read_only") { cls = "bad"; msg = PAY() ? `Read-only — pay ₹150 to make new bills (your data is safe)` : `Your free months are over`; }
     return msg ? `<a class="planbar ${cls}" href="#/biz/plan" data-planbar>${esc(msg)}${ic("arrow")}</a>` : `<span data-planbar hidden></span>`;
   }
@@ -195,18 +202,20 @@
   function planView() {
     const s = A.ownerShop();
     const upi = PAY(), name = (window.MM_CONFIG || {}).payName || "My Market";
-    const ref = "MM" + s.id.replace(/-/g, "").slice(0, 6).toUpperCase();
+    // the shop's payment code: goes first in the UPI note so it shows in the bank statement,
+    // where the server reads it and marks the payment done (same rule as shop_pay_code on the server)
+    const ref = "MM" + s.id.replace(/-/g, "").slice(0, 8).toUpperCase();
     let months = 1, pays = null;
     const draw = () => {
       const st = planStage(s), fmt = (t) => new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
       const amt = months === 12 ? 1500 : 150;
-      const link = `upi://pay?pa=${encodeURIComponent(upi).replace("%40", "@")}&pn=${encodeURIComponent(name)}&am=${amt}&cu=INR&tn=${encodeURIComponent(`${ref} ${months === 12 ? "1 year" : "1 month"}`)}`;
+      const link = `upi://pay?pa=${encodeURIComponent(upi).replace("%40", "@")}&pn=${encodeURIComponent(name)}&am=${amt}&cu=INR&tn=${encodeURIComponent(`${ref} ${months === 12 ? "12M" : "1M"} MyMarket`)}`;
       const head = !s.cloud ? ["Log in to see your plan", "Your plan lives on the server with your shop."]
         : st.state === "unknown" ? ["Checking your plan…", "Needs the internet once."]
         : st.state === "trial" ? [`Free plan · ${st.daysLeft} day${st.daysLeft === 1 ? "" : "s"} left`, `Free till ${fmt(st.end)}. After that ₹150 a month — everything stays the same.`]
         : st.state === "active" ? [`Plan active till ${fmt(st.end)}`, st.provisional_until && Date.parse(st.provisional_until) > Date.now() && !(Date.parse(st.paid_until || 0) > Date.now()) ? "Your payment is being checked — usually within a day. Everything works meanwhile." : "Thank you! Everything is on."]
         : st.state === "due" ? ["₹150 due", `Your plan ended on ${fmt(st.end)}. Everything still works for ${7 - st.daysOver} more day${7 - st.daysOver === 1 ? "" : "s"}.`]
-        : st.state === "orders_off" ? ["Website orders paused", `Billing still works for ${14 - st.daysOver} more day${14 - st.daysOver === 1 ? "" : "s"}, then the app becomes read-only.`]
+        : st.state === "orders_off" ? ["Website and analytics paused", `Your website is off and analytics stopped at ${fmt(st.end)}. Billing and stock work for ${15 - st.daysOver} more day${15 - st.daysOver === 1 ? "" : "s"}, then the app becomes read-only.`]
         : ["Read-only", "You can see all your bills, back them up and export them. Pay to make new bills again — nothing was lost."];
       U.app.innerHTML = `
         ${bizTop("My plan")}
@@ -225,17 +234,19 @@
           <label class="small quiet" style="display:block;margin-top:14px">After paying, type the <b>UPI transaction ID (UTR)</b> — 12 digits, in your UPI app's payment details
             <input class="field" id="utr" inputmode="numeric" maxlength="40" placeholder="e.g. 412345678901"></label>
           <button class="btn line" id="paid" style="margin-top:10px">I've paid ₹${amt.toLocaleString("en-IN")}</button>
-          <p class="faint tiny" style="margin:8px 0 0">Everything stays on while we check it (usually within a day). Reference: ${ref}</p>
+          <div class="paycode"><span>Your payment code</span><b>${ref}</b><button class="link" id="copyref">Copy</button></div>
+          <p class="faint tiny" style="margin:6px 0 0">It's already in the UPI note. Paying another way (bank transfer)? Write <b>${ref}</b> in the note so your payment is found automatically.</p>
         </div>` : `<div class="rsec"><p class="small quiet" style="margin:0">${s.cloud ? "Payments open soon — enjoy the free plan. We'll tell you before anything changes." : "Log in with your number to see your plan."}</p></div>`}
         <div class="rsec"><div class="rhd"><b>Payments</b></div><div id="paylist">${pays == null ? '<p class="quiet small">Loading…</p>' : pays.length ? pays.map((x) => `<div class="payrow ${x.status}">
           <span><b>${x.method === "grant" ? "Free months" : "₹" + x.amount.toLocaleString("en-IN")}</b> · ${x.months} month${x.months > 1 ? "s" : ""}<em>${fmt(x.created_at)}${x.ref ? " · " + esc(x.ref) : ""}${x.reason ? " · " + esc(x.reason) : ""}</em></span>
           <i>${{ claimed: "Checking", confirmed: "Paid ✓", rejected: "Not received" }[x.status]}</i></div>`).join("") : '<p class="quiet small">No payments yet.</p>'}</div></div>
         <div class="rsec"><div class="rhd"><b>If a payment is missed</b></div>
-          <ol class="gsteps"><li>Days 1–7: everything works, with a reminder.</li><li>Days 8–14: billing works; your website stops taking orders.</li><li>After that: read-only — you can still see, back up and export everything.</li></ol>
+          <ol class="gsteps"><li>Days 1–7: everything works, with a reminder.</li><li>Days 8–15: billing and stock work; your website is switched off and analytics stop updating.</li><li>After day 15: read-only — you can still see, back up and export everything.</li></ol>
           <p class="faint tiny" style="margin:6px 0 0">Pay any time and everything turns back on at once. Nothing is ever deleted.</p></div>
         <div style="height:30px"></div>`;
       bindTop();
       $$("[data-mo]").forEach((x) => x.onclick = () => { months = +x.dataset.mo; draw(); });
+      $("#copyref") && ($("#copyref").onclick = async () => { try { await navigator.clipboard.writeText(ref); U.toast("Payment code copied"); } catch { prompt("Your payment code", ref); } });
       if ($("#payqr")) makeQR(link).then((qr) => { const el = $("#payqr"); if (el) el.innerHTML = qr.createSvgTag({ cellSize: 3, margin: 2, scalable: true }); }).catch(() => { const el = $("#payqr"); el && el.remove(); });
       $("#paid") && ($("#paid").onclick = async (ev) => {
         const utr = $("#utr").value.replace(/[^A-Za-z0-9]/g, "");
@@ -314,6 +325,7 @@
         ${s.cloud ? `<a class="entry" href="#/biz/security"><div class="body"><div class="name">Login & security</div><div class="note">Backup number, change PIN, log out other phones</div></div>${ic("arrow")}</a>` : ""}
         <button class="entry" id="m-bs"><div class="body"><div class="name">Bill settings</div><div class="note">Advert, phone and GSTIN on your bills</div></div>${ic("arrow")}</button>
         <a class="entry" href="index.html#/shop/${s.id}" target="_blank" rel="noopener"><div class="body"><div class="name">See my shop as customers do</div><div class="note">Opens the My Market customer app</div></div>${ic("arrow")}</a>
+        ${A.store.get("isAdmin", false) ? `<a class="entry" href="#/biz/admin"><div class="body"><div class="name">Admin · payments</div><div class="note">Load a bank statement — payments are marked done by code</div></div>${ic("arrow")}</a>` : ""}
         <a class="entry" href="#/biz/plan"><div class="body"><div class="name">My plan</div><div class="note">${(() => { const st = planStage(s); return st.state === "trial" ? `Free plan · ${st.daysLeft} days left` : st.state === "active" ? "Active" : st.state === "unknown" ? "2 months free, then ₹150/month" : "Payment due"; })()}</div></div>${ic("arrow")}</a>
         <a class="entry" href="#/biz/backup"><div class="body"><div class="name">Back up bills</div><div class="note">Save a copy to Google Drive</div></div>${ic("arrow")}</a>
         <a class="entry" href="#/biz/insights"><div class="body"><div class="name">What people searched for</div><div class="note">Items nobody near you had</div></div>${ic("arrow")}</a>
@@ -584,15 +596,101 @@
     U.openSheet("", draw);
   }
 
+  // ---------- staff: load a bank statement, payments are marked done by the shop's code ----------
+  // Reads Excel / CSV statements from any bank: finds the credit, narration, date and
+  // transaction-ID columns, keeps credits whose narration has a code like MM9D6E77E2.
+  let xlsxLoad = null;
+  const loadXLSX = () => xlsxLoad || (xlsxLoad = new Promise((res, rej) => {
+    const sc = document.createElement("script"); sc.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+    sc.onload = () => res(window.XLSX); sc.onerror = () => { xlsxLoad = null; rej(new Error("Needs the internet to read Excel files")); }; document.head.appendChild(sc);
+  }));
+  const num = (v) => { const n = parseFloat(String(v ?? "").replace(/[^0-9.\-]/g, "")); return isFinite(n) ? n : 0; };
+  function statementRows(grid) {
+    // find the header row: it names a narration column and a credit column
+    const low = (x) => String(x ?? "").toLowerCase().trim();
+    let h = -1, col = {};
+    for (let i = 0; i < Math.min(grid.length, 60); i++) {
+      const r = grid[i].map(low);
+      const find = (re, not) => r.findIndex((x) => re.test(x) && !(not && not.test(x)));
+      const narr = find(/narration|description|particular|remark|details|transaction details/);
+      const cr = find(/credit|deposit|cr amount|amount \(cr\)|^cr$/, /debit/);
+      if (narr >= 0 && cr >= 0) { h = i; col = { narr, cr, dt: find(/date/), ref: find(/ref|utr|chq|cheque/), amt: -1 }; break; }
+      const amt = find(/^amount|txn amount|transaction amount/), type = find(/type|dr\s*\/\s*cr|cr\s*\/\s*dr/);
+      if (narr >= 0 && amt >= 0 && type >= 0) { h = i; col = { narr, cr: -1, amt, type, dt: find(/date/), ref: find(/ref|utr|chq|cheque/) }; break; }
+    }
+    if (h < 0) return null;
+    const out = [];
+    for (const r of grid.slice(h + 1)) {
+      const narration = String(r[col.narr] ?? "").trim(); if (!narration) continue;
+      let amount = col.cr >= 0 ? num(r[col.cr]) : (/cr|credit/i.test(String(r[col.type] ?? "")) ? num(r[col.amt]) : 0);
+      if (!(amount > 0)) continue;
+      const refCell = col.ref >= 0 ? String(r[col.ref] ?? "").replace(/\D/g, "") : "";
+      const utr = (refCell.length >= 10 ? refCell : (narration.match(/\b\d{12}\b/) || [""])[0]);
+      const dtRaw = col.dt >= 0 ? r[col.dt] : "";
+      let at = ""; if (dtRaw instanceof Date) at = dtRaw.toISOString();
+      else if (dtRaw) { const m = String(dtRaw).match(/(\d{1,2})[\/\-. ](\d{1,2}|[A-Za-z]{3})[\/\-. ](\d{2,4})/); if (m) { const mon = isNaN(+m[2]) ? "JanFebMarAprMayJunJulAugSepOctNovDec".indexOf(m[2].slice(0, 3)) / 3 : +m[2] - 1; const y = +m[3] < 100 ? 2000 + +m[3] : +m[3]; const d = new Date(y, mon, +m[1], 12); if (!isNaN(d)) at = d.toISOString(); } }
+      out.push({ utr, amount, narration, at, code: (narration.toUpperCase().match(/MM[0-9A-F]{8}/) || [""])[0] });
+    }
+    return out;
+  }
+  function adminView() {
+    const s = A.ownerShop();
+    let rows = null, results = null, busy = false, fileName = "";
+    const draw = () => {
+      const withCode = rows ? rows.filter((r) => r.code && r.utr) : [];
+      const counts = results ? results.reduce((m2, r) => (m2[r.result] = (m2[r.result] || 0) + 1, m2), {}) : null;
+      U.app.innerHTML = `
+        ${bizTop("Admin · payments")}
+        <div class="rsec"><p class="small" style="margin:0 0 8px">Load your bank statement (Excel or CSV from net banking). Every credit whose note has a shop's payment code, like <b>MM9D6E77E2</b>, is marked paid and that shop's plan is extended — ₹150 = 1 month, ₹1,500 = 1 year. Loading the same statement twice is safe.</p>
+          <label class="btn line" style="display:block;text-align:center;cursor:pointer">${ic("receipt")} Choose statement file<input type="file" id="stf" accept=".csv,.xls,.xlsx,text/csv" hidden></label>
+          ${fileName ? `<p class="faint tiny" style="margin:6px 0 0">${esc(fileName)}</p>` : ""}</div>
+        ${rows ? `<div class="rsec"><div class="rhd"><b>${withCode.length} payment${withCode.length === 1 ? "" : "s"} with a shop code</b><span class="faint tiny">${rows.length} credits in the file</span></div>
+          ${withCode.slice(0, 50).map((r) => `<div class="an-li"><span><b>${esc(r.code)}</b><em>${esc(r.narration.slice(0, 70))}${r.at ? " · " + new Date(r.at).toLocaleDateString("en-IN") : ""}</em></span><b>₹${r.amount.toLocaleString("en-IN")}</b></div>`).join("") || '<p class="quiet small">No line in this file has a shop code. Check that the bank statement shows the UPI note.</p>'}
+          ${withCode.length && !results ? `<button class="btn" id="mark" style="margin-top:12px">${busy ? "Marking…" : `Mark ${withCode.length} payment${withCode.length === 1 ? "" : "s"} done`}</button>` : ""}</div>` : ""}
+        ${results ? `<div class="rsec"><div class="rhd"><b>Done</b></div>
+          <div class="an-kpis three"><div><em>Marked paid</em><b>${counts.matched || 0}</b></div><div><em>Already done before</em><b>${counts.already_done || 0}</b></div><div><em>Need a look</em><b>${(counts.unknown_shop || 0) + (counts.too_small || 0) + (counts.error || 0)}</b></div></div>
+          ${results.filter((r) => !["matched", "already_done"].includes(r.result)).map((r) => `<div class="an-li"><span>${esc(r.code || r.utr || "")}<em>${{ unknown_shop: "No shop has this code", too_small: "Amount under ₹150", no_code: "No code", error: esc(r.error || "Error") }[r.result] || esc(r.result)}</em></span></div>`).join("")}</div>` : ""}
+        <div style="height:30px"></div>`;
+      bindTop();
+      $("#stf").onchange = async (e) => {
+        const f = e.target.files[0]; if (!f) return; fileName = f.name; results = null;
+        try {
+          let grid;
+          if (/\.csv$/i.test(f.name) || f.type === "text/csv") {
+            const text = await f.text();
+            grid = text.split(/\r?\n/).map((line) => { const out = []; let cur = "", q = false; for (const ch of line) { if (ch === '"') q = !q; else if (ch === "," && !q) { out.push(cur); cur = ""; } else cur += ch; } out.push(cur); return out; });
+          } else {
+            const X = await loadXLSX(); const wb = X.read(await f.arrayBuffer(), { type: "array", cellDates: true });
+            grid = X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: "" });
+          }
+          rows = statementRows(grid);
+          if (!rows) { rows = null; U.toast("Couldn't find the narration and credit columns in this file", 6000); }
+        } catch (x) { U.toast(x.message || "Couldn't read this file", 6000); }
+        draw();
+      };
+      $("#mark") && ($("#mark").onclick = async () => {
+        if (busy) return; busy = true; draw();
+        try { results = await window.MM_CLOUD.importStatement(withCode.map(({ utr, amount, narration, at }) => ({ utr, amount, narration, at }))); }
+        catch (x) { U.toast(x.message, 7000); }
+        busy = false; draw();
+      });
+    };
+    if (!A.store.get("isAdmin", false)) { U.app.innerHTML = `${bizTop("Admin")}<div class="rsec"><p class="small quiet">This page is only for My Market staff numbers.</p></div>`; bindTop(); return; }
+    draw();
+  }
+
   // ---------- shop analytics ----------
   // Standard retail measures, worked out on the phone from the shop's own bills,
   // items and purchases — each with a plain "what to do".
   function analyticsView(params) {
     const s = A.ownerShop();
-    const DAY = 86400000, now = Date.now();
+    const DAY = 86400000, stage = planStage(s);
+    // overdue past day 7: analytics stay as they were on the day the plan ended
+    const frozen = !!PAY() && (stage.state === "orders_off" || stage.state === "read_only");
+    const now = frozen ? stage.end : Date.now();
     const span = [7, 30, 90].includes(+params.get("p")) ? +params.get("p") : 30;
     const from = now - span * DAY, prevFrom = from - span * DAY;
-    const all = A.billsFor(s.id).filter((x) => !x.cancelled);
+    const all = A.billsFor(s.id).filter((x) => !x.cancelled && x.at < now);
     const bills = all.filter((x) => x.at >= from), prev = all.filter((x) => x.at >= prevFrom && x.at < from);
     const cancelled = A.billsFor(s.id).filter((x) => x.cancelled && x.at >= from).length;
     const itemOf = (id) => s.items.find((i) => i.id === id);
@@ -688,6 +786,7 @@
 
     U.app.innerHTML = `
       ${bizTop("Shop analytics")}
+      ${frozen ? `<a class="planbar bad" href="#/biz/plan">Analytics are frozen at ${new Date(now).toLocaleDateString("en-IN", { day: "numeric", month: "short" })} — pay ₹150 to see the latest${ic("arrow")}</a>` : ""}
       <div class="pad an-period"><div class="words">${[7, 30, 90].map((k) => `<a class="word ${span === k ? "on" : ""}" href="#/biz/analytics?p=${k}">Last ${k} days</a>`).join("")}</div></div>
       ${!bills.length ? `<div class="rsec">${none("No bills in this period yet. Analytics fill in as you bill — even a week of bills shows your best times and top sellers.")}</div>` : `
 
