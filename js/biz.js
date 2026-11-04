@@ -574,6 +574,24 @@
     U.app.innerHTML = `
       ${bizTop("My website")}
       ${!s.cloud ? '<div class="banner" style="margin:12px var(--gut) 0"><div class="serif">Not online yet</div><p>Log in with your mobile number and PIN so your shop is on the server — then your website goes live.</p></div>' : ""}
+      <div class="rsec"><div class="rhd"><b>Photos and details</b><a class="link" href="${esc(siteLink(s, "app"))}" target="_blank" rel="noopener">Preview</a></div>
+        <p class="small quiet" style="margin:0 0 10px">These show on your website. Good photos of your shop front and shelves bring more customers.</p>
+        <label class="ph-cover" id="pcover">${s.cover ? `<img src="${esc(s.cover)}" alt="">` : `${ic("camera")}<em>Add a cover photo — your shop front</em>`}<input type="file" accept="image/*" hidden data-up="cover"></label>
+        <div class="ph-row">
+          <label class="ph-logo" id="plogo">${s.logo ? `<img src="${esc(s.logo)}" alt="">` : `<span>${esc(s.name[0])}</span><em>Logo</em>`}<input type="file" accept="image/*" hidden data-up="logo"></label>
+          <p class="small quiet" style="margin:0">Tap the cover or the logo to change it. Square logo works best.</p>
+        </div>
+        <div class="eyebrow" style="margin:14px 0 8px">Gallery <span class="faint">· up to 6 photos</span></div>
+        <div class="ph-gal">${(s.gallery || []).map((g, i) => `<div class="g"><img src="${esc(g)}" alt=""><button data-rmg="${i}" aria-label="Remove photo">×</button></div>`).join("")}
+          ${(s.gallery || []).length < 6 ? `<label class="g add">${ic("plus")}<input type="file" accept="image/*" hidden data-up="gallery"></label>` : ""}</div>
+        <div class="form" style="margin-top:14px">
+          <label>About your shop <span class="faint tiny">— a few lines (up to 600 letters)</span><textarea class="field" id="sabout" rows="3" maxlength="600" placeholder="e.g. Family shop since 1998. All hardware, plumbing and electrical items. Wholesale rates for contractors.">${esc(s.about || "")}</textarea></label>
+          <label>Payments you accept</label>
+          <div class="words" id="spay">${["Cash", "UPI", "Card", "Credit (khata)"].map((p) => `<button type="button" class="word ${(s.payMethods || []).includes(p) ? "on" : ""}" data-pay="${p}">${p}</button>`).join("")}</div>
+          <label style="display:flex;align-items:center;gap:10px;text-transform:none"><input type="checkbox" id="sdel" ${s.delivery ? "checked" : ""} style="width:20px;height:20px;accent-color:#1e8e4e"> We do home delivery</label>
+          <button class="btn" id="ssave" type="button">Save details</button>
+        </div>
+      </div>
       <div class="rsec"><div class="rhd"><b>Your shop's website</b><a class="link" href="${esc(siteLink(s, "app"))}" target="_blank" rel="noopener">Open</a></div>
         <p class="small quiet" style="margin:0 0 8px">Free. Shows your items, prices, stock, hours and location — and lets people WhatsApp or call you.</p>
         <div class="linkbox"><input class="field" readonly value="${esc(link)}" id="lnk"><button class="btn auto" id="copy">Copy</button></div>
@@ -599,6 +617,23 @@
       </div>
       <div style="height:30px"></div>`;
     bindTop();
+    // photos and details
+    const SIZE = { cover: [1400, 0.78], logo: [500, 0.85], gallery: [1200, 0.78] };
+    $$("[data-up]").forEach((inp) => inp.onchange = async () => {
+      const f = inp.files[0]; if (!f) return;
+      const kind = inp.dataset.up, [max, ql] = SIZE[kind];
+      U.toast("Adding photo…");
+      const data = await shrinkPhoto(f, max, ql);
+      if (!data) return U.toast("Couldn't read that photo");
+      A.setShopPhoto(s.id, kind, data);
+      U.toast("Photo saved — it shows on your website"); siteView(params);
+    });
+    $$("[data-rmg]").forEach((b) => b.onclick = (e) => { e.preventDefault(); A.removeGalleryPhoto(s.id, +b.dataset.rmg); siteView(params); });
+    $$("#spay [data-pay]").forEach((b) => b.onclick = () => b.classList.toggle("on"));
+    $("#ssave").onclick = () => {
+      A.updateShop(s.id, { about: $("#sabout").value.trim(), payMethods: $$("#spay .word.on").map((b) => b.dataset.pay), delivery: $("#sdel").checked });
+      U.toast("Saved — it shows on your website");
+    };
     const copy = async (text, msg) => { try { await navigator.clipboard.writeText(text); U.toast(msg); } catch { prompt("Copy this link", text); } };
     $("#copy").onclick = () => copy(link, "Link copied");
     $("#copyg").onclick = () => copy(siteLink(s, "gmaps"), "Google Maps link copied — paste it in Website");
@@ -857,14 +892,14 @@
 
   // ---------- new item: photo + name + price + quantity ----------
   // The photo is shrunk to 360 px and kept with the item and uploaded to the server.
-  function shrinkPhoto(file) {
+  function shrinkPhoto(file, max = 360, q = 0.72) {
     return new Promise((res) => {
       const img = new Image(), url = URL.createObjectURL(file);
       img.onload = () => {
-        const k = Math.min(1, 360 / Math.max(img.width, img.height));
+        const k = Math.min(1, max / Math.max(img.width, img.height));
         const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
         c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
-        res(c.toDataURL("image/jpeg", 0.72));
+        res(c.toDataURL("image/jpeg", q));
       };
       img.onerror = () => { URL.revokeObjectURL(url); res(null); };
       img.src = url;

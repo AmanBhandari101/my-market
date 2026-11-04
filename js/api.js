@@ -555,6 +555,9 @@ window.MM_API = (function () {
     if ("promo" in patch) row.promo = patch.promo || null;
     if ("phone" in patch) row.phone = patch.phone || null;
     if ("gst" in patch) row.gst = patch.gst || null;
+    if ("about" in patch) row.about = (patch.about || "").slice(0, 600) || null;
+    if ("payMethods" in patch) row.pay_methods = patch.payMethods || [];
+    if ("delivery" in patch) row.delivery = !!patch.delivery;
     if (Object.keys(row).length) q(id, { op: "update", table: "shops", id, patch: row });
   }
   const shopRow = (sh, ownerId) => ({
@@ -612,6 +615,26 @@ window.MM_API = (function () {
     q(shopId, { op: "photo", shopId, itemId, dataUrl, productId: it.productMine ? it.productId : null });
   }
   function pick(d) { const o = {}; for (const k of DETAIL_KEYS) if (d[k] !== undefined) o[k] = d[k]; return o; }
+  // Shop website photos: kind = "logo" | "cover" | "gallery". Shown at once from the
+  // phone's copy; uploaded through the queue with a fresh file name (so no stale cache).
+  function setShopPhoto(id, kind, dataUrl, galleryIndex = null) {
+    const sh = getShop(id); if (!sh) return;
+    const rand = Math.random().toString(36).slice(2, 8);
+    const path = `${id}/shop-${kind}-${rand}.jpg`;
+    if (kind === "gallery") {
+      sh.gallery = sh.gallery || []; sh.galleryPaths = sh.galleryPaths || [];
+      if (galleryIndex == null) { sh.gallery.push(dataUrl); sh.galleryPaths.push(path); }
+      else { sh.gallery[galleryIndex] = dataUrl; sh.galleryPaths[galleryIndex] = path; }
+    } else sh[kind] = dataUrl;
+    persistAddedShop(sh);
+    q(id, { op: "shopphoto", shopId: id, kind, path, dataUrl, gallery: kind === "gallery" ? [...sh.galleryPaths] : null });
+  }
+  function removeGalleryPhoto(id, i) {
+    const sh = getShop(id); if (!sh || !sh.gallery) return;
+    sh.gallery.splice(i, 1); (sh.galleryPaths || []).splice(i, 1);
+    persistAddedShop(sh);
+    q(id, { op: "update", table: "shops", id, patch: { gallery: [...(sh.galleryPaths || [])] } });
+  }
   function persistAddedShop(shop) {
     const all = store.get("shopsAdded", []);
     const i = all.findIndex((s) => s.id === shop.id);
@@ -804,6 +827,7 @@ window.MM_API = (function () {
       cats: r.cats && r.cats.length ? r.cats : [r.cat], shopNo: r.shop_no || "—", floor: r.floor || "Ground floor", landmark: r.landmark || "",
       locality: r.locality || "", pincode: r.pincode || "", lat: r.lat, lng: r.lng, open: r.open_h, close: r.close_h, closedDay: r.closed_day,
       promo: r.promo || "", gst: r.gst || "", verified: r.verified, needsCheck: r.needs_check, rating: 0, ratings: 0, trust: 0.7, items: [], own: true, cloud: true,
+      ...siteDetails(r, photoUrl),
     };
     store.set("shopsAdded", [...store.get("shopsAdded", []).filter((s) => s.id !== r.id), shop]);
     const its = (items || []).filter((i) => !i.removed).map((i) => ({
@@ -826,6 +850,10 @@ window.MM_API = (function () {
     store.set("purchases", [...pu, ...store.get("purchases", []).filter((p) => p.shopId !== r.id)]);
     return shop;
   }
+  const siteDetails = (r, photoUrl) => ({
+    logo: r.logo_path ? photoUrl(r.logo_path) : null, cover: r.cover_path ? photoUrl(r.cover_path) : null,
+    gallery: (r.gallery || []).map(photoUrl), galleryPaths: r.gallery || [], about: r.about || "", payMethods: r.pay_methods || [], delivery: !!r.delivery,
+  });
   function productDetails(p, photoUrl, shopId) {
     return { productId: p.id, productMine: p.created_by === shopId && !p.verified, barcode: p.barcode || "", model: p.model || "", size: p.size || "",
       features: p.features || [], description: p.description || "", specMap: p.specs || {}, keywords: p.keywords || [],
@@ -845,6 +873,7 @@ window.MM_API = (function () {
         id: r.id, marketId: r.market_id || null, name: r.name, cat: r.cat, cats: r.cats && r.cats.length ? r.cats : [r.cat],
         shopNo: r.shop_no || "—", floor: r.floor || "Ground floor", landmark: r.landmark || "", locality: r.locality || "", pincode: r.pincode || "",
         lat: r.lat, lng: r.lng, open: r.open_h, close: r.close_h, closedDay: r.closed_day, phone: r.phone || "", promo: r.promo || "",
+        ...siteDetails(r, photoUrl),
         rating: 0, ratings: 0, verified: r.verified, trust: 0.8, live: true,
         items: (byShop[r.id] || []).map((i) => {
           const at = ms(i.updated_at);
@@ -919,7 +948,7 @@ window.MM_API = (function () {
     RANGES, getRange, setRange, trip, fmtTrip, nearArea, nearSearch, marketFor,
     REASONS, moveStock, stockLog, inventory, lowAt,
     billTotals, saveBill, cancelBill, billsFor, getBill, daySummary,
-    registerShop, login, updateShop, normPhone, addOwnItem, savePurchase, purchasesFor, hydrateShop, mergePublic, uuid, shopHas, saveDetails, productDetails, addPhoto, setBillLink, getShop, getMarket, isOpen, itemStatus,
+    registerShop, login, updateShop, normPhone, addOwnItem, savePurchase, purchasesFor, hydrateShop, mergePublic, uuid, shopHas, saveDetails, productDetails, addPhoto, setBillLink, setShopPhoto, removeGalleryPhoto, getShop, getMarket, isOpen, itemStatus,
     search, ask, getAsk, replyAsk, pendingAsks, feedback, logSearch, addView,
     ownerShopId, ownerShop, isOwnerShop, claimShop, releaseShop, addShop, persistAddedShop, setItem, addItem, catalogFor, missedSales,
     getBag, addToBag, setQty, bagCount, bagLines, STEPS, placeOrder, getOrders, getOrder, advanceOrder, cancelOrder, ordersFor,

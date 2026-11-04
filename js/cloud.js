@@ -50,6 +50,11 @@
       // our own catalogue product gets the photo too (ignored if it isn't ours)
       if (!r.error && op.productId) await sb.from("catalog_products").update({ photo_path: path }).eq("id", op.productId).is("photo_path", null);
     }
+    else if (op.op === "shopphoto") {
+      const blob = await (await fetch(op.dataUrl)).blob();
+      r = await sb.storage.from("item-photos").upload(op.path, blob, { upsert: true, contentType: "image/jpeg" });
+      if (!r.error) r = await sb.from("shops").update(op.kind === "gallery" ? { gallery: op.gallery } : { [op.kind + "_path"]: op.path }).eq("id", op.shopId);
+    }
     else if (op.op === "billpdf") {
       const blob = await (await fetch(op.dataUrl)).blob();
       r = await sb.storage.from("bills").upload(op.path, blob, { contentType: "application/pdf", upsert: false });

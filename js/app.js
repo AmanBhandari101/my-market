@@ -338,14 +338,15 @@
       <div class="site" style="${catVars(s.cat)}">
       <header class="s-nav">
         ${fromBack ? `<button class="s-icon" id="back" aria-label="Back">${ic("back")}</button>` : ""}
-        <a class="s-mark" href="#/shop/${s.id}"><span>${esc(s.name[0])}</span><b>${esc(s.name)}</b></a>
+        <a class="s-mark" href="#/shop/${s.id}">${s.logo ? `<img src="${esc(s.logo)}" alt="">` : `<span>${esc(s.name[0])}</span>`}<b>${esc(s.name)}</b></a>
         <button class="s-icon" id="share" aria-label="Share">${ic("arrow")}</button>
         <button class="s-icon" id="save" aria-label="Save" ${isSaved ? 'style="color:var(--terracotta)"' : ""}>${ic(isSaved ? "heartF" : "heart")}</button>
       </header>
 
-      <section class="s-hero">
+      ${s.cover ? `<div class="s-cover"><img src="${esc(s.cover)}" alt="${esc(s.name)}"></div>` : ""}
+      <section class="s-hero ${s.cover ? "has-cover" : ""}">
         <div class="s-in">
-          <div class="s-logo"><span>${esc(s.name[0])}</span></div>
+          <div class="s-logo">${s.logo ? `<img src="${esc(s.logo)}" alt="${esc(s.name)} logo">` : `<span>${esc(s.name[0])}</span>`}</div>
           <p class="s-kicker">${esc(C[s.cat].name)}${m ? ` · ${esc(m.name)}` : ""}</p>
           <h1 class="s-title">${esc(s.name)}</h1>
           <p class="s-status"><i class="${open ? "on" : "off"}"></i>${open ? `Open now · until ${fmtHour(s.close)}` : `Closed · opens ${fmtHour(s.open)}`}${s.verified ? ' <span class="s-ver">✓ Verified shop</span>' : ""}</p>
@@ -353,7 +354,7 @@
           <div class="s-cta">
             <button class="s-btn wa" id="wa">${ic("chat")}WhatsApp us</button>
             ${phone ? `<a class="s-btn" id="call" href="tel:+91${phone}">${ic("user")}Call</a>` : ""}
-            <a class="s-btn" id="dir" href="${loc ? `#/route/${s.id}` : gmaps}" ${loc ? "" : 'target="_blank" rel="noopener"'}>${ic("pin")}Directions</a>
+            <a class="s-btn ${phone ? "" : "solo"}" id="dir" href="${loc ? `#/route/${s.id}` : gmaps}" ${loc ? "" : 'target="_blank" rel="noopener"'}>${ic("pin")}Directions</a>
           </div>
         </div>
       </section>
@@ -366,6 +367,17 @@
         </div>
 
         ${s.promo ? `<div class="s-offer"><span>Offer</span><p>${esc(s.promo)}</p></div>` : ""}
+
+        ${s.about || (s.payMethods || []).length || s.delivery ? `<section class="s-sec">
+          <div class="s-head"><h2>About us</h2></div>
+          ${s.about ? `<p class="s-about">${esc(s.about)}</p>` : ""}
+          <div class="s-chips">${(s.payMethods || []).map((p) => `<span>${esc(p)}</span>`).join("")}${s.delivery ? '<span class="dl">Home delivery</span>' : ""}</div>
+        </section>` : ""}
+
+        ${(s.gallery || []).length ? `<section class="s-sec">
+          <div class="s-head"><h2>Photos</h2></div>
+          <div class="s-gal">${s.gallery.map((g, i) => `<button data-gal="${i}"><img src="${esc(g)}" alt="${esc(s.name)} photo ${i + 1}" loading="lazy"></button>`).join("")}</div>
+        </section>` : ""}
 
         <section class="s-sec">
           <div class="s-head"><h2>Products</h2><p>${s.items.length ? `Live prices and stock from ${esc(s.name)}` : "This shop is adding its products"}</p></div>
@@ -431,6 +443,19 @@
     $("#ishop") && $("#ishop").addEventListener("input", (e) => { q = e.target.value.trim().toLowerCase(); filter(); });
     $("#askit") && ($("#askit").onclick = () => wa(`Hi ${s.name}, do you have ${$("#ishop").value.trim()}?`));
     $$("[data-sc]").forEach((b) => b.onclick = () => { catF = b.dataset.sc; $$("[data-sc]").forEach((x) => x.classList.toggle("on", x === b)); filter(); });
+    // tap a gallery photo: view it large
+    $$("[data-gal]").forEach((b) => b.onclick = () => {
+      const all = s.gallery; let i = +b.dataset.gal;
+      const box = document.createElement("div"); box.className = "s-light";
+      const show = () => { box.innerHTML = `<img src="${esc(all[i])}" alt=""><button class="x" aria-label="Close">×</button>${all.length > 1 ? '<button class="p" aria-label="Previous">‹</button><button class="n" aria-label="Next">›</button>' : ""}`; };
+      show(); document.body.appendChild(box);
+      box.onclick = (e) => {
+        if (e.target.classList.contains("p")) { i = (i - 1 + all.length) % all.length; show(); }
+        else if (e.target.classList.contains("n")) { i = (i + 1) % all.length; show(); }
+        else box.remove();
+      };
+      cleanups.push(() => box.remove());
+    });
     try { const map = newMap("smap"); map.setView([s.lat, s.lng], 16); L.marker([s.lat, s.lng], { icon: dotIcon("best", s) }).addTo(map); map.scrollWheelZoom.disable(); } catch {}
     if (hl) setTimeout(() => $(`#it-${hl}`)?.scrollIntoView({ block: "center" }), 60);
   }

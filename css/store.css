@@ -500,3 +500,41 @@ body.site-mode.tabs-on #app { padding-bottom: 0; }
   .s-facts b { font-size: 14px; }
 }
 .s-facts b { white-space: nowrap; }
+
+/* ---------- shop website: cover, logo image, about, gallery ---------- */
+.s-cover { height: clamp(170px, 34vw, 340px); overflow: hidden; background: #ddd; }
+.s-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.s-hero.has-cover { padding-top: 0; }
+.s-hero.has-cover .s-logo { margin-top: -42px; position: relative; }
+.s-logo img { width: 66px; height: 66px; border-radius: 15px; object-fit: cover; }
+.s-mark img { width: 30px; height: 30px; border-radius: 8px; object-fit: cover; flex: none; }
+.s-about { margin: 14px 0 0; font-size: 16px; line-height: 1.65; color: #3b3f43; white-space: pre-line; }
+.s-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.s-chips span { font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 100px; background: #f3f2ee; border: 1px solid var(--hair); }
+.s-chips span.dl { background: #e8f5ec; border-color: #c6e6d0; color: #17733f; }
+.s-gal { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
+@media (min-width: 720px) { .s-gal { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; } }
+.s-gal button { padding: 0; border: 0; aspect-ratio: 1; border-radius: 12px; overflow: hidden; background: #eee; cursor: zoom-in; }
+.s-gal img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .2s; }
+.s-gal button:hover img { transform: scale(1.04); }
+.s-light { position: fixed; inset: 0; z-index: 2000; background: rgba(10,10,10,.92); display: grid; place-items: center; }
+.s-light img { max-width: 94vw; max-height: 86vh; border-radius: 8px; }
+.s-light button { position: absolute; color: #fff; font-size: 34px; width: 52px; height: 52px; }
+.s-light .x { top: 10px; right: 10px; } .s-light .p { left: 6px; top: 50%; } .s-light .n { right: 6px; top: 50%; }
+/* shop app: photo pickers */
+.ph-cover { display: grid; place-items: center; gap: 6px; height: 150px; border-radius: 12px; border: 1.5px dashed #a6a6a6; background: var(--sand); color: var(--ink-2); overflow: hidden; cursor: pointer; text-align: center; }
+.ph-cover img { width: 100%; height: 100%; object-fit: cover; }
+.ph-cover em, .ph-logo em { font-style: normal; font-size: 13px; }
+.ph-row { display: flex; gap: 12px; align-items: center; margin-top: -30px; padding-left: 12px; }
+.ph-logo { flex: none; width: 76px; height: 76px; border-radius: 18px; background: #fff; box-shadow: 0 0 0 3px #fff, 0 6px 16px -6px rgba(0,0,0,.35); display: grid; place-items: center; overflow: hidden; cursor: pointer; position: relative; }
+.ph-logo img { width: 100%; height: 100%; object-fit: cover; }
+.ph-logo span { font-size: 30px; font-weight: 700; color: #17733f; }
+.ph-logo em { position: absolute; bottom: 3px; font-size: 10px; color: var(--ink-2); }
+.ph-row p { padding-top: 30px; }
+.ph-gal { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.ph-gal .g { position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: var(--sand); }
+.ph-gal .g img { width: 100%; height: 100%; object-fit: cover; }
+.ph-gal .g button { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; border-radius: 50%; background: rgba(0,0,0,.6); color: #fff; font-size: 17px; line-height: 1; }
+.ph-gal .add { display: grid; place-items: center; border: 1.5px dashed #a6a6a6; cursor: pointer; color: var(--ink-2); }
+.ph-gal .add .i { width: 28px; height: 28px; }
+.s-cta .solo { grid-column: 1 / -1; }
