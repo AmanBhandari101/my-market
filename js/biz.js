@@ -625,7 +625,10 @@
       let amount = col.cr >= 0 ? num(r[col.cr]) : (/cr|credit/i.test(String(r[col.type] ?? "")) ? num(r[col.amt]) : 0);
       if (!(amount > 0)) continue;
       const refCell = col.ref >= 0 ? String(r[col.ref] ?? "").replace(/\D/g, "") : "";
-      const utr = (refCell.length >= 10 ? refCell : (narration.match(/\b\d{12}\b/) || [""])[0]);
+      // UPI transaction IDs are 12 digits; banks may pad the reference column with zeros
+      const inNarr = (narration.match(/(?:^|\D)(\d{12})(?:\D|$)/) || [])[1] || "";
+      const fromRef = refCell.replace(/^0+/, "");
+      const utr = inNarr || (/^0{2,}/.test(refCell) && fromRef.length <= 12 ? fromRef : refCell);
       const dtRaw = col.dt >= 0 ? r[col.dt] : "";
       let at = ""; if (dtRaw instanceof Date) at = dtRaw.toISOString();
       else if (dtRaw) { const m = String(dtRaw).match(/(\d{1,2})[\/\-. ](\d{1,2}|[A-Za-z]{3})[\/\-. ](\d{2,4})/); if (m) { const mon = isNaN(+m[2]) ? "JanFebMarAprMayJunJulAugSepOctNovDec".indexOf(m[2].slice(0, 3)) / 3 : +m[2] - 1; const y = +m[3] < 100 ? 2000 + +m[3] : +m[3]; const d = new Date(y, mon, +m[1], 12); if (!isNaN(d)) at = d.toISOString(); } }
