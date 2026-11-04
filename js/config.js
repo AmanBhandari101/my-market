@@ -4,4 +4,8 @@
 window.MM_CONFIG = {
   supabaseUrl: "https://dhcpzdwzbndntnekuiud.supabase.co",
   supabaseKey: "sb_publishable_XnlhmSrXLLoHCcZjLdMatQ_uMOH3LdM",
+  // Shop plan payments: 2 months free, then ₹150/month or ₹1,500/year, paid by UPI to this ID.
+  // While it is empty the plan page only shows the free trial and nothing is ever locked.
+  payUpi: "8923060977@ibl",
+  payName: "My Market",
 };

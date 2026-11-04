@@ -47,6 +47,10 @@ declare
 begin
   select delivery into v_delivery from shops where id = p_shop;
   if not found then raise exception 'This shop is not on My Market any more'; end if;
+  -- an overdue shop (see billing.sql) isn't taking online orders
+  if to_regprocedure('public.shop_takes_orders(uuid)') is not null then
+    if not shop_takes_orders(p_shop) then raise exception 'This shop is not taking online orders right now — message them on WhatsApp'; end if;
+  end if;
   if p_kind not in ('hold', 'buy') or p_mode not in ('pickup', 'delivery') then raise exception 'Choose Hold or Buy'; end if;
   if p_kind = 'hold' then p_mode := 'pickup'; end if;
   if p_mode = 'delivery' and not coalesce(v_delivery, false) then raise exception 'This shop does not deliver — choose pickup'; end if;

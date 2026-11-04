@@ -317,6 +317,7 @@
   };
   const myOrders = () => A.store.get("myOrders", []);
   const canOrder = (s) => !!(window.MM_CLOUD && window.MM_CLOUD.placeOrder && (s.live || s.cloud));
+  const ordersOn = (s) => s.takesOrders !== false;
   const tm = (t) => new Date(t).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
   const orderWord = (o) => o.status === "cancelled" ? "Cancelled"
     : o.status === "done" ? (o.mode === "delivery" ? "Delivered — thank you!" : "Collected — thank you!")
@@ -444,6 +445,7 @@
     const priceOf = (it) => it.price ? `<b>${rupee(it.price)}</b>${off(it) ? ` <s>${rupee(it.mrp)}</s>` : ""}` : '<span class="ask">Price on request</span>';
     const addCtl = (it) => {
       if (A.itemStatus(it).key === "out") return `<span class="sp-out">Out of stock</span>`;
+      if (!ordersOn(s)) return "";
       const n = sc.qty(s.id, it.id);
       return n ? `<span class="sp-step"><button data-dec="${it.id}" aria-label="One less">−</button><b>${n}</b><button data-inc="${it.id}" aria-label="One more">+</button></span>`
         : `<button class="sp-addb" data-add="${it.id}">${ic("plus")}Add</button>`;
@@ -476,7 +478,7 @@
           <h1 class="s-title">${esc(s.name)}</h1>
           <p class="s-status"><i class="${open ? "on" : "off"}"></i>${open ? `Open now · until ${fmtHour(s.close)}` : `Closed · opens ${fmtHour(s.open)}`}${s.verified ? ' <span class="s-ver">✓ Verified shop</span>' : ""}</p>
           ${where ? `<p class="s-addr">${ic("pin")}${esc(where)}</p>` : ""}
-          ${s.items.length ? `<div class="s-perks"><span>${ic("bag")}Order online</span><span>${ic("clock")}Hold for pickup</span>${s.delivery ? `<span>${ic("truck")}Home delivery</span>` : ""}<span>${ic("check")}Pay at the shop</span></div>` : ""}
+          ${s.items.length && ordersOn(s) ? `<div class="s-perks"><span>${ic("bag")}Order online</span><span>${ic("clock")}Hold for pickup</span>${s.delivery ? `<span>${ic("truck")}Home delivery</span>` : ""}<span>${ic("check")}Pay at the shop</span></div>` : ""}
           <div class="s-cta">
             ${s.items.length ? `<a class="s-btn shop" href="#" id="toprod">${ic("bag")}Shop now</a>` : ""}
             <button class="s-btn wa" id="wa">${ic("chat")}WhatsApp us</button>
@@ -487,6 +489,7 @@
       </section>
 
       <div class="s-in" id="sorders"></div>
+      ${!ordersOn(s) && s.items.length ? `<div class="s-in"><div class="s-paused">Online orders are paused at ${esc(s.name)} right now — message them on WhatsApp to order.</div></div>` : ""}
       <div class="s-in">
         <div class="s-facts rv">
           <div><b>${s.items.length}</b><span>Products</span></div>
@@ -935,7 +938,7 @@
   // ---------- bottom tabs (customer screens only) ----------
   const TAB_ON = { "": "home", item: "home", search: "search", ask: "search", me: "me", orders: "me", order: "me", bag: "bag" };
   // Shop app: three pages — Bill (home), Stock, Reports.
-  const BIZ_ON = { "": "bill", bill: "bill", cart: "bill", inbox: "bill", items: "stock", stockin: "stock", reports: "reports", bills: "reports", insights: "reports", site: "reports", security: "reports", backup: "reports" };
+  const BIZ_ON = { "": "bill", bill: "bill", cart: "bill", inbox: "bill", items: "stock", stockin: "stock", reports: "reports", bills: "reports", insights: "reports", site: "reports", security: "reports", backup: "reports", plan: "reports" };
   function syncTabs(r, parts = []) {
     const nav = $("#tabs"); if (!nav) return;
     if (BIZ) {

@@ -31,6 +31,8 @@ Also in the shop app:
 - **Login & security** — main number + backup number (a lost phone or SIM never locks the shop out), change PIN, log out other phones, delete shop.
 - **Safe offline use** — every change goes through a queue (outbox) and is retried; *Sync now* retries refused changes; the app never overwrites unsent changes with a download and warns before logging out with unsent bills; a full phone is detected and the bill is refused rather than silently lost.
 
+- **Plan: 2 months free, then ₹150/month (₹1,500/year)** — *My plan* page with *Pay with UPI* (opens the UPI app with the amount, or a QR on a computer). The shop types the UPI transaction ID; it counts for 3 days while My Market confirms it on the server (`confirm_payment`). One free trial per mobile number. If unpaid: days 1–7 reminders, days 8–14 website orders pause, then read-only (old bills, backup and export always work; nothing is deleted).
+
 ## Customer app (My Market)
 
 | Screen | What it does |
@@ -51,7 +53,7 @@ moving more than 5 km loads the new area.
 Set up once in the Supabase SQL editor — the files in `supabase/`, in the order given in
 [`supabase/SETUP.md`](supabase/SETUP.md):
 
-`schema.sql` → `searches.sql` → `catalog.sql` → `bills.sql` → `visits.sql` → `shopsite.sql` → `members.sql` → `billno.sql` → `nearby.sql` → `bills_cleanup.sql` → `bill_share.sql` → `scan_codes.sql` → `orders.sql`
+`schema.sql` → `searches.sql` → `catalog.sql` → `bills.sql` → `visits.sql` → `shopsite.sql` → `members.sql` → `billno.sql` → `nearby.sql` → `bills_cleanup.sql` → `bill_share.sql` → `scan_codes.sql` → `orders.sql` → `billing.sql`
 
 Row-level security keeps each shop's data private; customers read only the public views
 (`public_shops`, `public_items` — stock as a label, never a count). The app holds only the publishable key.
@@ -87,6 +89,7 @@ GPS needs `localhost` or `https`. After changing JS/CSS, bump the `?v=` numbers 
 
 - PIN reset by OTP (needs an SMS / WhatsApp provider)
 - A support contact for shopkeepers
+- UPI AutoPay (needs a payment-gateway account such as Razorpay); payments are confirmed by hand for now
 - Khata (credit) ledger, Play Store apps
 
 ## Licence

@@ -19,6 +19,7 @@
     if (sub === "bill" && parts[2]) return receiptView(parts[2]);
     if (sub === "cart") return cartView();
     if (sub === "backup") return backupView(params);
+    if (sub === "plan") return planView();
     if (sub === "bills") return billsView();
     if (sub === "insights") return insightsView();
     return billView(); // home = the billing counter
@@ -152,6 +153,102 @@
   let fullAt = 0;
   window.addEventListener("mm-storage-full", () => { if (Date.now() - fullAt > 60000) { fullAt = Date.now(); U.toast(A.FULL, 8000); } });
 
+  // ---------- the shop's plan: 2 months free, then ₹150/month ----------
+  // The server decides (plan_state); this phone keeps the last answer so it also
+  // works offline, and works out the stage from the dates as days pass.
+  const PAY = () => (window.MM_CONFIG || {}).payUpi || "";
+  const DAYMS = 86400000;
+  const planOf = (s) => A.store.get("plan:" + s.id, null);
+  function planStage(s) {
+    const p = planOf(s); if (!p || !s.cloud) return { state: "unknown" };
+    const end = Date.parse(p.access_until), now = Date.now(), paid = Math.max(Date.parse(p.paid_until || 0) || 0, Date.parse(p.provisional_until || 0) || 0);
+    const state = now < end ? (paid > now ? "active" : "trial") : now < end + 7 * DAYMS ? "due" : now < end + 14 * DAYMS ? "orders_off" : "read_only";
+    return { ...p, state, end, daysLeft: Math.ceil((end - now) / DAYMS), daysOver: Math.floor((now - end) / DAYMS) };
+  }
+  // read-only only bites when payments are switched on (a UPI ID is set)
+  const planLocked = (s) => !!PAY() && planStage(s).state === "read_only";
+  function lockedSheet() {
+    U.openSheet(`<div class="eyebrow">Plan</div><div class="title">Pay ₹150 to make new bills</div>
+      <p class="small quiet">Your free months are over and the plan wasn't paid, so the app is read-only for now. Your bills and data are all safe — you can still see them, back them up and export them.</p>
+      <div class="opts"><a class="btn" href="#/biz/plan">Pay ₹150 with UPI</a></div>`, (el) => $$("a", el).forEach((x) => x.addEventListener("click", () => U.closeSheet())));
+  }
+  let planAt = 0;
+  async function refreshPlan(force) {
+    const s = A.ownerShop(); if (!s || !s.cloud || !window.MM_CLOUD || !window.MM_CLOUD.myPlan || !navigator.onLine) return null;
+    if (!force && Date.now() - planAt < 3 * 3600000) return planOf(s);
+    try { const p = await window.MM_CLOUD.myPlan(s.id); if (p) { A.store.set("plan:" + s.id, p); planAt = Date.now(); $$("[data-planbar]").forEach((el) => { el.outerHTML = planBar(s); }); } return p; }
+    catch { return null; }
+  }
+  if (window.MM_APP === "business") { setTimeout(() => refreshPlan(true), 2500); setInterval(() => refreshPlan(), 3600000); }
+  function planBar(s) {
+    const st = planStage(s), fmt = (t) => new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+    let cls = "", msg = "";
+    if (st.state === "trial" && st.daysLeft <= 10) { cls = "soon"; msg = `Free plan: ${st.daysLeft} day${st.daysLeft === 1 ? "" : "s"} left (till ${fmt(st.end)}) — then ₹150/month`; }
+    else if (st.state === "active" && st.daysLeft <= 5) { cls = "soon"; msg = `Your plan ends on ${fmt(st.end)} — renew ₹150`; }
+    else if (st.state === "due") { cls = "due"; msg = PAY() ? `₹150 due — pay now to keep everything running` : `Your free months are over`; }
+    else if (st.state === "orders_off") { cls = "bad"; msg = `Website orders are paused — pay ₹150 to turn them back on`; }
+    else if (st.state === "read_only") { cls = "bad"; msg = PAY() ? `Read-only — pay ₹150 to make new bills (your data is safe)` : `Your free months are over`; }
+    return msg ? `<a class="planbar ${cls}" href="#/biz/plan" data-planbar>${esc(msg)}${ic("arrow")}</a>` : `<span data-planbar hidden></span>`;
+  }
+
+  function planView() {
+    const s = A.ownerShop();
+    const upi = PAY(), name = (window.MM_CONFIG || {}).payName || "My Market";
+    const ref = "MM" + s.id.replace(/-/g, "").slice(0, 6).toUpperCase();
+    let months = 1, pays = null;
+    const draw = () => {
+      const st = planStage(s), fmt = (t) => new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+      const amt = months === 12 ? 1500 : 150;
+      const link = `upi://pay?pa=${encodeURIComponent(upi).replace("%40", "@")}&pn=${encodeURIComponent(name)}&am=${amt}&cu=INR&tn=${encodeURIComponent(`${ref} ${months === 12 ? "1 year" : "1 month"}`)}`;
+      const head = !s.cloud ? ["Log in to see your plan", "Your plan lives on the server with your shop."]
+        : st.state === "unknown" ? ["Checking your plan…", "Needs the internet once."]
+        : st.state === "trial" ? [`Free plan · ${st.daysLeft} day${st.daysLeft === 1 ? "" : "s"} left`, `Free till ${fmt(st.end)}. After that ₹150 a month — everything stays the same.`]
+        : st.state === "active" ? [`Plan active till ${fmt(st.end)}`, st.provisional_until && Date.parse(st.provisional_until) > Date.now() && !(Date.parse(st.paid_until || 0) > Date.now()) ? "Your payment is being checked — usually within a day. Everything works meanwhile." : "Thank you! Everything is on."]
+        : st.state === "due" ? ["₹150 due", `Your plan ended on ${fmt(st.end)}. Everything still works for ${7 - st.daysOver} more day${7 - st.daysOver === 1 ? "" : "s"}.`]
+        : st.state === "orders_off" ? ["Website orders paused", `Billing still works for ${14 - st.daysOver} more day${14 - st.daysOver === 1 ? "" : "s"}, then the app becomes read-only.`]
+        : ["Read-only", "You can see all your bills, back them up and export them. Pay to make new bills again — nothing was lost."];
+      U.app.innerHTML = `
+        ${bizTop("My plan")}
+        <div class="rsec plancard ${st.state}"><b>${esc(head[0])}</b><p>${esc(head[1])}</p></div>
+        <div class="rsec"><div class="rhd"><b>Price</b></div>
+          <div class="planopts">
+            <button class="planopt ${months === 1 ? "on" : ""}" data-mo="1"><b>₹150</b><span>per month</span></button>
+            <button class="planopt ${months === 12 ? "on" : ""}" data-mo="12"><b>₹1,500</b><span>per year · 2 months free</span></button>
+          </div>
+          <p class="faint tiny" style="margin:8px 0 0">Billing, stock, reports, your website with orders, WhatsApp bills, backup — all included. Your data is never deleted.</p>
+        </div>
+        ${upi && s.cloud ? `<div class="rsec"><div class="rhd"><b>Pay with UPI</b></div>
+          <a class="btn" id="paynow" href="${esc(link)}">Pay ₹${amt.toLocaleString("en-IN")} with UPI</a>
+          <p class="faint tiny" style="margin:8px 0 0">Opens PhonePe, Google Pay, Paytm or your bank app. On a computer, scan this with any UPI app:</p>
+          <div id="payqr" class="qrbox small"></div>
+          <label class="small quiet" style="display:block;margin-top:14px">After paying, type the <b>UPI transaction ID (UTR)</b> — 12 digits, in your UPI app's payment details
+            <input class="field" id="utr" inputmode="numeric" maxlength="40" placeholder="e.g. 412345678901"></label>
+          <button class="btn line" id="paid" style="margin-top:10px">I've paid ₹${amt.toLocaleString("en-IN")}</button>
+          <p class="faint tiny" style="margin:8px 0 0">Everything stays on while we check it (usually within a day). Reference: ${ref}</p>
+        </div>` : `<div class="rsec"><p class="small quiet" style="margin:0">${s.cloud ? "Payments open soon — enjoy the free plan. We'll tell you before anything changes." : "Log in with your number to see your plan."}</p></div>`}
+        <div class="rsec"><div class="rhd"><b>Payments</b></div><div id="paylist">${pays == null ? '<p class="quiet small">Loading…</p>' : pays.length ? pays.map((x) => `<div class="payrow ${x.status}">
+          <span><b>${x.method === "grant" ? "Free months" : "₹" + x.amount.toLocaleString("en-IN")}</b> · ${x.months} month${x.months > 1 ? "s" : ""}<em>${fmt(x.created_at)}${x.ref ? " · " + esc(x.ref) : ""}${x.reason ? " · " + esc(x.reason) : ""}</em></span>
+          <i>${{ claimed: "Checking", confirmed: "Paid ✓", rejected: "Not received" }[x.status]}</i></div>`).join("") : '<p class="quiet small">No payments yet.</p>'}</div></div>
+        <div class="rsec"><div class="rhd"><b>If a payment is missed</b></div>
+          <ol class="gsteps"><li>Days 1–7: everything works, with a reminder.</li><li>Days 8–14: billing works; your website stops taking orders.</li><li>After that: read-only — you can still see, back up and export everything.</li></ol>
+          <p class="faint tiny" style="margin:6px 0 0">Pay any time and everything turns back on at once. Nothing is ever deleted.</p></div>
+        <div style="height:30px"></div>`;
+      bindTop();
+      $$("[data-mo]").forEach((x) => x.onclick = () => { months = +x.dataset.mo; draw(); });
+      if ($("#payqr")) makeQR(link).then((qr) => { const el = $("#payqr"); if (el) el.innerHTML = qr.createSvgTag({ cellSize: 3, margin: 2, scalable: true }); }).catch(() => { const el = $("#payqr"); el && el.remove(); });
+      $("#paid") && ($("#paid").onclick = async (ev) => {
+        const utr = $("#utr").value.replace(/[^A-Za-z0-9]/g, "");
+        if (utr.length < 10) return U.toast("Type the UPI transaction ID (UTR) from your UPI app");
+        ev.currentTarget.disabled = true;
+        try { const p = await window.MM_CLOUD.claimPayment(s.id, utr, months); A.store.set("plan:" + s.id, p); U.toast("Thank you! Everything stays on while we check it", 5000); await loadPays(); draw(); }
+        catch (x) { ev.currentTarget.disabled = false; U.toast(x.message, 7000); }
+      });
+    };
+    const loadPays = async () => { try { pays = await window.MM_CLOUD.myPayments(s.id); } catch { pays = pays || []; } };
+    draw();
+    if (s.cloud && window.MM_CLOUD) Promise.all([refreshPlan(true), loadPays()]).then(() => { if (location.hash.startsWith("#/biz/plan")) draw(); });
+  }
+
   // ---------- the cart (bill in progress) ----------
   // Saved on the phone for each shop, so it stays while you move between pages
   // or close the app — until the bill is generated or the cart is cleared.
@@ -191,7 +288,7 @@
     return `<div class="topline"><span class="brand"><img src="icon-business.svg" alt=""><span class="bt">${esc(title || s.name)}${s.cloud ? `<em class="syncst" data-sync>${syncWord()}</em>` : ""}</span></span>
       <div class="btn-row" style="gap:2px"><a class="iconbtn bagbtn" id="carticon" href="#/biz/cart" aria-label="Cart">${ic("bag")}<i class="bcount ${cartUnits(cartGet(s)) ? "" : "hidden"}" data-cartn>${cartUnits(cartGet(s))}</i></a>
       <a class="iconbtn bagbtn" href="#/biz/inbox" aria-label="Orders and questions">${ic("bell")}<i class="bcount ${n ? "" : "hidden"}" data-bell>${n}</i></a>
-      <button class="iconbtn" data-menu aria-label="Menu">${ic("menu")}</button></div></div>`;
+      <button class="iconbtn" data-menu aria-label="Menu">${ic("menu")}</button></div></div>${planBar(s)}`;
   }
   function bindTop() { $$("[data-menu]").forEach((b) => b.onclick = menuSheet); }
   // "Saved" / "Saving 3…" / "Offline · 3 waiting" / "2 not saved"
@@ -216,6 +313,7 @@
         ${s.cloud ? `<a class="entry" href="#/biz/security"><div class="body"><div class="name">Login & security</div><div class="note">Backup number, change PIN, log out other phones</div></div>${ic("arrow")}</a>` : ""}
         <button class="entry" id="m-bs"><div class="body"><div class="name">Bill settings</div><div class="note">Advert, phone and GSTIN on your bills</div></div>${ic("arrow")}</button>
         <a class="entry" href="index.html#/shop/${s.id}" target="_blank" rel="noopener"><div class="body"><div class="name">See my shop as customers do</div><div class="note">Opens the My Market customer app</div></div>${ic("arrow")}</a>
+        <a class="entry" href="#/biz/plan"><div class="body"><div class="name">My plan</div><div class="note">${(() => { const st = planStage(s); return st.state === "trial" ? `Free plan · ${st.daysLeft} days left` : st.state === "active" ? "Active" : st.state === "unknown" ? "2 months free, then ₹150/month" : "Payment due"; })()}</div></div>${ic("arrow")}</a>
         <a class="entry" href="#/biz/backup"><div class="body"><div class="name">Back up bills</div><div class="note">Save a copy to Google Drive</div></div>${ic("arrow")}</a>
         <a class="entry" href="#/biz/insights"><div class="body"><div class="name">What people searched for</div><div class="note">Items nobody near you had</div></div>${ic("arrow")}</a>
       </div>
@@ -376,6 +474,7 @@
         const done = (msg) => { U.toast(msg); U.closeSheet(); draw(); };
         $("#setn", el).onclick = () => { if ($("#n", el).value === "") return U.toast("Type how many you have"); A.moveStock(s.id, it.id, { set: n(), reason: "count" }); done("Count saved"); };
         $$("[data-mv]", el).forEach((b) => b.onclick = () => {
+          if (planLocked(s)) { U.closeSheet(); return lockedSheet(); }
           const r = b.dataset.mv, k = n() || 1;
           if (r === "out") A.moveStock(s.id, it.id, { set: 0, reason: "out" });
           else A.moveStock(s.id, it.id, { delta: r === "received" || r === "returned" ? k : -k, reason: r });
@@ -666,6 +765,7 @@
       $("#clearb").onclick = () => { if (!confirm("Clear the cart?")) return; cart = EMPTY_CART(); keep(); draw(); };
       $("#gen").onclick = (ev) => {
         if (ev.currentTarget.disabled) return;
+        if (planLocked(s)) return lockedSheet();
         if (cart.pay === "khata" && A.normPhone(cart.phone).length < 10) return U.toast("Add the customer's phone number for khata");
         if (cart.phone && A.normPhone(cart.phone).length !== 10) return U.toast("The customer's number should have 10 digits — or leave it empty");
         ev.currentTarget.disabled = true;
@@ -1090,6 +1190,7 @@
         $("#sup", el).oninput = (e) => { supplier = e.target.value; };
         $$("[data-pay]", el).forEach((b) => b.onclick = () => { pay = b.dataset.pay; draw(el); });
         $("#savein", el).onclick = (ev) => {
+          if (planLocked(s)) { U.closeSheet(); return lockedSheet(); }
           if (ev.currentTarget.disabled) return; ev.currentTarget.disabled = true;
           let p; try { p = A.savePurchase(s.id, { lines, supplier, pay }); } catch (x) { ev.currentTarget.disabled = false; return U.toast(x.message, 8000); }
           if (supplier.trim()) A.store.set("lastSupplier:" + s.id, supplier.trim());
@@ -1274,6 +1375,7 @@
       };
       $$("#ncat [data-c]", el).forEach((b) => b.onclick = () => { cat = b.dataset.c; $$("#ncat .word", el).forEach((x) => x.classList.toggle("on", x === b)); });
       $("#nsave", el).onclick = () => {
+        if (planLocked(s)) { U.closeSheet(); return lockedSheet(); }
         const name = $("#nm", el).value.trim(), pr = Math.round(+$("#pr", el).value), co = Math.round(+$("#co", el).value), qv = $("#qt", el).value.trim(), mrp = Math.round(+$("#mrp", el).value);
         if (!name) return ($("#nerr", el).textContent = "Type the item's name");
         if (!(pr > 0)) return ($("#nerr", el).textContent = "Type the selling price");

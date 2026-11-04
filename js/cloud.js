@@ -308,6 +308,18 @@
   const billShareLink = (token) => new URL("bill.html", location.href).href.split("#")[0] + "#b=" + token;
   const billFileUrl = (path) => `${C.supabaseUrl}/storage/v1/object/public/bills/${path}`;
 
+  // ---------- the shop's plan (free trial, ₹150/month) ----------
+  async function myPlan(shopId) { const { data, error } = await sb.rpc("my_plan", { p_shop: shopId }); if (error) throw new Error(friendly(error)); return data; }
+  async function claimPayment(shopId, ref, months) {
+    const { data, error } = await sb.rpc("claim_payment", { p_shop: shopId, p_ref: ref, p_months: months });
+    if (error) throw new Error(/fetch|network/i.test(error.message) ? "No internet — try again" : error.message);
+    return data;
+  }
+  async function myPayments(shopId) {
+    const { data, error } = await sb.from("payments").select("id,amount,months,method,ref,status,reason,created_at").eq("shop_id", shopId).order("created_at", { ascending: false }).limit(24);
+    if (error) throw new Error(friendly(error)); return data || [];
+  }
+
   // ---------- orders from a shop's website (Hold it for me / Buy) ----------
   async function placeOrder(o) {
     const { data, error } = await sb.rpc("place_order", { p_shop: o.shopId, p_kind: o.kind, p_mode: o.mode, p_name: o.name, p_phone: o.phone,
@@ -379,7 +391,7 @@
   async function myNumber() { const { data } = await sb.auth.getSession(); const m = (data.session?.user?.email || "").match(/^91(\d{10})@/); return m ? m[1] : ""; }
   async function deleteShop(shopId) { const { error } = await sb.rpc("delete_my_shop", { p_shop: shopId }); if (error) throw new Error(friendly(error)); }
 
-  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
+  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, myPlan, claimPayment, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
     pending: () => Q.get().length, failedOps: () => Q.failed() };
 
   // start-up
