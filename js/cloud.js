@@ -23,6 +23,7 @@
   const Q = {
     get: () => A.store.get("outbox", []),
     set: (v) => A.store.set("outbox", v),
+    setFailed: (v) => A.store.set("outboxFailed", v),
     failed: () => A.store.get("outboxFailed", []),
   };
   let busy = false, timer = null, online = navigator.onLine, lastError = "";
@@ -35,6 +36,12 @@
   function enqueue(op) {
     const o = Q.get(); o.push({ ...op, qid: Date.now() + "-" + Math.random().toString(36).slice(2, 7) }); Q.set(o);
     status(); schedule(250);
+  }
+  // "Sync now": changes the server refused before get one more try, oldest first.
+  function retryFailed() {
+    const f = Q.failed(); if (!f.length) return 0;
+    Q.set([...f.map(({ error, at, ...op }) => op), ...Q.get()]); Q.setFailed([]);
+    return f.length;
   }
   function schedule(ms = 0) { clearTimeout(timer); timer = setTimeout(flush, ms); }
 
@@ -61,6 +68,7 @@
       if (r.error && /exist|duplicate/i.test(r.error.message || "")) r = { error: null }; // sent before
     }
     if (r && r.error) throw r.error;
+    if (op.op === "photo" || op.op === "shopphoto") A.photoSent(op);
   }
   // A database answer (has a code / status) is permanent; a thrown fetch error is a network problem.
   const isNetwork = (e) => !e || (!e.code && !e.statusCode && /fetch|network|load failed|timeout/i.test(String(e.message || e)));
@@ -133,6 +141,9 @@
     ]);
     const pids = [...new Set(items.map((i) => i.product_id).filter(Boolean))];
     const products = pids.length ? await one(sb.from("catalog_products").select("*").in("id", pids)) : [];
+    // never replace the phone's copy while it still holds changes the server doesn't have
+    if (Q.get().length || (Q.failed().length && A.ownerShopId() === shop.id))
+      throw new Error("Some changes on this phone haven't reached the server yet — connect to the internet and tap Sync now again");
     A.hydrateShop({ shop, items, bills, purchases, markets, products }, photoUrl);
     A.store.set("lastPull", Date.now());
     return shop.id;
@@ -255,7 +266,7 @@
   async function myNumber() { const { data } = await sb.auth.getSession(); const m = (data.session?.user?.email || "").match(/^91(\d{10})@/); return m ? m[1] : ""; }
   async function deleteShop(shopId) { const { error } = await sb.rpc("delete_my_shop", { p_shop: shopId }); if (error) throw new Error(friendly(error)); }
 
-  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, sb, enqueue, flush, status, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
+  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, sb, enqueue, flush, status, retryFailed, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
     pending: () => Q.get().length, failedOps: () => Q.failed() };
 
   // start-up
@@ -272,8 +283,12 @@
     flush().then(() => {
       // a phone that hasn't downloaded for 30 min picks up changes made on the shop's other phones
       const shop = A.ownerShop();
-      if (shop && shop.cloud && !Q.get().length && Date.now() - A.store.get("lastPull", 0) > 30 * 60000)
-        pullShop().then(() => location.reload()).catch(() => {});
+      if (shop && shop.cloud && !Q.get().length && !Q.failed().length && Date.now() - A.store.get("lastPull", 0) > 30 * 60000)
+        pullShop().then(() => {
+          // don't reload under someone's fingers: wait until they move to another page
+          const busy = () => /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || "") || (document.querySelector("#sheet") && !document.querySelector("#sheet").classList.contains("hidden"));
+          if (!busy()) location.reload(); else window.addEventListener("hashchange", () => location.reload(), { once: true });
+        }).catch(() => {});
     });
   } else {
     loadPublic().then((n) => { window.MM_CLOUD.publicDone = true; if (window.MM_UI) window.MM_UI.route(); })

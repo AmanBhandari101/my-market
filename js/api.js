@@ -10,7 +10,15 @@ window.MM_API = (function () {
   // ---------- storage helpers (per-device, wrapped so private mode works) ----------
   const store = {
     get(k, d) { try { const v = localStorage.getItem("mm." + k); return v ? JSON.parse(v) : d; } catch { return d; } },
-    set(k, v) { try { localStorage.setItem("mm." + k, JSON.stringify(v)); } catch {} },
+    // Returns false when the phone's storage is full (after trying to free space),
+    // so callers that must not lose data (bills) can stop and say so.
+    set(k, v) {
+      let txt; try { txt = JSON.stringify(v); } catch { return false; }
+      try { localStorage.setItem("mm." + k, txt); return true; } catch {}
+      try { if (freeSpace()) { localStorage.setItem("mm." + k, txt); return true; } } catch {}
+      try { window.dispatchEvent(new CustomEvent("mm-storage-full")); } catch {}
+      return false;
+    },
     del(k) { try { localStorage.removeItem("mm." + k); } catch {} },
   };
 
@@ -22,6 +30,49 @@ window.MM_API = (function () {
       store.set("dataVersion", 2);
     }
   } catch {}
+
+  const FULL = "Phone storage is full — this was NOT saved. Connect to the internet and tap Menu → Sync now, or free space on the phone.";
+  // Make room: photos already on the server are kept as a link instead of the
+  // photo itself, and old bills the server already has are dropped from the phone.
+  function freeSpace() {
+    const C = window.MM_CLOUD; if (!C || !C.photoUrl) return false;
+    let changed = false;
+    const pend = new Set((store.get("outbox", []) || []).filter((o) => o.op === "photo" || o.op === "shopphoto").map((o) => o.itemId || o.path));
+    const cloudShops = new Set((store.get("shopsAdded", []) || []).filter((x) => x.cloud).map((x) => x.id));
+    const oi = store.get("ownerItems", {});
+    for (const [sid, list] of Object.entries(oi)) if (cloudShops.has(sid)) for (const it of list)
+      if (typeof it.photo === "string" && it.photo.startsWith("data:") && !pend.has(it.id)) { it.photo = C.photoUrl(`${sid}/${it.id}.jpg`); changed = true; }
+    const sa = store.get("shopsAdded", []);
+    for (const sh of sa) if (sh.cloud) {
+      for (const k of ["logo", "cover"]) if (typeof sh[k] === "string" && sh[k].startsWith("data:") && sh[k + "Path"] && !pend.has(sh[k + "Path"])) { sh[k] = C.photoUrl(sh[k + "Path"]); changed = true; }
+      (sh.gallery || []).forEach((g, i) => { const p = (sh.galleryPaths || [])[i]; if (typeof g === "string" && g.startsWith("data:") && p && !pend.has(p)) { sh.gallery[i] = C.photoUrl(p); changed = true; } });
+    }
+    const old = Date.now() - 120 * DAY, sent = new Set((store.get("outbox", []) || []).filter((o) => o.table === "bills").map((o) => o.row?.id || o.id));
+    const bills = store.get("bills", []), keep = bills.filter((b) => !cloudShops.has(b.shopId) || b.at > old || sent.has(b.id));
+    const writes = [];
+    if (changed) writes.push(["ownerItems", oi], ["shopsAdded", sa]);
+    if (keep.length < bills.length) writes.push(["bills", keep]);
+    let ok = false;
+    for (const [k, v] of writes) try { localStorage.setItem("mm." + k, JSON.stringify(v)); ok = true; } catch {}
+    try { if ((store.get("outboxFailed", []) || []).length > 50) { localStorage.setItem("mm.outboxFailed", JSON.stringify(store.get("outboxFailed", []).slice(-50))); ok = true; } } catch {}
+    return ok;
+  }
+  // A photo reached the server: keep only its link on the phone.
+  function photoSent(op) {
+    const C = window.MM_CLOUD; if (!C) return;
+    if (op.op === "photo") {
+      const oi = store.get("ownerItems", {}), it = (oi[op.shopId] || []).find((x) => x.id === op.itemId);
+      if (it && it.photo === op.dataUrl) { it.photo = C.photoUrl(`${op.shopId}/${op.itemId}.jpg`) + "?v=" + Date.now().toString(36); store.set("ownerItems", oi); }
+    } else if (op.op === "shopphoto") {
+      const sa = store.get("shopsAdded", []), sh = sa.find((x) => x.id === op.shopId); if (!sh) return;
+      if (op.kind === "gallery") (sh.gallery || []).forEach((g, i) => { if (g === op.dataUrl) sh.gallery[i] = C.photoUrl(op.path); });
+      else if (sh[op.kind] === op.dataUrl) sh[op.kind] = C.photoUrl(op.path);
+      store.set("shopsAdded", sa);
+    }
+  }
+  // Numbers the server accepts: whole rupees / pieces, within sane limits.
+  const money = (v) => (v == null || v === "" || !isFinite(+v) ? null : Math.min(10000000, Math.max(0, Math.round(+v))));
+  const count = (v) => Math.min(100000, Math.max(0, Math.round(+v || 0)));
 
   // ---------- server sync helpers ----------
   // Every record gets an id made on the phone, so a bill sent twice is saved once.
@@ -132,24 +183,37 @@ window.MM_API = (function () {
     damaged: "Damaged / expired", count: "Stock count", out: "Marked out of stock",
   };
   function applyEntry(it, e) {
-    it.qty = e.set != null ? e.set : Math.max(0, (it.qty || 0) + e.delta);
+    it.qtyRaw = e.set != null ? e.set : (it.qtyRaw ?? it.qty ?? 0) + e.delta;
+    it.qty = Math.max(0, it.qtyRaw);
     it.stockAt = e.at;
     if (it.qty > 0) { it.lastConfirmed = e.at; if (it.reportedOut && it.reportedOut < e.at) it.reportedOut = null; }
   }
   function replayLedger() {
-    const byItem = {};
+    const byItem = {}, base = store.get("ledgerBase", {});
     for (const e of store.get("ledger", [])) (byItem[e.itemId] = byItem[e.itemId] || []).push(e);
     for (const sh of D.shops) for (const it of sh.items) {
-      const log = byItem[it.id]; if (!log) continue;
-      if (it.qty0 !== undefined) { it.qty = it.qty0; it.stockAt = it.stockAt0; }
-      for (const e of log.sort((a, b) => a.at - b.at)) applyEntry(it, e);
+      const log = byItem[it.id], b = base[it.id]; if (!log && !b) continue;
+      if (b) { it.qty = Math.max(0, b.q); it.qtyRaw = b.q; it.stockAt = b.at; if (b.q > 0) it.lastConfirmed = it.lastConfirmed || b.at; }
+      else if (it.qty0 !== undefined) { it.qty = it.qty0; it.qtyRaw = undefined; it.stockAt = it.stockAt0; }
+      for (const e of (log || []).sort((a, b) => a.at - b.at)) applyEntry(it, e);
     }
   }
   function moveStock(shopId, itemId, { delta = 0, set = null, reason = "count", ref = null }) {
     const it = getShop(shopId)?.items.find((x) => x.id === itemId); if (!it) return;
     const before = it.qty ?? 0;
     const e = { id: uuid(), shopId, itemId, delta: set != null ? set - before : delta, set, reason, at: Date.now(), ...(ref ? { ref } : {}) };
-    const log = store.get("ledger", []); log.push(e); store.set("ledger", log.slice(-3000));
+    const log = store.get("ledger", []); log.push(e);
+    // a long history: fold the oldest moves into a per-item starting count, never just drop them
+    if (log.length > 3000) {
+      const base = store.get("ledgerBase", {}), old = log.splice(0, 1000).sort((a, b) => a.at - b.at);
+      for (const o of old) {
+        const cur = base[o.itemId] || (() => { const x = getShop(o.shopId)?.items.find((y) => y.id === o.itemId);
+          return { shopId: o.shopId, q: x && x.qty0 !== undefined ? x.qty0 : 0, at: 0 }; })();
+        cur.q = o.set != null ? o.set : cur.q + o.delta; cur.at = o.at; base[o.itemId] = cur;
+      }
+      store.set("ledgerBase", base);
+    }
+    store.set("ledger", log);
     applyEntry(it, e);
     q(shopId, { op: "insert", table: "stock_moves", row: { id: e.id, shop_id: shopId, item_id: itemId, delta: e.delta, set_to: set, reason, ref, at: iso(e.at) } });
     return it;
@@ -565,7 +629,7 @@ window.MM_API = (function () {
     const sh = getShop(id); if (!sh) return;
     Object.assign(sh, patch); persistAddedShop(sh);
     const row = {};
-    if ("promo" in patch) row.promo = patch.promo || null;
+    if ("promo" in patch) row.promo = (patch.promo || "").slice(0, 90) || null;
     if ("phone" in patch) row.phone = patch.phone || null;
     if ("gst" in patch) row.gst = patch.gst || null;
     if ("about" in patch) row.about = (patch.about || "").slice(0, 600) || null;
@@ -574,13 +638,13 @@ window.MM_API = (function () {
     if (Object.keys(row).length) q(id, { op: "update", table: "shops", id, patch: row });
   }
   const shopRow = (sh, ownerId) => ({
-    id: sh.id, owner_id: ownerId, name: sh.name, owner_name: sh.owner || null, phone: sh.phone || null, cat: sh.cat, cats: sh.cats,
+    id: sh.id, owner_id: ownerId, name: String(sh.name).slice(0, 80), owner_name: sh.owner || null, phone: sh.phone || null, cat: sh.cat, cats: sh.cats,
     market_id: sh.marketId, shop_no: sh.shopNo, floor: sh.floor, landmark: sh.landmark, locality: sh.locality || null, pincode: sh.pincode || null,
-    lat: sh.lat, lng: sh.lng, open_h: sh.open, close_h: sh.close, closed_day: sh.closedDay, promo: sh.promo || null, gst: sh.gst || null, needs_check: !!sh.needsCheck,
+    lat: sh.lat, lng: sh.lng, open_h: sh.open, close_h: sh.close, closed_day: sh.closedDay, promo: (sh.promo || "").slice(0, 90) || null, gst: sh.gst || null, needs_check: !!sh.needsCheck,
   });
   const marketRow = (m) => ({ id: m.id, name: m.name, area: m.area || null, locality: m.locality || null, pincode: m.pincode || null,
     lat: m.lat, lng: m.lng, radius_m: m.radiusM || 300, pending: true, tagline: m.tagline || null });
-  const itemRow = (shopId, it) => ({ id: it.id, shop_id: shopId, name: it.name, brand: it.brand || null, cat: it.cat,
+  const itemRow = (shopId, it) => ({ id: it.id, shop_id: shopId, name: String(it.name).slice(0, 120), brand: it.brand || null, cat: it.cat,
     price: it.price ?? null, mrp: it.mrp ?? null, cost: it.cost ?? null, reorder_at: it.reorderAt ?? 3 });
   // ---------- product details (shared catalogue) ----------
   // details d = { productId?, barcode, model, size, mrp, features[], description, specMap{}, keywords[],
@@ -595,7 +659,7 @@ window.MM_API = (function () {
   }
   const productRow = (shopId, it, d) => ({
     id: d.productId, barcode: d.barcode || null, name: it.name, brand: it.brand || null, model: d.model || null, cat: it.cat, size: d.size || null,
-    mrp: d.mrp ?? null, features: d.features || [], description: d.description || null, specs: d.specMap || {}, keywords: d.keywords || [],
+    mrp: d.mrp ?? null, features: d.features || [], description: (d.description || "").slice(0, 1000) || null, specs: d.specMap || {}, keywords: d.keywords || [],
     photo_url: d.productPhoto && /^https:/.test(d.productPhoto) ? d.productPhoto : null, photo_credit: d.photoCredit || null,
     source: d.source || "shop", created_by: shopId,
   });
@@ -638,7 +702,7 @@ window.MM_API = (function () {
       sh.gallery = sh.gallery || []; sh.galleryPaths = sh.galleryPaths || [];
       if (galleryIndex == null) { sh.gallery.push(dataUrl); sh.galleryPaths.push(path); }
       else { sh.gallery[galleryIndex] = dataUrl; sh.galleryPaths[galleryIndex] = path; }
-    } else sh[kind] = dataUrl;
+    } else { sh[kind] = dataUrl; sh[kind + "Path"] = path; }
     persistAddedShop(sh);
     q(id, { op: "shopphoto", shopId: id, kind, path, dataUrl, gallery: kind === "gallery" ? [...sh.galleryPaths] : null });
   }
@@ -654,6 +718,9 @@ window.MM_API = (function () {
     if (i >= 0) { all[i] = { ...shop, items: [] }; store.set("shopsAdded", all); }
   }
   function setItem(shopId, itemId, patch) {
+    patch = { ...patch };
+    for (const k of ["price", "cost", "mrp"]) if (k in patch) patch[k] = patch[k] == null ? null : money(patch[k]) || null;
+    if ("reorderAt" in patch && patch.reorderAt != null) patch.reorderAt = count(patch.reorderAt);
     const edits = store.get("itemEdits", {});
     edits[itemId] = { ...(edits[itemId] || {}), ...patch, at: Date.now() };
     store.set("itemEdits", edits);
@@ -685,7 +752,11 @@ window.MM_API = (function () {
   // cost and opening quantity. The photo also shows in the customer app.
   function addOwnItem(shopId, { name, brand = "", cat, price = null, cost = null, photo = null, qty = null, details = null }) {
     const sh = getShop(shopId); if (!sh) return null;
-    if (sh.items.find((x) => x.name.toLowerCase() === name.toLowerCase() && (x.brand || "") === brand)) return null;
+    name = String(name || "").trim().slice(0, 120); brand = String(brand || "").trim().slice(0, 60);
+    if (!name) return null;
+    const same = (x) => x.name.trim().toLowerCase() === name.toLowerCase() && (x.brand || "Generic").toLowerCase() === (brand || "Generic").toLowerCase();
+    if (sh.items.find(same)) return null;
+    price = money(price); cost = money(cost); if (qty != null) qty = count(qty);
     const it = enrich({ id: uuid(), name, brand: brand || "Generic", cat: cat || sh.cat, price, cost, photo, lastConfirmed: Date.now(), addedAt: Date.now() });
     const all = store.get("ownerItems", {}); (all[shopId] = all[shopId] || []).push(it); store.set("ownerItems", all);
     sh.items.push(it);
@@ -700,8 +771,10 @@ window.MM_API = (function () {
   }
   // Stock arrived from a supplier: every line goes into stock, the purchase is kept for reports.
   function savePurchase(shopId, { lines, supplier = "", pay = "cash" }) {
-    const p = { id: uuid(), shopId, at: Date.now(), supplier: supplier.trim(), pay,
-      lines: lines.map((l) => ({ id: uuid(), itemId: l.itemId, name: l.name, qty: l.qty, cost: l.cost ?? null })) };
+    const p = { id: uuid(), shopId, at: Date.now(), supplier: supplier.trim().slice(0, 80), pay,
+      lines: lines.filter((l) => l.qty > 0).map((l) => ({ id: uuid(), itemId: l.itemId, name: l.name, qty: Math.max(1, count(l.qty)), cost: money(l.cost) })) };
+    if (!p.lines.length) throw new Error("Nothing to add");
+    const pall = store.get("purchases", []); pall.unshift(p); if (!store.set("purchases", pall.slice(0, 1000))) throw new Error(FULL);
     p.total = p.lines.reduce((a, l) => a + (l.cost || 0) * l.qty, 0);
     q(shopId, { op: "insert", table: "purchases", row: { id: p.id, shop_id: shopId, at: iso(p.at), supplier: p.supplier || null, pay, total: p.total } });
     for (const l of p.lines) q(shopId, { op: "insert", table: "purchase_lines", row: { id: l.id, purchase_id: p.id, shop_id: shopId, item_id: l.itemId, name: l.name, qty: l.qty, cost: l.cost } });
@@ -710,7 +783,6 @@ window.MM_API = (function () {
       if (l.cost) setItem(shopId, l.itemId, { cost: l.cost });
       const it = getShop(shopId)?.items.find((x) => x.id === l.itemId); if (it && l.cost) it.cost = l.cost;
     }
-    const all = store.get("purchases", []); all.unshift(p); store.set("purchases", all.slice(0, 1000));
     return p;
   }
   const purchasesFor = (shopId) => store.get("purchases", []).filter((p) => p.shopId === shopId);
@@ -800,14 +872,21 @@ window.MM_API = (function () {
     return { sub, discount: disc, total: sub - disc, units: lines.reduce((a, l) => a + l.qty, 0) };
   }
   function saveBill(shopId, { lines, discount = 0, pay = "cash", phone = "", received = null }) {
-    const seq = store.get("billSeq", {}); seq[shopId] = (seq[shopId] || 1000) + 1; store.set("billSeq", seq);
-    const t = billTotals(lines, discount);
+    lines = (lines || []).map((l) => ({ ...l, name: String(l.name || "Item").slice(0, 120), qty: Math.max(1, count(l.qty)), price: money(l.price) ?? 0 })).filter((l) => l.qty > 0);
+    if (!lines.length) throw new Error("The cart is empty");
+    if (!["cash", "upi", "card", "khata"].includes(pay)) pay = "cash";
+    const t = billTotals(lines, money(discount) || 0);
+    if (t.sub > 2000000000) throw new Error("This bill is too large — check the quantities and prices");
+    const seq = store.get("billSeq", {}); const mine = billsFor(shopId).reduce((a, b) => Math.max(a, b.no || 0), 0);
+    seq[shopId] = Math.max(seq[shopId] || 1000, mine) + 1;
     const b = {
       id: uuid(), no: seq[shopId], shopId, at: Date.now(),
       lines: lines.map((l) => ({ id: uuid(), itemId: l.itemId || null, name: l.name, brand: l.brand || "", qty: l.qty, price: l.price, cost: l.cost ?? null })),
-      ...t, pay, phone: phone || "", received: pay === "cash" && received ? received : null,
+      ...t, pay, phone: phone || "", received: pay === "cash" && received ? money(received) : null,
     };
-    const all = store.get("bills", []); all.unshift(b); store.set("bills", all.slice(0, 2000));
+    const all = store.get("bills", []); all.unshift(b);
+    if (!store.set("bills", all.slice(0, 2000))) throw new Error(FULL);
+    store.set("billSeq", seq);
     q(shopId, { op: "insert", table: "bills", row: { id: b.id, shop_id: shopId, no: b.no, at: iso(b.at), sub: b.sub, discount: b.discount, total: b.total,
       units: b.units, pay, phone: b.phone || null, received: b.received } });
     for (const l of b.lines) q(shopId, { op: "insert", table: "bill_lines", row: { id: l.id, bill_id: b.id, shop_id: shopId, item_id: l.itemId,
@@ -853,6 +932,7 @@ window.MM_API = (function () {
     const ids = new Set((items || []).map((i) => i.id));
     const ed = store.get("itemEdits", {}); for (const k of Object.keys(ed)) if (ids.has(k)) delete ed[k]; store.set("itemEdits", ed);
     store.set("ledger", store.get("ledger", []).filter((e) => e.shopId !== r.id));
+    const lb = store.get("ledgerBase", {}); for (const k of Object.keys(lb)) if (lb[k].shopId === r.id) delete lb[k]; store.set("ledgerBase", lb);
     const bl = (bills || []).map((b) => ({ id: b.id, no: b.no, shopId: r.id, at: ms(b.at), sub: b.sub, discount: b.discount, total: b.total, units: b.units,
       pay: b.pay, phone: b.phone || "", received: b.received, ...(b.cancelled_at ? { cancelled: ms(b.cancelled_at) } : {}),
       lines: (b.bill_lines || []).map((l) => ({ id: l.id, itemId: l.item_id, name: l.name, brand: l.brand || "", qty: l.qty, price: l.price, cost: l.cost })) }));
@@ -961,7 +1041,7 @@ window.MM_API = (function () {
     RANGES, getRange, setRange, trip, fmtTrip, nearArea, nearSearch, marketFor,
     REASONS, moveStock, stockLog, inventory, lowAt,
     billTotals, saveBill, cancelBill, billsFor, getBill, daySummary,
-    registerShop, login, updateShop, normPhone, weakPin, addOwnItem, savePurchase, purchasesFor, hydrateShop, mergePublic, uuid, shopHas, saveDetails, productDetails, addPhoto, setBillLink, setShopPhoto, removeGalleryPhoto, getShop, getMarket, isOpen, itemStatus,
+    photoSent, FULL, registerShop, login, updateShop, normPhone, weakPin, addOwnItem, savePurchase, purchasesFor, hydrateShop, mergePublic, uuid, shopHas, saveDetails, productDetails, addPhoto, setBillLink, setShopPhoto, removeGalleryPhoto, getShop, getMarket, isOpen, itemStatus,
     search, ask, getAsk, replyAsk, pendingAsks, feedback, logSearch, addView,
     ownerShopId, ownerShop, isOwnerShop, claimShop, releaseShop, addShop, persistAddedShop, setItem, addItem, catalogFor, missedSales,
     getBag, addToBag, setQty, bagCount, bagLines, STEPS, placeOrder, getOrders, getOrder, advanceOrder, cancelOrder, ordersFor,

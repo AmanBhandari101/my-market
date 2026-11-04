@@ -79,8 +79,8 @@
       <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button><span class="eyebrow faint">About 2 minutes</span></div>
       <div class="pad" style="margin-top:22px"><div class="eyebrow">Add your shop</div><h1 class="title" style="margin-top:8px">Tell customers where you are.</h1></div>
       <form id="f" class="pad form">
-        <label>Shop name<input class="field" name="name" required placeholder="e.g. Sharma Hardware"></label>
-        <label>Your name<input class="field" name="owner" required placeholder="e.g. Ramesh Sharma"></label>
+        <label>Shop name<input class="field" name="name" required maxlength="80" placeholder="e.g. Sharma Hardware"></label>
+        <label>Your name<input class="field" name="owner" required maxlength="60" placeholder="e.g. Ramesh Sharma"></label>
         <label>Mobile number <span class="faint tiny">— your login, and the shop's WhatsApp for bills</span><input class="field" name="phone" inputmode="tel" autocomplete="username" required placeholder="98765 43210"></label>
         <div class="two"><label>Create a 6-digit PIN<input class="field" name="pin" type="password" inputmode="numeric" autocomplete="new-password" maxlength="6" required placeholder="••••••"></label>
           <label>Repeat PIN<input class="field" name="pin2" type="password" inputmode="numeric" autocomplete="new-password" maxlength="6" required></label></div>
@@ -148,6 +148,9 @@
     };
   }
 
+  let fullAt = 0;
+  window.addEventListener("mm-storage-full", () => { if (Date.now() - fullAt > 60000) { fullAt = Date.now(); U.toast(A.FULL, 8000); } });
+
   // ---------- the cart (bill in progress) ----------
   // Saved on the phone for each shop, so it stays while you move between pages
   // or close the app — until the bill is generated or the cart is cleared.
@@ -199,11 +202,16 @@
       $("#m-bs", el).onclick = () => billSettings(s);
       $("#m-sync", el) && ($("#m-sync", el).onclick = async () => {
         U.closeSheet(); U.toast("Syncing…");
+        window.MM_CLOUD.retryFailed();
         const st = await window.MM_CLOUD.flush();
         if (st.pending) return U.toast("No internet — your changes are kept and will send later");
+        if (st.failed) return U.toast(`${st.failed} change${st.failed > 1 ? "s" : ""} could not be saved: ${st.lastError || "server refused"}`, 8000);
         try { await window.MM_CLOUD.pullShop(); location.reload(); } catch (x) { U.toast(x.message); }
       });
-      $("#m-out", el).onclick = () => { A.releaseShop(); U.closeSheet(); U.toast("Logged out"); U.go("#/biz"); };
+      $("#m-out", el).onclick = () => {
+        const c = window.MM_CLOUD, n = s.cloud && c ? c.pending() + c.failedOps().length : 0;
+        if (n && !confirm(`${n} change${n > 1 ? "s" : ""} (bills, stock…) ${n > 1 ? "haven't" : "hasn't"} reached the server yet.\nIf you log out now they will be LOST.\n\nConnect to the internet and tap Sync now first. Log out anyway?`)) return;
+        A.releaseShop(); U.closeSheet(); U.toast("Logged out"); U.go("#/biz"); };
       $$("a.entry", el).forEach((a) => a.addEventListener("click", () => U.closeSheet()));
     });
   }
@@ -304,7 +312,7 @@
           done(A.REASONS[r]);
         });
         $("#savep", el).onclick = () => {
-          const patch = {}, pr = +$("#pr", el).value, co = +$("#co", el).value, ro = +$("#ro", el).value;
+          const num = (id) => Math.round(+$(id, el).value.replace(/[^\d.]/g, "")), patch = {}, pr = num("#pr"), co = num("#co"), ro = num("#ro");
           if (pr > 0) patch.price = pr; if (co > 0) patch.cost = co; if (ro >= 0 && $("#ro", el).value !== "") patch.reorderAt = Math.round(ro);
           A.setItem(s.id, it.id, patch);
           if (patch.cost != null) it.cost = patch.cost; if (patch.reorderAt != null) it.reorderAt = patch.reorderAt;
@@ -443,7 +451,7 @@
     }
     function otherItem() {
       U.openSheet(`<div class="eyebrow">Not in your list</div><div class="title">Add an amount</div>
-        <div class="form"><label>What is it? <span class="faint tiny">(optional)</span><input class="field" id="on" placeholder="e.g. Repair charge"></label>
+        <div class="form"><label>What is it? <span class="faint tiny">(optional)</span><input class="field" id="on" maxlength="120" placeholder="e.g. Repair charge"></label>
         <div class="two"><label>Price ₹<input class="field" id="op" inputmode="numeric"></label><label>Quantity<input class="field" id="oq" inputmode="numeric" value="1"></label></div>
         <button class="btn" id="ook" type="button">Add to bill</button></div>`, (el) => {
         setTimeout(() => $("#op", el).focus(), 50);
@@ -542,17 +550,23 @@
       $$("[data-p]").forEach((b) => b.onclick = () => { cart.lines[ix(b, "p")].qty++; keep(); draw(); });
       $$("[data-rm]").forEach((b) => b.onclick = () => { cart.lines.splice(ix(b, "rm"), 1); keep(); draw(); });
       $$("[data-price]").forEach((b) => b.onclick = () => {
-        const l = cart.lines[ix(b, "price")]; const v = Math.round(+prompt(`Price for ${l.name} (₹)`, l.price));
-        if (v > 0) { l.price = v; keep(); draw(); }
+        const l = cart.lines[ix(b, "price")]; const a = prompt(`Price for ${l.name} (₹)`, l.price); if (a == null) return;
+        const v = Math.round(+String(a).replace(/[^\d.]/g, ""));
+        if (v > 0 && v <= 10000000) { l.price = v; keep(); draw(); } else U.toast("Type a price in rupees");
       });
       $("#disc").onchange = (e) => { cart.discount = Math.max(0, Math.round(+e.target.value || 0)); keep(); draw(); };
       $$("[data-pay]").forEach((b) => b.onclick = () => { cart.pay = b.dataset.pay; keep(); draw(); });
       $("#recv") && ($("#recv").oninput = (e) => { cart.received = e.target.value; keep(); const c = +e.target.value - A.billTotals(cart.lines, cart.discount).total; $("#chg").innerHTML = c > 0 ? `Return <b style="font-size:18px">${rupee(c)}</b>` : ""; });
       $("#ph").oninput = (e) => { cart.phone = e.target.value.replace(/[^\d+ ]/g, ""); keep(); };
       $("#clearb").onclick = () => { if (!confirm("Clear the cart?")) return; cart = EMPTY_CART(); keep(); draw(); };
-      $("#gen").onclick = () => {
+      $("#gen").onclick = (ev) => {
+        if (ev.currentTarget.disabled) return;
         if (cart.pay === "khata" && A.normPhone(cart.phone).length < 10) return U.toast("Add the customer's phone number for khata");
-        const b = A.saveBill(s.id, { lines: cart.lines, discount: cart.discount, pay: cart.pay, phone: cart.phone, received: +cart.received || null });
+        if (cart.phone && A.normPhone(cart.phone).length !== 10) return U.toast("The customer's number should have 10 digits — or leave it empty");
+        ev.currentTarget.disabled = true;
+        let b;
+        try { b = A.saveBill(s.id, { lines: cart.lines, discount: cart.discount, pay: cart.pay, phone: cart.phone, received: +cart.received || null }); }
+        catch (x) { ev.currentTarget.disabled = false; return U.toast(x.message, 8000); }
         cartSet(s, EMPTY_CART());
         U.go("#/biz/bill/" + b.id);
         if (A.normPhone(b.phone).length === 10) sendBill(b, s);
@@ -994,8 +1008,9 @@
         $$("[data-cost]", el).forEach((inp) => inp.onchange = () => { const v = Math.round(+inp.value); lines[ix(inp, "cost")].cost = v > 0 ? v : null; keep(); draw(el); });
         $("#sup", el).oninput = (e) => { supplier = e.target.value; };
         $$("[data-pay]", el).forEach((b) => b.onclick = () => { pay = b.dataset.pay; draw(el); });
-        $("#savein", el).onclick = () => {
-          const p = A.savePurchase(s.id, { lines, supplier, pay });
+        $("#savein", el).onclick = (ev) => {
+          if (ev.currentTarget.disabled) return; ev.currentTarget.disabled = true;
+          let p; try { p = A.savePurchase(s.id, { lines, supplier, pay }); } catch (x) { ev.currentTarget.disabled = false; return U.toast(x.message, 8000); }
           if (supplier.trim()) A.store.set("lastSupplier:" + s.id, supplier.trim());
           A.store.del("stockDraft:" + s.id); lines = [];
           U.closeSheet(); U.toast(`Added ${p.lines.reduce((a, l) => a + l.qty, 0)} pieces to stock`); U.go("#/biz/items");
@@ -1117,7 +1132,7 @@
         <label class="photo-in"><input type="file" accept="image/*" capture="environment" id="ph" hidden>
           <span id="phv">${photo ? `<img src="${photo}" alt="">` : p.photo_url ? `<img src="${esc(p.photo_url)}" alt="">` : `${ic("camera")}<em>Take or choose a photo</em>`}</span></label>
         ${!photo && p.photo_url && p.photo_credit ? `<p class="faint tiny" style="margin:-6px 0 0">${esc(p.photo_credit)} — take your own photo to replace it</p>` : ""}
-        <label>Name<input class="field" id="nm" placeholder="e.g. Ball valve 1 inch" autocomplete="off" value="${esc(p.name || f.name || (presetName ? presetName[0].toUpperCase() + presetName.slice(1) : ""))}"></label>
+        <label>Name<input class="field" id="nm" maxlength="120" placeholder="e.g. Ball valve 1 inch" autocomplete="off" value="${esc(p.name || f.name || (presetName ? presetName[0].toUpperCase() + presetName.slice(1) : ""))}"></label>
         <label>Brand <span class="faint tiny">(optional)</span><input class="field" id="br" placeholder="e.g. Ashirvad" autocomplete="off" value="${esc(p.brand || f.brand || "")}"></label>
         <label>Category</label><div class="words" id="ncat">${Object.entries(C).map(([k, c]) => `<button type="button" class="word ${k === cat ? "on" : ""}" data-c="${k}">${esc(c.name)}</button>`).join("")}</div>
         <div class="two"><label>Selling price ₹<input class="field" id="pr" inputmode="numeric" value="${esc(f.price || "")}"></label><label>MRP on pack ₹<input class="field" id="mrp" inputmode="numeric" value="${esc(p.mrp || f.mrp || "")}"></label></div>

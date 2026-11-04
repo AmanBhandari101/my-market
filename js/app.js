@@ -73,9 +73,9 @@
   };
   const openWord = (s) => A.isOpen(s) ? `Open until ${fmtHour(s.close)}` : `Closed · opens ${fmtHour(s.open)}`;
   const statusWord = { confirmed: "In stock", listed: "Ask to confirm", out: "Not available" };
-  function toast(msg) {
+  function toast(msg, ms = 2600) {
     const t = $("#toast"); t.textContent = msg; t.classList.remove("hidden");
-    clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add("hidden"), 2600);
+    clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add("hidden"), ms);
   }
   function openSheet(html, onMount) {
     $("#sheet").innerHTML = html;
