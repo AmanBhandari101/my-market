@@ -17,6 +17,7 @@
     if (sub === "security") return securityView();
     if (sub === "inbox") return dashView();
     if (sub === "bill" && parts[2]) return receiptView(parts[2]);
+    if (sub === "cart") return cartView();
     if (sub === "bills") return billsView();
     if (sub === "insights") return insightsView();
     return billView(); // home = the billing counter
@@ -147,12 +148,26 @@
     };
   }
 
+  // ---------- the cart (bill in progress) ----------
+  // Saved on the phone for each shop, so it stays while you move between pages
+  // or close the app — until the bill is generated or the cart is cleared.
+  const EMPTY_CART = () => ({ lines: [], discount: 0, pay: "cash", phone: "", received: "" });
+  const cartGet = (s) => A.store.get("billDraft:" + s.id, EMPTY_CART());
+  const cartUnits = (c) => (c.lines || []).reduce((a, l) => a + l.qty, 0);
+  function cartSet(s, c, bump) {
+    A.store.set("billDraft:" + s.id, c);
+    const n = cartUnits(c);
+    $$("[data-cartn]").forEach((el) => { el.textContent = n; el.classList.toggle("hidden", !n); });
+    if (bump) { const ic2 = $("#carticon"); if (ic2) { ic2.classList.remove("bump"); void ic2.offsetWidth; ic2.classList.add("bump"); } }
+  }
+
   // ---------- shop-app top bar ----------
   const waiting = (s) => A.pendingAsks(s.id).length + A.ordersFor(s.id).filter((o) => !o.cancelled && o.step < A.STEPS[o.mode].length - 1).length;
   function bizTop(title) {
     const s = A.ownerShop(), n = waiting(s);
     return `<div class="topline"><span class="brand"><img src="icon-business.svg" alt=""><span class="bt">${esc(title || s.name)}${s.cloud ? `<em class="syncst" data-sync>${syncWord()}</em>` : ""}</span></span>
-      <div class="btn-row" style="gap:2px"><a class="iconbtn bagbtn" href="#/biz/inbox" aria-label="Orders and questions">${ic("bell")}<i class="bcount ${n ? "" : "hidden"}">${n}</i></a>
+      <div class="btn-row" style="gap:2px"><a class="iconbtn bagbtn" id="carticon" href="#/biz/cart" aria-label="Cart">${ic("bag")}<i class="bcount ${cartUnits(cartGet(s)) ? "" : "hidden"}" data-cartn>${cartUnits(cartGet(s))}</i></a>
+      <a class="iconbtn bagbtn" href="#/biz/inbox" aria-label="Orders and questions">${ic("bell")}<i class="bcount ${n ? "" : "hidden"}">${n}</i></a>
       <button class="iconbtn" data-menu aria-label="Menu">${ic("menu")}</button></div></div>`;
   }
   function bindTop() { $$("[data-menu]").forEach((b) => b.onclick = menuSheet); }
@@ -398,8 +413,8 @@
   function billView() {
     const s = A.ownerShop();
     // The bill in progress survives leaving the screen (kept on this device).
-    let cart = A.store.get("billDraft:" + s.id, { lines: [], discount: 0, pay: "cash", phone: "", received: "" });
-    const keep = () => A.store.set("billDraft:" + s.id, cart);
+    let cart = cartGet(s);
+    const keep = (bump) => cartSet(s, cart, bump);
     let q = "";
     // most-sold items first, then the ones in stock
     const sold = {}; for (const b of A.billsFor(s.id)) for (const l of b.lines) if (l.itemId) sold[l.itemId] = (sold[l.itemId] || 0) + l.qty;
@@ -411,7 +426,7 @@
       if (!it.price) return askPrice(it);
       const l = lineOf(it.id);
       if (l) l.qty += n; else cart.lines.push({ itemId: it.id, name: it.name, brand: it.brand, qty: n, price: it.price, cost: it.cost ?? null });
-      cart.lines = cart.lines.filter((x) => x.qty > 0); keep(); paint();
+      cart.lines = cart.lines.filter((x) => x.qty > 0); keep(n > 0); paint();
     }
     function askPrice(it) {
       U.openSheet(`<div class="eyebrow">${esc(it.brand)}</div><div class="title">${esc(it.name)}</div>
@@ -436,7 +451,7 @@
           const p = Math.round(+$("#op", el).value), n = Math.max(1, Math.round(+$("#oq", el).value || 1));
           if (!(p > 0)) return U.toast("Type the price");
           cart.lines.push({ itemId: null, key: "x" + Date.now(), name: $("#on", el).value.trim() || "Other item", qty: n, price: p, cost: null });
-          keep(); U.closeSheet(); paint();
+          keep(true); U.closeSheet(); paint();
         };
       });
     }
@@ -454,60 +469,11 @@
           ${n ? `<span class="bstep"><button data-dec="${it.id}" aria-label="One less">−</button><b>${n}</b><button data-inc="${it.id}" aria-label="One more">+</button></span>` : ""}
         </div>`;
       }).join("") || '<p class="quiet small">No item matches. Use “Item not in list”.</p>';
-      $("#bsum").innerHTML = t.units ? `<span><b>${rupee(t.total)}</b><em>${t.units} item${t.units > 1 ? "s" : ""}${t.discount ? ` · ${rupee(t.discount)} off` : ""}</em></span>` : '<span class="quiet">Tap items to add them</span>';
+      $("#bsum").innerHTML = t.units ? `<span class="cartsum">${ic("bag")}<span><b>${rupee(t.total)}</b><em>${t.units} item${t.units > 1 ? "s" : ""} in cart${t.discount ? ` · ${rupee(t.discount)} off` : ""}</em></span></span>` : '<span class="quiet">Tap items to add them to the cart</span>';
       $("#bgo").classList.toggle("hidden", !t.units);
       $$("[data-it]").forEach((el) => el.onclick = (e) => { if (e.target.closest("[data-dec],[data-inc]")) return; add(s.items.find((x) => x.id === el.dataset.it)); });
       $$("[data-inc]").forEach((b) => b.onclick = () => add(s.items.find((x) => x.id === b.dataset.inc)));
       $$("[data-dec]").forEach((b) => b.onclick = () => add(s.items.find((x) => x.id === b.dataset.dec), -1));
-    }
-
-    // Review: quantities, prices, discount, payment, then Generate bill.
-    function review() {
-      const draw = (el) => {
-        const t = totals();
-        const change = cart.pay === "cash" && +cart.received > t.total ? +cart.received - t.total : 0;
-        el.innerHTML = `
-          <div class="eyebrow">Bill · ${esc(s.name)}</div><div class="title">${rupee(t.total)}</div>
-          <div class="entries">${cart.lines.map((l, i) => `<div class="bline">
-            <div class="body"><div class="name">${esc(l.name)}</div><button class="link" data-price="${i}">${rupee(l.price)} each</button></div>
-            <span class="stepper sm"><button data-m="${i}" aria-label="One less">−</button><span>${l.qty}</span><button data-p="${i}" aria-label="One more">+</button></span>
-            <b class="bamt">${rupee(l.qty * l.price)}</b></div>`).join("")}</div>
-          <table class="specs bill" style="margin-top:8px">
-            <tr><th>Items</th><td>${rupee(t.sub)}</td></tr>
-            <tr><th>Discount ₹</th><td><input class="field" id="disc" inputmode="numeric" value="${cart.discount || ""}" placeholder="0" style="width:96px;text-align:right;padding:6px 8px"></td></tr>
-            <tr class="total"><th>Total</th><td>${rupee(t.total)}</td></tr></table>
-          <div class="eyebrow" style="margin-top:16px">Paid by</div>
-          <div class="words" style="margin-top:8px">${Object.entries(PAYS).map(([k, v]) => `<button class="word ${cart.pay === k ? "on" : ""}" data-pay="${k}">${v}</button>`).join("")}</div>
-          ${cart.pay === "cash" ? `<div class="two" style="margin-top:12px;align-items:end"><label class="small quiet">Cash received ₹<input class="field" id="recv" inputmode="numeric" value="${cart.received || ""}" placeholder="${t.total}"></label>
-            <div class="small" style="padding-bottom:12px">${change ? `Return <b style="font-size:18px">${rupee(change)}</b>` : ""}</div></div>` : ""}
-          ${cart.pay === "upi" ? `<p class="small quiet" style="margin-top:10px">The customer pays ${rupee(t.total)} to your shop's UPI.</p>` : ""}
-          ${cart.pay === "khata" ? `<p class="small quiet" style="margin-top:10px">Added to the customer's credit. Add their phone number so it goes in their khata.</p>` : ""}
-          <label class="small quiet" style="display:block;margin-top:12px">Customer WhatsApp number <span class="faint">(optional)</span>
-            <input class="field" id="ph" inputmode="tel" value="${esc(cart.phone)}" placeholder="98765 43210"></label>
-          <p class="faint tiny" style="margin:4px 0 0">With a number, WhatsApp opens on that customer's chat with the bill ready — tap Send.</p>
-          <div class="opts" style="margin-top:18px"><button class="btn" id="gen" style="height:52px;font-size:16px">Generate bill · ${rupee(t.total)}</button>
-            <button class="link accent" id="clearb">Clear this bill</button></div>`;
-        const idx = (b, k) => +b.dataset[k];
-        $$("[data-m]", el).forEach((b) => b.onclick = () => { cart.lines[idx(b, "m")].qty--; cart.lines = cart.lines.filter((l) => l.qty > 0); keep(); paint(); if (!cart.lines.length) return U.closeSheet(); draw(el); });
-        $$("[data-p]", el).forEach((b) => b.onclick = () => { cart.lines[idx(b, "p")].qty++; keep(); paint(); draw(el); });
-        $$("[data-price]", el).forEach((b) => b.onclick = () => {
-          const l = cart.lines[idx(b, "price")]; const v = Math.round(+prompt(`Price for ${l.name} (₹)`, l.price));
-          if (v > 0) { l.price = v; keep(); paint(); draw(el); }
-        });
-        $("#disc", el).onchange = (e) => { cart.discount = Math.max(0, Math.round(+e.target.value || 0)); keep(); paint(); draw(el); };
-        $$("[data-pay]", el).forEach((b) => b.onclick = () => { cart.pay = b.dataset.pay; keep(); draw(el); });
-        $("#recv", el) && ($("#recv", el).oninput = (e) => { cart.received = e.target.value; keep(); const c = +e.target.value - totals().total; e.target.closest(".two").lastElementChild.innerHTML = c > 0 ? `Return <b style="font-size:18px">${rupee(c)}</b>` : ""; });
-        $("#ph", el).oninput = (e) => { cart.phone = e.target.value.replace(/[^\d+ ]/g, ""); keep(); };
-        $("#clearb", el).onclick = () => { if (!confirm("Clear this bill?")) return; cart = { lines: [], discount: 0, pay: "cash", phone: "", received: "" }; keep(); U.closeSheet(); paint(); };
-        $("#gen", el).onclick = () => {
-          if (cart.pay === "khata" && cart.phone.replace(/\D/g, "").length < 10) return U.toast("Add the customer's phone number for khata");
-          const b = A.saveBill(s.id, { lines: cart.lines, discount: cart.discount, pay: cart.pay, phone: cart.phone, received: +cart.received || null });
-          A.store.del("billDraft:" + s.id);
-          U.closeSheet(); U.go("#/biz/bill/" + b.id);
-          if (A.normPhone(b.phone).length === 10) sendBill(b, s);
-        };
-      };
-      U.openSheet("", draw);
     }
 
     U.app.innerHTML = `
@@ -518,12 +484,81 @@
       <div class="pad" style="margin:12px 0 0"><button class="btn line" id="other">+ Item not in list</button></div>
       ${s.items.length ? "" : '<div class="banner" style="margin:14px var(--gut) 0"><div class="serif">No items yet</div><p>Add your items on the Stock page first — then tap them here to bill.</p><a class="link accent" href="#/biz/items">Go to Stock</a></div>'}
       <div style="height:110px"></div>
-      <div class="billbar"><div id="bsum"></div><button class="btn auto" id="bgo">Review bill</button></div>`;
+      <div class="billbar"><div id="bsum"></div><a class="btn auto" id="bgo" href="#/biz/cart">View cart</a></div>`;
     bindTop();
     $("#bq").addEventListener("input", (e) => { q = e.target.value.trim().toLowerCase(); paint(); });
     $("#other").onclick = otherItem;
-    $("#bgo").onclick = review;
     paint();
+  }
+
+  // ---------- cart page: check the items, payment, then Generate bill ----------
+  function cartView() {
+    const s = A.ownerShop();
+    let cart = cartGet(s);
+    const keep = () => cartSet(s, cart);
+    const draw = () => {
+      const t = A.billTotals(cart.lines, cart.discount);
+      const change = cart.pay === "cash" && +cart.received > t.total ? +cart.received - t.total : 0;
+      if (!cart.lines.length) {
+        U.app.innerHTML = `${bizTop("Cart")}
+          <div class="cart-empty">${ic("bag")}<b>Your cart is empty</b><p>Tap items on the Bill page to add them here.</p><a class="btn auto" href="#/biz">Add items</a></div>`;
+        bindTop(); return;
+      }
+      U.app.innerHTML = `
+        ${bizTop("Cart")}
+        <div class="pad billhead"><b>${t.units} item${t.units > 1 ? "s" : ""}</b><a class="link" href="#/biz">+ Add more items</a></div>
+        <div class="cartlist">${cart.lines.map((l, i) => {
+          const it = l.itemId && s.items.find((x) => x.id === l.itemId);
+          return `<div class="cline">
+            <span class="thumb" style="${it ? U.catVars(it.cat) : ""}">${it ? U.pimg(it) : U.art(s.cat, 30)}</span>
+            <div class="body"><div class="name">${esc(l.name)}</div>
+              <button class="link" data-price="${i}">${rupee(l.price)} each · change</button></div>
+            <div class="cright"><b>${rupee(l.qty * l.price)}</b>
+              <span class="stepper sm"><button data-m="${i}" aria-label="One less">−</button><span>${l.qty}</span><button data-p="${i}" aria-label="One more">+</button></span></div>
+            <button class="crm" data-rm="${i}" aria-label="Remove ${esc(l.name)}">×</button>
+          </div>`; }).join("")}</div>
+        <div class="rsec">
+          <table class="specs bill">
+            <tr><th>Items (${t.units})</th><td>${rupee(t.sub)}</td></tr>
+            <tr><th>Discount ₹</th><td><input class="field" id="disc" inputmode="numeric" value="${cart.discount || ""}" placeholder="0" style="width:96px;text-align:right;padding:6px 8px"></td></tr>
+            <tr class="total"><th>Total</th><td>${rupee(t.total)}</td></tr></table>
+        </div>
+        <div class="rsec"><div class="rhd"><b>Paid by</b></div>
+          <div class="words">${Object.entries(PAYS).map(([k, v]) => `<button class="word ${cart.pay === k ? "on" : ""}" data-pay="${k}">${v}</button>`).join("")}</div>
+          ${cart.pay === "cash" ? `<div class="two" style="margin-top:12px;align-items:end"><label class="small quiet">Cash received ₹<input class="field" id="recv" inputmode="numeric" value="${cart.received || ""}" placeholder="${t.total}"></label>
+            <div class="small" id="chg" style="padding-bottom:12px">${change ? `Return <b style="font-size:18px">${rupee(change)}</b>` : ""}</div></div>` : ""}
+          ${cart.pay === "upi" ? `<p class="small quiet" style="margin:10px 0 0">The customer pays ${rupee(t.total)} to your shop's UPI.</p>` : ""}
+          ${cart.pay === "khata" ? `<p class="small quiet" style="margin:10px 0 0">Goes on the customer's credit — add their number below.</p>` : ""}
+          <label class="small quiet" style="display:block;margin-top:14px">Customer WhatsApp number <span class="faint">(optional)</span>
+            <input class="field" id="ph" inputmode="tel" value="${esc(cart.phone)}" placeholder="98765 43210"></label>
+          <p class="faint tiny" style="margin:4px 0 0">With a number, WhatsApp opens on that customer's chat with the bill ready — tap Send.</p>
+          <div style="text-align:center;margin-top:14px"><button class="link accent" id="clearb">Clear cart</button></div>
+        </div>
+        <div style="height:120px"></div>
+        <div class="billbar"><span><b>${rupee(t.total)}</b><em>${t.units} item${t.units > 1 ? "s" : ""} · ${PAYS[cart.pay]}</em></span><button class="btn auto" id="gen">Generate bill</button></div>`;
+      bindTop();
+      const ix = (b, k) => +b.dataset[k];
+      $$("[data-m]").forEach((b) => b.onclick = () => { cart.lines[ix(b, "m")].qty--; cart.lines = cart.lines.filter((l) => l.qty > 0); keep(); draw(); });
+      $$("[data-p]").forEach((b) => b.onclick = () => { cart.lines[ix(b, "p")].qty++; keep(); draw(); });
+      $$("[data-rm]").forEach((b) => b.onclick = () => { cart.lines.splice(ix(b, "rm"), 1); keep(); draw(); });
+      $$("[data-price]").forEach((b) => b.onclick = () => {
+        const l = cart.lines[ix(b, "price")]; const v = Math.round(+prompt(`Price for ${l.name} (₹)`, l.price));
+        if (v > 0) { l.price = v; keep(); draw(); }
+      });
+      $("#disc").onchange = (e) => { cart.discount = Math.max(0, Math.round(+e.target.value || 0)); keep(); draw(); };
+      $$("[data-pay]").forEach((b) => b.onclick = () => { cart.pay = b.dataset.pay; keep(); draw(); });
+      $("#recv") && ($("#recv").oninput = (e) => { cart.received = e.target.value; keep(); const c = +e.target.value - A.billTotals(cart.lines, cart.discount).total; $("#chg").innerHTML = c > 0 ? `Return <b style="font-size:18px">${rupee(c)}</b>` : ""; });
+      $("#ph").oninput = (e) => { cart.phone = e.target.value.replace(/[^\d+ ]/g, ""); keep(); };
+      $("#clearb").onclick = () => { if (!confirm("Clear the cart?")) return; cart = EMPTY_CART(); keep(); draw(); };
+      $("#gen").onclick = () => {
+        if (cart.pay === "khata" && A.normPhone(cart.phone).length < 10) return U.toast("Add the customer's phone number for khata");
+        const b = A.saveBill(s.id, { lines: cart.lines, discount: cart.discount, pay: cart.pay, phone: cart.phone, received: +cart.received || null });
+        cartSet(s, EMPTY_CART());
+        U.go("#/biz/bill/" + b.id);
+        if (A.normPhone(b.phone).length === 10) sendBill(b, s);
+      };
+    };
+    draw();
   }
 
   // Shop's bill details: the small advert and GSTIN printed on every bill.

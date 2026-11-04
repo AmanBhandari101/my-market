@@ -754,14 +754,16 @@
   // ---------- bottom tabs (customer screens only) ----------
   const TAB_ON = { "": "home", item: "home", search: "search", ask: "search", me: "me", orders: "me", order: "me", bag: "bag" };
   // Shop app: three pages — Bill (home), Stock, Reports.
-  const BIZ_ON = { "": "bill", bill: "bill", inbox: "bill", items: "stock", stockin: "stock", reports: "reports", bills: "reports", insights: "reports", site: "reports", security: "reports" };
+  const BIZ_ON = { "": "bill", bill: "bill", cart: "bill", inbox: "bill", items: "stock", stockin: "stock", reports: "reports", bills: "reports", insights: "reports", site: "reports", security: "reports" };
   function syncTabs(r, parts = []) {
     const nav = $("#tabs"); if (!nav) return;
     if (BIZ) {
       const on = A.ownerShop() && r === "biz" ? BIZ_ON[parts[1] || ""] : null;
       nav.classList.toggle("hidden", !on); nav.classList.add("three"); document.body.classList.toggle("tabs-on", !!on);
       if (on) nav.innerHTML = [["bill", "#/biz", "receipt", "Bill"], ["stock", "#/biz/items", "box", "Stock"], ["reports", "#/biz/reports", "chart", "Reports"]]
-        .map(([k, h, i, l]) => `<a href="${h}" class="${on === k ? "on" : ""}">${ic(i)}${l}</a>`).join("");
+        .map(([k, h, i, l]) => `<a href="${h}" class="${on === k ? "on" : ""}">${ic(i)}${l}${k === "bill" ? (() => {
+          const c = A.store.get("billDraft:" + A.ownerShopId(), null), n = c ? (c.lines || []).reduce((a, x) => a + x.qty, 0) : 0;
+          return `<i class="bcount ${n ? "" : "hidden"}" data-cartn>${n}</i>`; })() : ""}</a>`).join("");
       return;
     }
     const on = TAB_ON[r];
