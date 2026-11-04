@@ -1266,13 +1266,15 @@
       // the bill is saved in the database; the link shows it from there (no PDF file is uploaded)
       const tok = s.cloud && window.MM_CLOUD ? A.billToken(b.id) : null;
       const link = tok ? window.MM_CLOUD.billShareLink(tok) : null;
-      const msg = link
-        ? `*${s.name}*\nBill #${b.no} · ${rs(b.total)} · ${PAYS[b.pay]}\nYour bill: ${link}\nOur stock & prices: ${siteLink(s, "bill")}\nThank you! Visit again.`
-        : billText(b, s);
+      const msg = billText(b, s, link || "");
       U.openWhatsApp(num, msg);
       if (!link) U.toast("Sent as text — log in so bills go out as links");
       return link ? "link" : "text";
     }
+    return shareBillFile(b, s);
+  }
+  // the PDF itself, through the phone's share menu (pick WhatsApp, then the customer's chat)
+  async function shareBillFile(b, s) {
     if (!window.jspdf) { U.toast("PDF needs the internet once"); return "none"; }
     const doc = makeBillPdf(b, s);
     const file = new File([doc.output("blob")], billName(b, s), { type: "application/pdf" });
@@ -1797,11 +1799,16 @@
     else paintLooking(A.missedSales(s).map((m) => ({ q: m.q, n: m.n, missed: m.n })));
   }
 
-  function billText(b, s) {
+  // The WhatsApp message shows the whole bill in the chat; the link adds the full page and PDF.
+  function billText(b, s, link = "") {
     const d = new Date(b.at).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
-    return [`*${s.name}*`, `Bill #${b.no} · ${d}`, "",
-      ...b.lines.map((l) => `${l.name} — ${l.qty} × ₹${l.price} = ₹${(l.qty * l.price).toLocaleString("en-IN")}`), "",
-      b.discount ? `Discount: −₹${b.discount}` : null, `*Total: ₹${b.total.toLocaleString("en-IN")}*`, `Paid by: ${PAYS[b.pay]}`, "", "Thank you! — sent from My Market"].filter((x) => x !== null).join("\n");
+    const shown = b.lines.slice(0, 25), more = b.lines.length - shown.length;
+    return [`🧾 *${s.name}*`, `Bill #${b.no} · ${d}`, "",
+      ...shown.map((l) => `• ${l.name} — ${l.qty} × ₹${l.price.toLocaleString("en-IN")} = ₹${(l.qty * l.price).toLocaleString("en-IN")}`),
+      more > 0 ? `• …and ${more} more item${more > 1 ? "s" : ""}` : null, "",
+      b.discount ? `Discount: −₹${b.discount.toLocaleString("en-IN")}` : null, `*Total: ₹${b.total.toLocaleString("en-IN")}*`, `Paid by: ${PAYS[b.pay]}`,
+      link ? "" : null, link ? `Full bill & PDF: ${link}` : null,
+      s.cloud ? `Our stock & prices: ${siteLink(s, "bill")}` : null, "", "Thank you! Visit again 🙏"].filter((x) => x !== null).join("\n");
   }
   function receiptView(id) {
     const b = A.getBill(id), s = A.ownerShop();
@@ -1825,12 +1832,14 @@
       </div>
       <div class="pad noprint" style="display:grid;gap:10px;margin:18px 0 10px">
         <button class="btn" id="wa">${b.phone ? `Send bill on WhatsApp to ${esc(b.phone)}` : "Share bill PDF"}</button>
+        ${b.phone ? `<button class="btn line" id="wafile">Send as PDF file (WhatsApp, etc.)</button>` : ""}
         <div class="two"><button class="btn line" id="pdf">Download PDF</button><button class="btn line" id="pr">Print</button></div>
         <a class="btn warm" href="#/biz/bill">New bill</a>
       </div>
       ${b.cancelled ? "" : '<div class="pad noprint" style="text-align:center;margin-bottom:40px"><button class="link accent" id="cx">Cancel this bill (puts items back in stock)</button></div>'}`;
     $("#back").onclick = () => U.go("#/biz");
     $("#wa").onclick = () => sendBill(b, s);
+    $("#wafile") && ($("#wafile").onclick = () => shareBillFile(b, s));
     $("#pdf").onclick = () => { if (!window.jspdf) return U.toast("PDF needs the internet once"); makeBillPdf(b, s).save(billName(b, s)); };
     $("#pr").onclick = () => window.print();
     $("#cx") && ($("#cx").onclick = () => { if (!confirm(`Cancel bill #${b.no}? Its items go back into stock.`)) return; A.cancelBill(b.id); U.toast("Bill cancelled"); receiptView(id); });

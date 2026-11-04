@@ -998,5 +998,30 @@
     loc: () => loc, addCleanup: (f) => cleanups.push(f), ROUTES, route,
   };
   window.addEventListener("hashchange", route);
+
+  // ---------- stay up to date ----------
+  // An installed app can stay open for days. Every 30 min (and when the app comes
+  // back to the screen) check whether a newer version is online; if so, reload at a
+  // safe moment — not while someone is typing or has a sheet open (carts are saved).
+  const MY_V = +((document.querySelector('script[src*="js/app.js?v="]') || {}).src || "").replace(/.*v=(\d+).*/, "$1") || 0;
+  let newer = false;
+  const safeNow = () => !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || "") && $("#sheet").classList.contains("hidden");
+  async function checkVersion() {
+    if (!MY_V || newer || !navigator.onLine || location.protocol === "file:") return;
+    try {
+      const page = BIZ ? "business.html" : "index.html";
+      const html = await (await fetch(`${page}?check=${Date.now()}`, { cache: "no-store" })).text();
+      const live = +((html.match(/js\/app\.js\?v=(\d+)/) || [])[1] || 0);
+      if (live > MY_V) {
+        newer = true;
+        const go = () => location.reload();
+        if (safeNow()) { toast("Updating to the latest version…"); setTimeout(go, 1200); }
+        else window.addEventListener("hashchange", () => setTimeout(go, 300), { once: true });
+      }
+    } catch { /* offline: try later */ }
+  }
+  setTimeout(checkVersion, 8000);
+  setInterval(checkVersion, 30 * 60000);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkVersion(); });
   document.addEventListener("DOMContentLoaded", route);
 })();
