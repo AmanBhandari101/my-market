@@ -303,13 +303,14 @@
         : '<div class="empty"><div class="serif">This shop isn\'t on My Market (any more).</div><p><a class="link" href="#/">Find shops near you</a></p></div>';
       return;
     }
+    document.body.classList.add("site-mode");
+    cleanups.push(() => document.body.classList.remove("site-mode"));
     const m = A.getMarket(s.marketId);
     const isSaved = saved.includes(id);
     const hl = params.get("item");
     const src = params.get("src") || visitSrc[id] || "app";
     visitSrc[id] = src;
     A.addView(id);
-    // count one view per shop per half hour on this phone
     try {
       const k = "mm.v." + id, last = +sessionStorage.getItem(k) || 0;
       if (Date.now() - last > 30 * 60000) { sessionStorage.setItem(k, Date.now()); window.MM_CLOUD?.logVisit(id, "view", src); }
@@ -320,79 +321,117 @@
     const phone = String(s.phone || "").replace(/\D/g, "").slice(-10);
     const where = [s.shopNo && s.shopNo !== "—" ? `Shop ${s.shopNo}` : "", s.floor && s.floor !== "Ground floor" ? s.floor : "", m?.name, [s.locality || m?.locality, s.pincode || m?.pincode].filter(Boolean).join(" ")].filter(Boolean).join(", ");
     const gmaps = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}`;
-    const hours = `${fmtHour(s.open)} – ${fmtHour(s.close)}${s.closedDay && s.closedDay !== "None" ? ` · closed ${s.closedDay}` : " · open all week"}`;
+    const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    const today = new Date().toLocaleDateString("en-US", { weekday: "long" });
+    const hours = `${fmtHour(s.open)} – ${fmtHour(s.close)}`;
+    const fromBack = history.length > 1 && src === "app";
+    const priceOf = (it) => it.price ? `<b>${rupee(it.price)}</b>${off(it) ? ` <s>${rupee(it.mrp)}</s>` : ""}` : '<span class="ask">Price on request</span>';
+    const card = (it) => {
+      const st = A.itemStatus(it);
+      const word = st.key === "out" ? "Out of stock" : st.few ? "Only a few left" : st.key === "confirmed" ? "In stock" : "Ask availability";
+      return `<a class="sp ${it.id === hl ? "hl" : ""}" id="it-${it.id}" data-item="${it.id}" href="#/item/${s.id}/${it.id}">
+        <span class="sp-img">${it.img ? `<img src="${esc(it.img)}" alt="${esc(it.name)}" loading="lazy">` : art(it.cat, 56)}</span>
+        <span class="sp-b"><em>${esc(it.brand && it.brand !== "Generic" ? it.brand : C[it.cat]?.name || "")}</em><span class="sp-n">${esc(it.name)}</span>
+        <span class="sp-p">${priceOf(it)}</span><span class="sp-s ${st.key} ${st.few ? "few" : ""}">${word}</span></span></a>`;
+    };
     app.innerHTML = `
-      <div class="shop-band" style="${catVars(s.cat)}">
-      <div class="shop-top">
-        <button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button>
-        <div class="btn-row" style="gap:10px">
-          <button class="iconbtn" id="share" aria-label="Share this shop">${ic("arrow")}</button>
-          <button class="iconbtn" id="save" aria-label="Save" style="${isSaved ? "color:var(--terracotta)" : ""}">${ic(isSaved ? "heartF" : "heart")}</button>
+      <div class="site" style="${catVars(s.cat)}">
+      <header class="s-nav">
+        ${fromBack ? `<button class="s-icon" id="back" aria-label="Back">${ic("back")}</button>` : ""}
+        <a class="s-mark" href="#/shop/${s.id}"><span>${esc(s.name[0])}</span><b>${esc(s.name)}</b></a>
+        <button class="s-icon" id="share" aria-label="Share">${ic("arrow")}</button>
+        <button class="s-icon" id="save" aria-label="Save" ${isSaved ? 'style="color:var(--terracotta)"' : ""}>${ic(isSaved ? "heartF" : "heart")}</button>
+      </header>
+
+      <section class="s-hero">
+        <div class="s-in">
+          <div class="s-logo"><span>${esc(s.name[0])}</span></div>
+          <p class="s-kicker">${esc(C[s.cat].name)}${m ? ` · ${esc(m.name)}` : ""}</p>
+          <h1 class="s-title">${esc(s.name)}</h1>
+          <p class="s-status"><i class="${open ? "on" : "off"}"></i>${open ? `Open now · until ${fmtHour(s.close)}` : `Closed · opens ${fmtHour(s.open)}`}${s.verified ? ' <span class="s-ver">✓ Verified shop</span>' : ""}</p>
+          ${where ? `<p class="s-addr">${ic("pin")}${esc(where)}</p>` : ""}
+          <div class="s-cta">
+            <button class="s-btn wa" id="wa">${ic("chat")}WhatsApp us</button>
+            ${phone ? `<a class="s-btn" id="call" href="tel:+91${phone}">${ic("user")}Call</a>` : ""}
+            <a class="s-btn" id="dir" href="${loc ? `#/route/${s.id}` : gmaps}" ${loc ? "" : 'target="_blank" rel="noopener"'}>${ic("pin")}Directions</a>
+          </div>
         </div>
-      </div>
-      <div class="shop-head">
-        <div class="site-logo" style="${catVars(s.cat)}">${esc(s.name[0])}</div>
-        <div class="eyebrow">${esc(C[s.cat].name)}${m ? ` · ${esc(m.name)}` : ""}</div>
-        <h1 class="title">${esc(s.name)}</h1>
-        <div class="facts">
-          <span class="pill ${open ? "open" : "closed"}">${openWord(s)}</span>
-          ${loc ? `<span class="pill">${away(A.distKm(loc, s))}</span>` : ""}
-          ${s.verified ? '<span class="pill">✓ Verified</span>' : ""}
-          <span class="pill">${s.items.length} item${s.items.length === 1 ? "" : "s"}</span>
+      </section>
+
+      <div class="s-in">
+        <div class="s-facts">
+          <div><b>${s.items.length}</b><span>Products</span></div>
+          <div><b>${hours}</b><span>Shop hours</span></div>
+          <div><b>${s.closedDay && s.closedDay !== "None" ? `${s.closedDay.slice(0, 3)} off` : "7 days"}</b><span>${s.closedDay && s.closedDay !== "None" ? "Weekly holiday" : "Open all week"}</span></div>
         </div>
+
+        ${s.promo ? `<div class="s-offer"><span>Offer</span><p>${esc(s.promo)}</p></div>` : ""}
+
+        <section class="s-sec">
+          <div class="s-head"><h2>Products</h2><p>${s.items.length ? `Live prices and stock from ${esc(s.name)}` : "This shop is adding its products"}</p></div>
+          ${s.items.length ? `<div class="s-tools">
+            <label class="s-search">${ic("search")}<input id="ishop" placeholder="Search products" autocomplete="off"></label>
+            ${cats.length > 1 ? `<div class="s-tabs" id="scats"><button class="on" data-sc="">All</button>${cats.map((c) => `<button data-sc="${c}">${esc(C[c]?.name || c)}</button>`).join("")}</div>` : ""}
+          </div>
+          <div class="s-grid">${s.items.map(card).join("")}</div>
+          <p class="s-none hidden" id="snone">No products match. <button class="link" id="askit">Ask the shop on WhatsApp</button></p>`
+          : `<div class="s-emptyp"><p>Message the shop to ask what's in stock.</p><button class="s-btn wa" id="wa2">${ic("chat")}Ask on WhatsApp</button></div>`}
+        </section>
+
+        <section class="s-sec">
+          <div class="s-head"><h2>Visit us</h2><p>${esc(s.landmark || "We look forward to seeing you")}</p></div>
+          <div class="s-visit">
+            <div class="s-map" id="smap"></div>
+            <div class="s-info">
+              ${where ? `<div class="s-row"><span>Address</span><p>${esc(where)}</p></div>` : ""}
+              ${phone ? `<div class="s-row"><span>Phone & WhatsApp</span><p><a href="tel:+91${phone}">+91 ${phone.slice(0, 5)} ${phone.slice(5)}</a></p></div>` : ""}
+              <div class="s-row"><span>Opening hours</span>
+                <table class="s-hours">${DAYS.map((d) => `<tr class="${d === today ? "now" : ""}"><td>${d}</td><td>${d === s.closedDay ? "Closed" : hours}</td></tr>`).join("")}</table></div>
+              <a class="s-btn dark" href="${gmaps}" target="_blank" rel="noopener">${ic("pin")}Get directions</a>
+            </div>
+          </div>
+        </section>
       </div>
-      </div>
-      <div class="site-actions">
-        <button id="wa">${ic("chat")}WhatsApp</button>
-        ${phone ? `<a id="call" href="tel:+91${phone}">${ic("user")}Call</a>` : ""}
-        <a id="dir" href="${loc ? `#/route/${s.id}` : gmaps}" ${loc ? "" : 'target="_blank" rel="noopener"'}>${ic("pin")}Directions</a>
-        <button id="share2">${ic("arrow")}Share</button>
-      </div>
-      ${s.promo ? `<div class="site-promo"><b>%</b><span>${esc(s.promo)}</span></div>` : ""}
-      <div class="block">
-        <div class="eyebrow"><span>Items · ${s.items.length}</span></div>
-        <div class="inshop">${ic("search")}<input id="ishop" placeholder="Find in this shop" autocomplete="off"></div>
-        ${cats.length > 1 ? `<div class="words" id="scats" style="margin:8px 0 4px"><button class="word on" data-sc="">All</button>${cats.map((c) => `<button class="word" data-sc="${c}">${esc(C[c]?.name || c)}</button>`).join("")}</div>` : ""}
-        <div class="pgrid">${s.items.map((it) => productCard(s, it, it.id === hl)).join("") || '<p class="quiet">This shop hasn\'t listed items yet — WhatsApp them to ask.</p>'}</div>
-      </div>
-      <div class="block"><div class="eyebrow"><span>About the shop</span></div>
-        <div class="site-about">
-          <div><span>Address</span><b>${esc(where || "—")}</b>${s.landmark ? `<em>${esc(s.landmark)}</em>` : ""}</div>
-          <div><span>Hours</span><b>${esc(hours)}</b></div>
-          ${phone ? `<div><span>Phone / WhatsApp</span><b>+91 ${phone.slice(0, 5)} ${phone.slice(5)}</b></div>` : ""}
+
+      <footer class="s-foot">
+        <div class="s-in">
+          <b>${esc(s.name)}</b>
+          <p>${esc(where)}</p>
+          <div class="s-foot-links"><a href="#/">Find more shops near you</a><a href="business.html" target="_blank" rel="noopener">Own a shop? Get a free website</a></div>
+          <small>Website by <a href="#/">My Market</a> · live stock and prices from local shops</small>
         </div>
-        <div class="map" id="smap" style="margin:12px 0 0;height:200px;min-height:0"></div>
-        <a class="link" href="${gmaps}" target="_blank" rel="noopener" style="display:inline-block;margin-top:8px">Open in Google Maps</a>
-      </div>
-      <div class="site-foot">
-        <img src="icons/icon-192.png" alt=""><div><b>Powered by My Market</b><span>Live stock and prices from shops near you</span></div>
-        <a class="btn auto" href="#/">Find more shops</a>
+      </footer>
+      <button class="s-fab" id="wa3" aria-label="WhatsApp the shop">${ic("chat")}</button>
       </div>`;
-    $("#back").onclick = () => (history.length > 1 ? history.back() : go("#/"));
+    $("#back") && ($("#back").onclick = () => history.back());
     $("#save").onclick = () => {
       saved = isSaved ? saved.filter((x) => x !== id) : [id, ...saved]; A.store.set("saved", saved);
       toast(isSaved ? "Removed from saved" : "Saved"); shopView(id, params);
     };
-    $("#wa").onclick = () => { tap("whatsapp"); waShop(s, `Hi ${s.name}, I found your shop on My Market.`); };
+    const wa = (txt) => { tap("whatsapp"); waShop(s, txt || `Hi ${s.name}, I found your shop on My Market.`); };
+    ["#wa", "#wa2", "#wa3"].forEach((k) => $(k) && ($(k).onclick = () => wa()));
     $("#call") && $("#call").addEventListener("click", () => tap("call"));
     $("#dir").addEventListener("click", () => tap("directions"));
-    const share = async () => {
+    $("#share").onclick = async () => {
       tap("share");
       const url = window.MM_CLOUD ? window.MM_CLOUD.shopLink(s.id, "share") : location.href;
-      const text = `${s.name} — see their stock and prices on My Market`;
-      try { if (navigator.share) return await navigator.share({ title: s.name, text, url }); } catch (x) { if (x.name === "AbortError") return; }
+      try { if (navigator.share) return await navigator.share({ title: s.name, text: `${s.name} — see their products and prices`, url }); } catch (x) { if (x.name === "AbortError") return; }
       try { await navigator.clipboard.writeText(url); toast("Link copied"); } catch { prompt("Copy this link", url); }
     };
-    $("#share").onclick = share; $("#share2").onclick = share;
     let catF = "", q = "";
-    const filter = () => $$("[data-item]").forEach((b) => {
-      const it = s.items.find((x) => x.id === b.dataset.item);
-      b.classList.toggle("hidden", (!!q && !`${it.name} ${it.brand}`.toLowerCase().includes(q)) || (!!catF && it.cat !== catF));
-    });
-    $("#ishop").addEventListener("input", (e) => { q = e.target.value.trim().toLowerCase(); filter(); });
+    const filter = () => {
+      let shown = 0;
+      $$("[data-item]").forEach((b) => {
+        const it = s.items.find((x) => x.id === b.dataset.item);
+        const hide = (!!q && !`${it.name} ${it.brand}`.toLowerCase().includes(q)) || (!!catF && it.cat !== catF);
+        b.classList.toggle("hidden", hide); if (!hide) shown++;
+      });
+      $("#snone") && $("#snone").classList.toggle("hidden", shown > 0);
+    };
+    $("#ishop") && $("#ishop").addEventListener("input", (e) => { q = e.target.value.trim().toLowerCase(); filter(); });
+    $("#askit") && ($("#askit").onclick = () => wa(`Hi ${s.name}, do you have ${$("#ishop").value.trim()}?`));
     $$("[data-sc]").forEach((b) => b.onclick = () => { catF = b.dataset.sc; $$("[data-sc]").forEach((x) => x.classList.toggle("on", x === b)); filter(); });
-    bindAdd(app);
-    try { const map = newMap("smap"); map.setView([s.lat, s.lng], 16); L.marker([s.lat, s.lng], { icon: dotIcon("best", s) }).addTo(map); } catch {}
+    try { const map = newMap("smap"); map.setView([s.lat, s.lng], 16); L.marker([s.lat, s.lng], { icon: dotIcon("best", s) }).addTo(map); map.scrollWheelZoom.disable(); } catch {}
     if (hl) setTimeout(() => $(`#it-${hl}`)?.scrollIntoView({ block: "center" }), 60);
   }
 
@@ -688,7 +727,7 @@
   }
 
   // ---------- bottom tabs (customer screens only) ----------
-  const TAB_ON = { "": "home", shop: "home", item: "home", search: "search", ask: "search", me: "me", orders: "me", order: "me", bag: "bag" };
+  const TAB_ON = { "": "home", item: "home", search: "search", ask: "search", me: "me", orders: "me", order: "me", bag: "bag" };
   // Shop app: three pages — Bill (home), Stock, Reports.
   const BIZ_ON = { "": "bill", bill: "bill", inbox: "bill", items: "stock", stockin: "stock", reports: "reports", bills: "reports", insights: "reports", site: "reports" };
   function syncTabs(r, parts = []) {
