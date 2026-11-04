@@ -166,12 +166,31 @@
   }
 
   // ---------- shop-app top bar ----------
-  const waiting = (s) => A.pendingAsks(s.id).length + A.ordersFor(s.id).filter((o) => !o.cancelled && o.step < A.STEPS[o.mode].length - 1).length;
+  const waiting = (s) => A.pendingAsks(s.id).length + (A.store.get("newOrders:" + s.id, 0) || 0);
+  // website orders: check the server every minute; a new one rings the bell
+  let lastNew = null;
+  async function pollOrders() {
+    const s = A.ownerShop(); if (!s || !s.cloud || !window.MM_CLOUD || !window.MM_CLOUD.shopOrders || !navigator.onLine) return null;
+    try {
+      const list = await window.MM_CLOUD.shopOrders(s.id);
+      const n = list.filter((o) => o.status === "new").length;
+      A.store.set("newOrders:" + s.id, n);
+      $$("[data-bell]").forEach((el) => { const t = waiting(s); el.textContent = t; el.classList.toggle("hidden", !t); });
+      if (lastNew != null && n > lastNew) {
+        const o = list.find((x) => x.status === "new");
+        U.toast(`New ${o && o.kind === "hold" ? "hold" : "order"} from ${o ? o.name : "a customer"} — open the bell`, 6000);
+        try { navigator.vibrate && navigator.vibrate([120, 80, 120]); } catch {}
+      }
+      lastNew = n;
+      return list;
+    } catch { return null; }
+  }
+  if (window.MM_APP === "business") { setTimeout(pollOrders, 3000); setInterval(pollOrders, 60000); }
   function bizTop(title) {
     const s = A.ownerShop(), n = waiting(s);
     return `<div class="topline"><span class="brand"><img src="icon-business.svg" alt=""><span class="bt">${esc(title || s.name)}${s.cloud ? `<em class="syncst" data-sync>${syncWord()}</em>` : ""}</span></span>
       <div class="btn-row" style="gap:2px"><a class="iconbtn bagbtn" id="carticon" href="#/biz/cart" aria-label="Cart">${ic("bag")}<i class="bcount ${cartUnits(cartGet(s)) ? "" : "hidden"}" data-cartn>${cartUnits(cartGet(s))}</i></a>
-      <a class="iconbtn bagbtn" href="#/biz/inbox" aria-label="Orders and questions">${ic("bell")}<i class="bcount ${n ? "" : "hidden"}">${n}</i></a>
+      <a class="iconbtn bagbtn" href="#/biz/inbox" aria-label="Orders and questions">${ic("bell")}<i class="bcount ${n ? "" : "hidden"}" data-bell>${n}</i></a>
       <button class="iconbtn" data-menu aria-label="Menu">${ic("menu")}</button></div></div>`;
   }
   function bindTop() { $$("[data-menu]").forEach((b) => b.onclick = menuSheet); }
@@ -223,13 +242,12 @@
     const draw = () => {
       const s = A.ownerShop();
       const asks = A.pendingAsks(s.id);
-      const orders = A.ordersFor(s.id).filter((o) => !o.cancelled && o.step < A.STEPS[o.mode].length - 1);
       const missed = A.missedSales(s);
       const views = (A.store.get("views", {})[s.id] || 0) + 40 + Math.floor((s.id.length * 7) % 60);
       const inStock = s.items.filter((i) => A.itemStatus(i).key === "confirmed").length;
       const inv = A.inventory(s);
       const today = A.daySummary(s.id);
-      const sig = JSON.stringify([asks.map((a) => a.id), orders.map((o) => o.id + o.step)]);
+      const sig = JSON.stringify([asks.map((a) => a.id)]);
       if (U.app.dataset.sig === sig && $("#dash")) return;
       U.app.dataset.sig = sig;
       U.app.innerHTML = `
@@ -243,18 +261,7 @@
           </div>`).join("") : '<p class="quiet small">No questions right now. When someone nearby asks for something you sell, it shows up here — and on your WhatsApp.</p>'}
         </div>
 
-        <div class="block" id="o"><div class="eyebrow"><span>Orders & reservations</span></div>
-          ${orders.length ? orders.map((o) => {
-            const steps = A.STEPS[o.mode];
-            const next = steps[o.step + 1];
-            const verb = o.step === 0 ? (o.mode === "reserve" ? "Keep it aside" : "Accept") : next === "Picked up" || next === "Collected" ? "Customer collected" : next === "Delivered" ? "Mark delivered" : next === "Out for delivery" ? "Send for delivery" : "Mark ready";
-            return `<div class="qcard">
-              <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="eyebrow">${o.mode === "reserve" ? "Reservation" : o.mode === "delivery" ? "Delivery" : "Pickup"} · ${esc(steps[o.step])}</span><span class="faint tiny">${o.id}</span></div>
-              ${o.items.map((l) => `<div class="small" style="margin-top:6px">${l.qty} × ${esc(l.name)}${l.price ? ` · ${rupee(l.price * l.qty)}` : ""}</div>`).join("")}
-              <div class="small quiet" style="margin-top:6px">${o.mode !== "delivery" ? `Pickup code <b style="color:var(--ink)">${o.code}</b> · ` : esc(o.address) + " · "}${o.paid ? "Paid" : o.pay === "cod" ? "Cash on delivery" : "Pay at counter"} · <b style="color:var(--ink)">${o.total ? rupee(o.total) : "price at counter"}</b></div>
-              <div class="qrow"><button class="btn auto" data-adv="${o.id}">${verb}</button></div>
-            </div>`; }).join("") : '<p class="quiet small">No active orders.</p>'}
-        </div>
+        <div class="block" id="o"><div class="eyebrow"><span>Orders from your website</span></div><div id="olist"><p class="quiet small">Loading…</p></div></div>
 
         <div style="height:30px"></div>`;
       bindTop();
@@ -263,12 +270,73 @@
         A.replyAsk(b.dataset.yes, s.id, { has: true, price: p }); U.toast("Sent — the customer can see you have it"); U.app.dataset.sig = ""; draw();
       });
       $$("[data-no]").forEach((b) => b.onclick = () => { A.replyAsk(b.dataset.no, s.id, { has: false }); U.app.dataset.sig = ""; draw(); });
-      $$("[data-adv]").forEach((b) => b.onclick = () => { A.advanceOrder(b.dataset.adv); U.toast("Updated — the customer is notified"); U.app.dataset.sig = ""; draw(); });
+      drawOrders();
     };
+    // ---- website orders (Hold it for me / Buy) ----
+    let orders = null, showOld = false;
+    const ago = (t) => { const m = Math.round((Date.now() - Date.parse(t)) / 60000); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+    const KIND = (o) => o.kind === "hold" ? "HOLD" : o.mode === "delivery" ? "DELIVERY" : "PICKUP";
+    function drawOrders() {
+      const box = $("#olist"); if (!box) return;
+      const s = A.ownerShop();
+      if (!s.cloud) { box.innerHTML = '<p class="quiet small">Log in with your number so customers can order from your website.</p>'; return; }
+      if (!orders) return;
+      const open = orders.filter((o) => o.status === "new" || o.status === "ready"), old = orders.filter((o) => !(o.status === "new" || o.status === "ready"));
+      const card = (o) => {
+        const ph = String(o.phone || "");
+        return `<div class="ocard ${o.status}">
+          <div class="ohd"><span class="okind ${o.kind}">${KIND(o)}</span><b>${esc(o.code)}</b><span class="faint tiny">${ago(o.created_at)}</span>
+            <span class="ost ${o.status}">${{ new: "New", ready: o.kind === "hold" ? "Kept aside" : "Ready", done: "Done", cancelled: "Cancelled" }[o.status]}</span></div>
+          <div class="owho"><b>${esc(o.name)}</b> · <a href="tel:+91${esc(ph)}">${esc(ph.slice(0, 5) + " " + ph.slice(5))}</a>
+            <button class="link" data-owa="${o.id}">WhatsApp</button></div>
+          ${(o.lines || []).map((l) => `<div class="oline"><span>${l.qty} × ${esc(l.name)}</span><span>${l.price ? rupee(l.price * l.qty) : "price?"}</span></div>`).join("")}
+          <div class="otot"><span>${o.mode === "delivery" ? "Deliver to: " + esc(o.address || "") : o.kind === "hold" && o.hold_until ? "Hold until " + new Date(o.hold_until).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : "Pickup at the shop"}</span><b>${rupee(o.total)}</b></div>
+          ${o.note ? `<div class="onote">“${esc(o.note)}”</div>` : ""}
+          ${o.status === "new" ? `<div class="oacts"><button class="btn auto" data-ost="${o.id}" data-to="ready">${o.kind === "hold" ? "Keep aside" : "Accept"}</button><button class="btn auto line" data-ost="${o.id}" data-to="cancelled">Can't do</button></div>`
+            : o.status === "ready" ? `<div class="oacts"><button class="btn auto" data-obill="${o.id}">Collected · make bill</button><button class="btn auto line" data-ost="${o.id}" data-to="done">Collected</button><button class="link" data-ost="${o.id}" data-to="cancelled">Cancel</button></div>` : ""}
+        </div>`;
+      };
+      box.innerHTML = (open.length ? open.map(card).join("") : '<p class="quiet small">No open orders. Customers can tap <b>Add</b> on your website, then <b>Hold</b> or <b>Buy</b> — the order shows up here and rings the bell.</p>')
+        + (old.length ? `<button class="link" id="oold" style="margin-top:10px">${showOld ? "Hide" : "Show"} earlier orders (${old.length})</button>${showOld ? old.map(card).join("") : ""}` : "");
+      $("#oold") && ($("#oold").onclick = () => { showOld = !showOld; drawOrders(); });
+      const find = (id) => orders.find((x) => x.id === id);
+      $$("[data-owa]", box).forEach((x) => x.onclick = () => {
+        const o = find(x.dataset.owa);
+        const msg = o.status === "ready" ? (o.kind === "hold" ? `Hi ${o.name}, your items are kept aside at ${s.name} (order ${o.code}). See you soon!` : o.mode === "delivery" ? `Hi ${o.name}, your order ${o.code} from ${s.name} is on its way.` : `Hi ${o.name}, your order ${o.code} is ready for pickup at ${s.name}.`)
+          : `Hi ${o.name}, this is ${s.name} about your order ${o.code}.`;
+        U.openWhatsApp(o.phone, msg);
+      });
+      $$("[data-ost]", box).forEach((x) => x.onclick = async () => {
+        const o = find(x.dataset.ost), to = x.dataset.to;
+        if (to === "cancelled" && !confirm(`Cancel order ${o.code} from ${o.name}?`)) return;
+        x.disabled = true;
+        try {
+          await window.MM_CLOUD.setOrderStatus(o.id, to); o.status = to;
+          U.toast(to === "ready" ? `Done — ${o.name} sees it's ${o.kind === "hold" ? "kept aside" : "accepted"}` : to === "cancelled" ? "Order cancelled" : "Marked collected");
+          if (to === "ready") { const msg = o.kind === "hold" ? `Hi ${o.name}, your items are kept aside at ${s.name} (order ${o.code}).` : o.mode === "delivery" ? `Hi ${o.name}, ${s.name} accepted your order ${o.code} — we'll deliver soon.` : `Hi ${o.name}, your order ${o.code} is ready for pickup at ${s.name}.`;
+            if (confirm(`Tell ${o.name} on WhatsApp?`)) U.openWhatsApp(o.phone, msg); }
+          pollOrders(); drawOrders();
+        } catch (e) { x.disabled = false; U.toast(e.message || "No internet — try again"); }
+      });
+      $$("[data-obill]", box).forEach((x) => x.onclick = async () => {
+        const o = find(x.dataset.obill);
+        const c = cartGet(s);
+        if (c.lines.length && !confirm("Your cart already has items. Add this order to them?")) return;
+        for (const l of o.lines || []) {
+          const it = s.items.find((i) => i.id === l.item_id), price = (it && it.price) || l.price || 0;
+          const have = c.lines.find((x2) => x2.itemId === l.item_id);
+          if (have) have.qty += l.qty; else c.lines.push({ itemId: it ? it.id : null, name: l.name, brand: l.brand || "", qty: l.qty, price, cost: it ? it.cost ?? null : null });
+        }
+        c.phone = c.phone || o.phone; cartSet(s, c, true);
+        try { await window.MM_CLOUD.setOrderStatus(o.id, "done"); } catch {}
+        U.toast(`Order ${o.code} is in the cart — check prices, then Generate bill`); U.go("#/biz/cart");
+      });
+    }
+    async function loadOrders() { const list = await pollOrders(); if (list) { orders = list; drawOrders(); } else if (!orders) { const box = $("#olist"); box && (box.innerHTML = '<p class="quiet small">Couldn\'t load orders — check your internet.</p>'); } }
     U.app.dataset.sig = "";
-    draw();
-    const iv = setInterval(draw, 2000);
-    U.addCleanup(() => clearInterval(iv));
+    draw(); loadOrders();
+    const iv = setInterval(draw, 2000), iv2 = setInterval(loadOrders, 30000);
+    U.addCleanup(() => { clearInterval(iv); clearInterval(iv2); });
   }
 
   // ---------- items: stock switches, prices, catalogue, shelf scan ----------

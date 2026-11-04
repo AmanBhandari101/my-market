@@ -15,6 +15,9 @@
   // thin line icons
   const P = {
     back: '<path d="M15 5l-7 7 7 7"/>',
+    clock: '<circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/>',
+    check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    phone: '<path d="M6.5 4h3l1.5 4-2 1.3a10 10 0 0 0 5.7 5.7L16 13l4 1.5v3A2 2 0 0 1 18 19.5 15.5 15.5 0 0 1 4.5 6 2 2 0 0 1 6.5 4z"/>',
     search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
     user: '<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c1.2-3.6 4-5 7-5s5.8 1.4 7 5"/>',
     heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
@@ -298,6 +301,108 @@
   // ---------- a shop's own website page ----------
   // Opens from search, from a shared link, the QR poster, a bill or Google Maps
   // (?src=…), even without the visitor's location. Visits are counted for the shop.
+  // ---------- a shop's website: cart, "Hold it for me" and "Buy" ----------
+  // The cart is kept on this phone per shop. Orders go to the shop through the server
+  // (place_order); a shop that isn't online yet gets the order on WhatsApp instead.
+  const sc = {
+    get: (sid) => A.store.get("siteCart:" + sid, []),
+    set: (sid, v) => A.store.set("siteCart:" + sid, v),
+    qty: (sid, iid) => (sc.get(sid).find((l) => l.itemId === iid) || {}).qty || 0,
+    add(sid, iid, n) {
+      const c = sc.get(sid), l = c.find((x) => x.itemId === iid);
+      if (l) l.qty = Math.max(0, Math.min(99, l.qty + n)); else if (n > 0) c.push({ itemId: iid, qty: Math.min(99, n) });
+      sc.set(sid, c.filter((x) => x.qty > 0));
+    },
+    lines: (s) => sc.get(s.id).map((l) => ({ ...l, it: s.items.find((i) => i.id === l.itemId) })).filter((l) => l.it && A.itemStatus(l.it).key !== "out"),
+  };
+  const myOrders = () => A.store.get("myOrders", []);
+  const canOrder = (s) => !!(window.MM_CLOUD && window.MM_CLOUD.placeOrder && (s.live || s.cloud));
+  const tm = (t) => new Date(t).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
+  const orderWord = (o) => o.status === "cancelled" ? "Cancelled"
+    : o.status === "done" ? (o.mode === "delivery" ? "Delivered — thank you!" : "Collected — thank you!")
+    : o.status === "ready" ? (o.kind === "hold" ? `Kept aside for you${o.hold_until ? " until " + tm(o.hold_until) : ""} ✓` : o.mode === "delivery" ? "Accepted — on its way soon ✓" : "Ready for pickup ✓")
+    : "Sent — waiting for the shop to confirm";
+  function orderText(s, kind, mode, lines, f, code) {
+    const total = lines.reduce((x, l) => x + (l.it.price || 0) * l.qty, 0);
+    return `Hi ${s.name}, I ${code ? "placed an order" : "would like to order"} on My Market.\n` +
+      `${code ? `Order *${code}* · ` : ""}${kind === "hold" ? "Please *hold* these for me — I'll pick them up" : mode === "delivery" ? "*Buy* — home delivery" : "*Buy* — I'll pick it up"}\n` +
+      lines.map((l) => `• ${l.qty} × ${l.it.name}${l.it.price ? ` — ₹${(l.it.price * l.qty).toLocaleString("en-IN")}` : ""}`).join("\n") +
+      `\nTotal: ₹${total.toLocaleString("en-IN")}\nName: ${f.name}${mode === "delivery" ? `\nAddress: ${f.address}` : ""}${f.note ? `\nNote: ${f.note}` : ""}`;
+  }
+  function siteCheckout(s, kind = "hold", src = "app") {
+    const me = A.store.get("me", {});
+    const f = { name: me.name || "", phone: me.phone || "", address: me.address || "", note: "" };
+    let mode = "pickup", busy = false;
+    const draw = (el) => {
+      const lines = sc.lines(s);
+      if (!lines.length) { closeSheet(); return; }
+      if (kind === "hold") mode = "pickup";
+      const total = lines.reduce((x, l) => x + (l.it.price || 0) * l.qty, 0), unknown = lines.some((l) => !l.it.price);
+      el.innerHTML = `<div class="co" style="${catVars(s.cat)}">
+        <div class="co-hd"><b>Your order</b><span>${esc(s.name)}</span></div>
+        <div class="co-tabs"><button class="${kind === "hold" ? "on" : ""}" data-k="hold">${ic("clock")}Hold it for me</button><button class="${kind === "buy" ? "on" : ""}" data-k="buy">${ic("bag")}Buy</button></div>
+        <p class="co-why">${kind === "hold" ? `The shop keeps these aside for <b>4 hours</b>. Pay when you collect — nothing to pay now.` : `Pay at the shop${s.delivery ? " or on delivery" : ""} — cash or UPI. Nothing is charged online.`}</p>
+        <div class="co-lines">${lines.map((l) => `<div class="co-l"><span class="co-n">${esc(l.it.name)}<em>${l.it.price ? rupee(l.it.price) + " each" : "price at the shop"}</em></span>
+          <span class="co-q"><button data-cq="${l.itemId}" data-n="-1" aria-label="One less">−</button><b>${l.qty}</b><button data-cq="${l.itemId}" data-n="1" aria-label="One more">+</button></span>
+          <span class="co-p">${l.it.price ? rupee(l.it.price * l.qty) : "—"}</span></div>`).join("")}</div>
+        <div class="co-tot"><span>Total${unknown ? " <em>+ items priced at the shop</em>" : ""}</span><b>${rupee(total)}</b></div>
+        ${kind === "buy" ? `<div class="co-mode"><button class="${mode === "pickup" ? "on" : ""}" data-m="pickup">${ic("store")}Pick up</button>${s.delivery ? `<button class="${mode === "delivery" ? "on" : ""}" data-m="delivery">${ic("truck")}Home delivery</button>` : `<span class="co-nod">This shop doesn't deliver yet</span>`}</div>` : ""}
+        <div class="co-form">
+          <label>Your name<input data-f="name" autocomplete="name" maxlength="60" value="${esc(f.name)}" placeholder="e.g. Priya"></label>
+          <label>Mobile number<input data-f="phone" inputmode="tel" autocomplete="tel" maxlength="16" value="${esc(f.phone)}" placeholder="98765 43210"></label>
+          ${mode === "delivery" ? `<label class="wide">Delivery address<textarea data-f="address" rows="2" maxlength="300" placeholder="House no., street, landmark">${esc(f.address)}</textarea></label>` : ""}
+          <label class="wide">Note for the shop <span>(optional)</span><input data-f="note" maxlength="300" value="${esc(f.note)}" placeholder="${kind === "hold" ? "e.g. I'll come at 6 pm" : "e.g. Call before coming"}"></label>
+        </div>
+        <p class="co-err" id="co-err"></p>
+        <button class="co-go" id="co-go"><span>${kind === "hold" ? "Hold my items" : mode === "delivery" ? "Place delivery order" : "Place order"}</span><b>${rupee(total)}</b></button>
+        <p class="co-fine">${canOrder(s) ? "The shop gets your order straight away and confirms it here." : "This shop gets your order on WhatsApp."}</p>
+      </div>`;
+      $$("[data-f]", el).forEach((x) => x.oninput = () => { f[x.dataset.f] = x.value; });
+      $$("[data-k]", el).forEach((x) => x.onclick = () => { kind = x.dataset.k; draw(el); });
+      $$("[data-m]", el).forEach((x) => x.onclick = () => { mode = x.dataset.m; draw(el); });
+      $$("[data-cq]", el).forEach((x) => x.onclick = () => { sc.add(s.id, x.dataset.cq, +x.dataset.n); paintSiteCart(s); draw(el); });
+      const err = (m) => { const e = $("#co-err", el); e.textContent = m; e.classList.remove("shake"); void e.offsetWidth; e.classList.add("shake"); };
+      $("#co-go", el).onclick = async () => {
+        if (busy) return;
+        const name = f.name.trim(), ph = A.normPhone(f.phone);
+        if (!name) return err("Enter your name");
+        if (!/^[6-9]\d{9}$/.test(ph)) return err("Enter your 10-digit mobile number");
+        if (mode === "delivery" && f.address.trim().length < 6) return err("Enter the delivery address");
+        A.store.set("me", { name, phone: ph, address: f.address.trim() });
+        if (!canOrder(s)) { // shop not online yet: the order goes as a WhatsApp message
+          waShop(s, orderText(s, kind, mode, lines, { ...f, name }, null)); sc.set(s.id, []); paintSiteCart(s); closeSheet(); return;
+        }
+        busy = true; const btn = $("#co-go", el); btn.classList.add("busy"); btn.querySelector("span").textContent = "Sending your order…";
+        try {
+          const r = await window.MM_CLOUD.placeOrder({ shopId: s.id, kind, mode, name, phone: ph, address: f.address.trim(), note: f.note.trim(), lines });
+          A.store.set("myOrders", [{ token: r.token, shopId: s.id, code: r.code, at: Date.now() }, ...myOrders()].slice(0, 30));
+          sc.set(s.id, []); paintSiteCart(s);
+          try { window.MM_CLOUD.logVisit(s.id, "whatsapp", src); } catch {}
+          const sent = lines.slice();
+          el.innerHTML = `<div class="co done" style="${catVars(s.cat)}">
+            <div class="co-tick">${ic("check")}</div>
+            <h3>${kind === "hold" ? "Your items are on hold" : "Order placed"}</h3>
+            <p class="co-code">Order <b>${esc(r.code)}</b> · ${rupee(r.total)}</p>
+            <p class="co-why">${kind === "hold" ? `Show code <b>${esc(r.code)}</b> at ${esc(s.name)} within 4 hours.` : mode === "delivery" ? `${esc(s.name)} will confirm and deliver to you.` : `Pick it up at ${esc(s.name)} — show code <b>${esc(r.code)}</b>.`} You'll see when the shop confirms it on this page.</p>
+            <button class="co-go wa" id="co-wa"><span>${ic("chat")}Tell the shop on WhatsApp</span></button>
+            <button class="co-done" id="co-ok">Done</button></div>`;
+          $("#co-wa", el).onclick = () => waShop(s, orderText(s, kind, mode, sent, { ...f, name }, r.code));
+          $("#co-ok", el).onclick = () => { closeSheet(); route(); };
+        } catch (x) { busy = false; btn.classList.remove("busy"); btn.querySelector("span").textContent = "Try again"; err(x.message || "Couldn't send — try again"); }
+      };
+    };
+    openSheet("", (el) => { el.classList.add("co-sheet"); draw(el); });
+    cleanups.push(() => $("#sheet")?.classList.remove("co-sheet"));
+  }
+  // the floating cart bar on a shop's website
+  function paintSiteCart(s) {
+    const bar = $("#scb"); if (!bar) return;
+    const lines = sc.lines(s), n = lines.reduce((x, l) => x + l.qty, 0), t = lines.reduce((x, l) => x + (l.it.price || 0) * l.qty, 0);
+    bar.classList.toggle("on", n > 0); document.body.classList.toggle("has-scb", n > 0);
+    $("#scbn").textContent = n; $("#scbt").textContent = rupee(t);
+    $("#scbw").textContent = `${n} item${n === 1 ? "" : "s"} in your cart`;
+  }
+
   const visitSrc = {}, shopTried = new Set();
   function shopView(id, params) {
     const s = A.getShop(id);
@@ -337,13 +442,21 @@
     const hours = `${fmtHour(s.open)} – ${fmtHour(s.close)}`;
     const fromBack = history.length > 1 && src === "app";
     const priceOf = (it) => it.price ? `<b>${rupee(it.price)}</b>${off(it) ? ` <s>${rupee(it.mrp)}</s>` : ""}` : '<span class="ask">Price on request</span>';
-    const card = (it) => {
+    const addCtl = (it) => {
+      if (A.itemStatus(it).key === "out") return `<span class="sp-out">Out of stock</span>`;
+      const n = sc.qty(s.id, it.id);
+      return n ? `<span class="sp-step"><button data-dec="${it.id}" aria-label="One less">−</button><b>${n}</b><button data-inc="${it.id}" aria-label="One more">+</button></span>`
+        : `<button class="sp-addb" data-add="${it.id}">${ic("plus")}Add</button>`;
+    };
+    const card = (it, i) => {
       const st = A.itemStatus(it);
       const word = st.key === "out" ? "Out of stock" : st.few ? "Only a few left" : st.key === "confirmed" ? "In stock" : "Ask availability";
-      return `<a class="sp ${it.id === hl ? "hl" : ""}" id="it-${it.id}" data-item="${it.id}" href="#/item/${s.id}/${it.id}">
-        <span class="sp-img">${it.img ? `<img src="${esc(it.img)}" alt="${esc(it.name)}" loading="lazy">` : art(it.cat, 56)}</span>
+      return `<div class="sp rv ${it.id === hl ? "hl" : ""} ${st.key === "out" ? "is-out" : ""}" id="it-${it.id}" data-item="${it.id}" style="--d:${Math.min(i, 12) * 45}ms">
+        <a class="sp-link" href="#/item/${s.id}/${it.id}">
+        <span class="sp-img">${off(it) ? `<i class="sp-off">-${off(it)}%</i>` : ""}${it.img ? `<img src="${esc(it.img)}" alt="${esc(it.name)}" loading="lazy">` : art(it.cat, 56)}</span>
         <span class="sp-b"><em>${esc(it.brand && it.brand !== "Generic" ? it.brand : C[it.cat]?.name || "")}</em><span class="sp-n">${esc(it.name)}</span>
-        <span class="sp-p">${priceOf(it)}</span><span class="sp-s ${st.key} ${st.few ? "few" : ""}">${word}</span></span></a>`;
+        <span class="sp-p">${priceOf(it)}</span><span class="sp-s ${st.key} ${st.few ? "few" : ""}">${word}</span></span></a>
+        <div class="sp-add" data-ctl="${it.id}">${addCtl(it)}</div></div>`;
     };
     app.innerHTML = `
       <div class="site" style="${catVars(s.cat)}">
@@ -356,13 +469,16 @@
 
       ${s.cover ? `<div class="s-cover"><img src="${esc(s.cover)}" alt="${esc(s.name)}"></div>` : ""}
       <section class="s-hero ${s.cover ? "has-cover" : ""}">
+        <span class="s-blob b1"></span><span class="s-blob b2"></span><span class="s-blob b3"></span>
         <div class="s-in">
           <div class="s-logo">${s.logo ? `<img src="${esc(s.logo)}" alt="${esc(s.name)} logo">` : `<span>${esc(s.name[0])}</span>`}</div>
           <p class="s-kicker">${esc(C[s.cat].name)}${m ? ` · ${esc(m.name)}` : ""}</p>
           <h1 class="s-title">${esc(s.name)}</h1>
           <p class="s-status"><i class="${open ? "on" : "off"}"></i>${open ? `Open now · until ${fmtHour(s.close)}` : `Closed · opens ${fmtHour(s.open)}`}${s.verified ? ' <span class="s-ver">✓ Verified shop</span>' : ""}</p>
           ${where ? `<p class="s-addr">${ic("pin")}${esc(where)}</p>` : ""}
+          ${s.items.length ? `<div class="s-perks"><span>${ic("bag")}Order online</span><span>${ic("clock")}Hold for pickup</span>${s.delivery ? `<span>${ic("truck")}Home delivery</span>` : ""}<span>${ic("check")}Pay at the shop</span></div>` : ""}
           <div class="s-cta">
+            ${s.items.length ? `<a class="s-btn shop" href="#" id="toprod">${ic("bag")}Shop now</a>` : ""}
             <button class="s-btn wa" id="wa">${ic("chat")}WhatsApp us</button>
             ${phone ? `<a class="s-btn" id="call" href="tel:+91${phone}">${ic("user")}Call</a>` : ""}
             <a class="s-btn ${phone ? "" : "solo"}" id="dir" href="${loc ? `#/route/${s.id}` : gmaps}" ${loc ? "" : 'target="_blank" rel="noopener"'}>${ic("pin")}Directions</a>
@@ -370,38 +486,39 @@
         </div>
       </section>
 
+      <div class="s-in" id="sorders"></div>
       <div class="s-in">
-        <div class="s-facts">
+        <div class="s-facts rv">
           <div><b>${s.items.length}</b><span>Products</span></div>
           <div><b>${hours}</b><span>Shop hours</span></div>
           <div><b>${s.closedDay && s.closedDay !== "None" ? `${s.closedDay.slice(0, 3)} off` : "7 days"}</b><span>${s.closedDay && s.closedDay !== "None" ? "Weekly holiday" : "Open all week"}</span></div>
         </div>
 
-        ${s.promo ? `<div class="s-offer"><span>Offer</span><p>${esc(s.promo)}</p></div>` : ""}
+        ${s.promo ? `<div class="s-offer rv"><span>Offer</span><p>${esc(s.promo)}</p></div>` : ""}
 
-        ${s.about || (s.payMethods || []).length || s.delivery ? `<section class="s-sec">
+        ${s.about || (s.payMethods || []).length || s.delivery ? `<section class="s-sec rv">
           <div class="s-head"><h2>About us</h2></div>
           ${s.about ? `<p class="s-about">${esc(s.about)}</p>` : ""}
           <div class="s-chips">${(s.payMethods || []).map((p) => `<span>${esc(p)}</span>`).join("")}${s.delivery ? '<span class="dl">Home delivery</span>' : ""}</div>
         </section>` : ""}
 
-        ${(s.gallery || []).length ? `<section class="s-sec">
+        ${(s.gallery || []).length ? `<section class="s-sec rv">
           <div class="s-head"><h2>Photos</h2></div>
           <div class="s-gal">${s.gallery.map((g, i) => `<button data-gal="${i}"><img src="${esc(g)}" alt="${esc(s.name)} photo ${i + 1}" loading="lazy"></button>`).join("")}</div>
         </section>` : ""}
 
-        <section class="s-sec">
-          <div class="s-head"><h2>Products</h2><p>${s.items.length ? `Live prices and stock from ${esc(s.name)}` : "This shop is adding its products"}</p></div>
+        <section class="s-sec" id="sprod">
+          <div class="s-head rv"><h2>Products</h2><p>${s.items.length ? `Live prices and stock from ${esc(s.name)}` : "This shop is adding its products"}</p></div>
           ${s.items.length ? `<div class="s-tools">
             <label class="s-search">${ic("search")}<input id="ishop" placeholder="Search products" autocomplete="off"></label>
             ${cats.length > 1 ? `<div class="s-tabs" id="scats"><button class="on" data-sc="">All</button>${cats.map((c) => `<button data-sc="${c}">${esc(C[c]?.name || c)}</button>`).join("")}</div>` : ""}
           </div>
-          <div class="s-grid">${s.items.map(card).join("")}</div>
+          <div class="s-grid" id="sgrid">${s.items.map(card).join("")}</div>
           <p class="s-none hidden" id="snone">No products match. <button class="link" id="askit">Ask the shop on WhatsApp</button></p>`
           : `<div class="s-emptyp"><p>Message the shop to ask what's in stock.</p><button class="s-btn wa" id="wa2">${ic("chat")}Ask on WhatsApp</button></div>`}
         </section>
 
-        <section class="s-sec">
+        <section class="s-sec rv">
           <div class="s-head"><h2>Visit us</h2><p>${esc(s.landmark || "We look forward to seeing you")}</p></div>
           <div class="s-visit">
             <div class="s-map" id="smap"></div>
@@ -425,6 +542,11 @@
         </div>
       </footer>
       <button class="s-fab" id="wa3" aria-label="WhatsApp the shop">${ic("chat")}</button>
+      <div class="s-cartbar" id="scb">
+        <span class="scb-ic">${ic("bag")}<i id="scbn">0</i></span>
+        <span class="scb-t"><b id="scbt"></b><em id="scbw"></em></span>
+        <button class="scb-hold" id="scbh">Hold</button><button class="scb-go" id="scbg">Buy ${ic("arrow")}</button>
+      </div>
       </div>`;
     $("#back") && ($("#back").onclick = () => history.back());
     $("#save").onclick = () => {
@@ -469,6 +591,54 @@
     });
     try { const map = newMap("smap"); map.setView([s.lat, s.lng], 16); L.marker([s.lat, s.lng], { icon: dotIcon("best", s) }).addTo(map); map.scrollWheelZoom.disable(); } catch {}
     if (hl) setTimeout(() => $(`#it-${hl}`)?.scrollIntoView({ block: "center" }), 60);
+
+    // add to cart (a little dot flies into the cart bar)
+    const fly = (from) => {
+      const bar = $("#scb .scb-ic"); if (!bar || !from || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      const a0 = from.getBoundingClientRect(), b0 = bar.getBoundingClientRect(), dot = document.createElement("i");
+      dot.className = "s-fly"; dot.style.left = a0.left + a0.width / 2 - 9 + "px"; dot.style.top = a0.top + a0.height / 2 - 9 + "px"; document.body.appendChild(dot);
+      dot.animate([{ transform: "translate(0,0) scale(1)", opacity: 1 }, { transform: `translate(${b0.left - a0.left - a0.width / 2 + 18}px, ${b0.top - a0.top - a0.height / 2 + 18}px) scale(.4)`, opacity: .6 }],
+        { duration: 520, easing: "cubic-bezier(.5,-0.3,.6,1)" }).onfinish = () => { dot.remove(); bar.classList.remove("pop"); void bar.offsetWidth; bar.classList.add("pop"); };
+    };
+    const ctl = (iid) => { const box = $(`[data-ctl="${iid}"]`); const it = s.items.find((x) => x.id === iid); if (box && it) box.innerHTML = addCtl(it); };
+    $("#sgrid") && $("#sgrid").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-add],[data-inc],[data-dec]"); if (!b) return;
+      e.preventDefault();
+      const iid = b.dataset.add || b.dataset.inc || b.dataset.dec;
+      sc.add(s.id, iid, b.dataset.dec ? -1 : 1);
+      if (!b.dataset.dec) fly(b);
+      ctl(iid); paintSiteCart(s);
+      if (b.dataset.add) { try { navigator.vibrate && navigator.vibrate(25); } catch {} }
+    });
+    $("#scbg").onclick = () => siteCheckout(s, "buy", src);
+    $("#scbh").onclick = () => siteCheckout(s, "hold", src);
+    $("#toprod") && ($("#toprod").onclick = (e) => { e.preventDefault(); $("#sprod")?.scrollIntoView({ behavior: "smooth", block: "start" }); });
+    paintSiteCart(s);
+    cleanups.push(() => document.body.classList.remove("has-scb"));
+    if (params.get("cart") === "hold" || params.get("cart") === "buy") setTimeout(() => sc.lines(s).length && siteCheckout(s, params.get("cart"), src), 120);
+
+    // this customer's orders at this shop, with what the shop has done so far
+    const mine = myOrders().filter((o) => o.shopId === s.id && Date.now() - o.at < 3 * 86400000);
+    if (mine.length && window.MM_CLOUD && window.MM_CLOUD.orderStatus) {
+      Promise.all(mine.map((o) => window.MM_CLOUD.orderStatus(o.token).catch(() => null))).then((list) => {
+        const box = $("#sorders"); if (!box) return;
+        box.innerHTML = list.map((o, i) => o ? `<div class="s-ord ${o.status}">
+          <span class="s-ord-ic">${ic(o.status === "ready" || o.status === "done" ? "check" : o.status === "cancelled" ? "close" : "clock")}</span>
+          <div><b>Order ${esc(o.code)} · ${o.kind === "hold" ? "On hold" : o.mode === "delivery" ? "Delivery" : "Pickup"} · ${rupee(o.total)}</b><p>${esc(orderWord(o))}</p></div>
+          ${o.status === "new" ? `<button data-cx="${esc(mine[i].token)}">Cancel</button>` : ""}</div>` : "").join("");
+        $$("[data-cx]", box).forEach((b) => b.onclick = async () => {
+          if (!confirm("Cancel this order?")) return;
+          try { await window.MM_CLOUD.cancelMyOrder(b.dataset.cx); toast("Order cancelled"); route(); } catch { toast("Couldn't cancel — check your internet"); }
+        });
+      });
+    }
+
+    // sections fade up as they scroll into view
+    const rv = $$(".site .rv");
+    if ("IntersectionObserver" in window && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      const io = new IntersectionObserver((es) => es.forEach((x) => { if (x.isIntersecting) { x.target.classList.add("in"); io.unobserve(x.target); } }), { rootMargin: "0px 0px -8% 0px" });
+      rv.forEach((x) => io.observe(x)); cleanups.push(() => io.disconnect());
+    } else rv.forEach((x) => x.classList.add("in"));
   }
 
   // ---------- product card (shared by shop page, search, owner preview) ----------
@@ -821,7 +991,7 @@
   };
   window.MM_UI = {
     BIZ, A, C, $, $$, app, esc, ic, toast, fmtHour, openWhatsApp, openSheet, closeSheet, go, rupee, dist, away, openWord, statusWord, stWord, catVars, mono, reverseName, stars, amt,
-    newMap, meIcon, dotIcon, shopPopup, reachSteps, shopEntry, productCard, priceLine, pimg, art, off, bindAdd, bagBtn, refreshBag, orderEntry,
+    sc, siteCheckout, paintSiteCart, newMap, meIcon, dotIcon, shopPopup, reachSteps, shopEntry, productCard, priceLine, pimg, art, off, bindAdd, bagBtn, refreshBag, orderEntry,
     loc: () => loc, addCleanup: (f) => cleanups.push(f), ROUTES, route,
   };
   window.addEventListener("hashchange", route);

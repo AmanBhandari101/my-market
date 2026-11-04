@@ -40,6 +40,12 @@
         <div class="pstat ${st.key} ${st.few ? "few" : ""}" style="margin-top:10px;font-size:16px"><span class="dot ${st.key}"></span>${esc(st.label)}</div>
       </div>
 
+      ${st.key !== "out" ? `<div class="pad pbuy" style="${U.catVars(s.cat)}">
+        <div class="pbuy-q"><button id="pq-" aria-label="One less">−</button><b id="pqn">1</b><button id="pq+" aria-label="One more">+</button></div>
+        <button class="pbuy-add" id="padd">${ic("bag")}Add to cart</button>
+        <button class="pbuy-hold" id="phold">${ic("clock")}Hold it for me</button>
+        <button class="pbuy-buy" id="pbuy">Buy now</button>
+      </div>` : ""}
       <div class="sold-by">
         <div class="eyebrow">Sold by</div>
         <a class="entry" href="#/shop/${s.id}" style="border:0;padding:8px 0 4px">${U.mono(s)}
@@ -71,6 +77,14 @@
       </div>`;
 
     $("#back").onclick = () => (history.length > 1 ? history.back() : U.go(`#/shop/${s.id}`));
+    // buy box: the same cart as the shop's website
+    if ($("#padd")) {
+      let pq = 1; const setQ = (n) => { pq = Math.max(1, Math.min(99, n)); $("#pqn").textContent = pq; };
+      $("#pq-").onclick = () => setQ(pq - 1); $("#pq+").onclick = () => setQ(pq + 1);
+      $("#padd").onclick = () => { U.sc.add(s.id, it.id, pq); U.toast(`Added to your cart at ${s.name}`); U.go(`#/shop/${s.id}?item=${it.id}`); };
+      $("#phold").onclick = () => { U.sc.add(s.id, it.id, pq); U.go(`#/shop/${s.id}?cart=hold`); };
+      $("#pbuy").onclick = () => { U.sc.add(s.id, it.id, pq); U.go(`#/shop/${s.id}?cart=buy`); };
+    }
     $("#fb-yes").onclick = () => { A.feedback(s.id, it.id, true); U.toast("Thank you — marked in stock."); U.route(); };
     $("#fb-no").onclick = () => { A.feedback(s.id, it.id, false); U.toast("Thank you — we'll let others know."); U.route(); };
     $("#wa").onclick = () => {

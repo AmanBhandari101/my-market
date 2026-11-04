@@ -26,6 +26,7 @@ Also in the shop app:
 - **Bill numbers** — each phone gets its own block of numbers from the server, so a shop billing from two phones never prints the same number, even offline.
 - **Older PDF links** — bills sent before the database links were stored as PDF files; the shop app deletes those after 2 days.
 - **Back up bills to Google Drive** — one PDF with every bill plus a sheet (CSV) for Google Sheets / Excel, shared to Drive from the phone. Reports reminds the owner after 7 days without a backup.
+- **Website orders** — holds and orders from the shop's website ring the bell; *Keep aside / Accept*, *Can't do*, *Collected · make bill* (fills the cart), WhatsApp the customer.
 - **My website** — the shop's own page in the customer app: logo, cover, gallery, about, payments, delivery, link + QR poster, visits by source. **Google Maps**: step-by-step with every detail ready to copy (Google only lets the owner add or claim a shop).
 - **Login & security** — main number + backup number (a lost phone or SIM never locks the shop out), change PIN, log out other phones, delete shop.
 - **Safe offline use** — every change goes through a queue (outbox) and is retried; *Sync now* retries refused changes; the app never overwrites unsent changes with a download and warns before logging out with unsent bills; a full phone is detected and the bill is refused rather than silently lost.
@@ -37,7 +38,7 @@ Also in the shop app:
 | Location | GPS or area search (OpenStreetMap) |
 | Home | Map and nearby markets and shops, category filter |
 | Search | English + Hinglish + typos; best match first, which shop has it, price, stock label (in / few / out) |
-| Shop page | The shop's website: photos, about, hours, map, items with prices, WhatsApp and directions |
+| Shop page | The shop's website in its own colours, with smooth animations: photos, about, hours, map, items with prices. **Add** to cart, then **Hold it for me** (kept aside 4 hours, pay at the shop) or **Buy** (pickup or home delivery). No account needed — name and mobile number. The customer sees when the shop confirms. |
 | Product page | Photo, price, stock, details, the same item at other shops |
 | Directions | Walk / bike / car route, Google Maps hand-off |
 
@@ -50,7 +51,7 @@ moving more than 5 km loads the new area.
 Set up once in the Supabase SQL editor — the files in `supabase/`, in the order given in
 [`supabase/SETUP.md`](supabase/SETUP.md):
 
-`schema.sql` → `searches.sql` → `catalog.sql` → `bills.sql` → `visits.sql` → `shopsite.sql` → `members.sql` → `billno.sql` → `nearby.sql` → `bills_cleanup.sql` → `bill_share.sql` → `scan_codes.sql`
+`schema.sql` → `searches.sql` → `catalog.sql` → `bills.sql` → `visits.sql` → `shopsite.sql` → `members.sql` → `billno.sql` → `nearby.sql` → `bills_cleanup.sql` → `bill_share.sql` → `scan_codes.sql` → `orders.sql`
 
 Row-level security keeps each shop's data private; customers read only the public views
 (`public_shops`, `public_items` — stock as a label, never a count). The app holds only the publishable key.

@@ -308,6 +308,28 @@
   const billShareLink = (token) => new URL("bill.html", location.href).href.split("#")[0] + "#b=" + token;
   const billFileUrl = (path) => `${C.supabaseUrl}/storage/v1/object/public/bills/${path}`;
 
+  // ---------- orders from a shop's website (Hold it for me / Buy) ----------
+  async function placeOrder(o) {
+    const { data, error } = await sb.rpc("place_order", { p_shop: o.shopId, p_kind: o.kind, p_mode: o.mode, p_name: o.name, p_phone: o.phone,
+      p_address: o.address || null, p_note: o.note || null, p_lines: o.lines.map((l) => ({ item_id: l.itemId, qty: l.qty })) });
+    if (error) throw new Error(/fetch|network/i.test(error.message) ? "No internet — check your connection and try again" : error.message);
+    return data;
+  }
+  async function orderStatus(token) { const { data, error } = await sb.rpc("order_status", { p_token: token }); if (error) throw error; return data; }
+  async function cancelMyOrder(token) { const { data, error } = await sb.rpc("cancel_my_order", { p_token: token }); if (error) throw error; return data; }
+  // the shop's side
+  async function shopOrders(shopId) {
+    const since = new Date(Date.now() - 4 * 86400000).toISOString();
+    const { data, error } = await sb.from("orders").select("id,code,kind,mode,name,phone,address,note,lines,total,status,hold_until,created_at")
+      .eq("shop_id", shopId).gte("created_at", since).order("created_at", { ascending: false }).limit(100);
+    if (error) throw new Error(friendly(error));
+    return data || [];
+  }
+  async function setOrderStatus(id, status) {
+    const { error } = await sb.from("orders").update({ status, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) throw new Error(friendly(error));
+  }
+
   // ---------- shop website visits ----------
   const SRCS = ["app", "qr", "bill", "share", "gmaps", "link", "search"];
   function logVisit(shopId, kind, src) {
@@ -357,7 +379,7 @@
   async function myNumber() { const { data } = await sb.auth.getSession(); const m = (data.session?.user?.email || "").match(/^91(\d{10})@/); return m ? m[1] : ""; }
   async function deleteShop(shopId) { const { error } = await sb.rpc("delete_my_shop", { p_shop: shopId }); if (error) throw new Error(friendly(error)); }
 
-  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
+  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
     pending: () => Q.get().length, failedOps: () => Q.failed() };
 
   // start-up
