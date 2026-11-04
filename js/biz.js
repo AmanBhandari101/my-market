@@ -213,7 +213,7 @@
       const head = !s.cloud ? ["Log in to see your plan", "Your plan lives on the server with your shop."]
         : st.state === "unknown" ? ["Checking your plan…", "Needs the internet once."]
         : st.state === "trial" ? [`Free plan · ${st.daysLeft} day${st.daysLeft === 1 ? "" : "s"} left`, `Free till ${fmt(st.end)}. After that ₹150 a month — everything stays the same.`]
-        : st.state === "active" ? [`Plan active till ${fmt(st.end)}`, st.provisional_until && Date.parse(st.provisional_until) > Date.now() && !(Date.parse(st.paid_until || 0) > Date.now()) ? "Your payment is being checked — usually within a day. Everything works meanwhile." : "Thank you! Everything is on."]
+        : st.state === "active" ? [`Plan active till ${fmt(st.end)}`, st.provisional_until && Date.parse(st.provisional_until) > Date.now() && !(Date.parse(st.paid_until || 0) > Date.now()) ? "Your payment is on its way — it's confirmed automatically when it reaches us. Everything works meanwhile." : "Thank you! Everything is on."]
         : st.state === "due" ? ["₹150 due", `Your plan ended on ${fmt(st.end)}. Everything still works for ${7 - st.daysOver} more day${7 - st.daysOver === 1 ? "" : "s"}.`]
         : st.state === "orders_off" ? ["Website and analytics paused", `Your website is off and analytics stopped at ${fmt(st.end)}. Billing and stock work for ${15 - st.daysOver} more day${15 - st.daysOver === 1 ? "" : "s"}, then the app becomes read-only.`]
         : ["Read-only", "You can see all your bills, back them up and export them. Pay to make new bills again — nothing was lost."];
@@ -231,15 +231,14 @@
           <a class="btn" id="paynow" href="${esc(link)}">Pay ₹${amt.toLocaleString("en-IN")} with UPI</a>
           <p class="faint tiny" style="margin:8px 0 0">Opens PhonePe, Google Pay, Paytm or your bank app. On a computer, scan this with any UPI app:</p>
           <div id="payqr" class="qrbox small"></div>
-          <label class="small quiet" style="display:block;margin-top:14px">After paying, type the <b>UPI transaction ID (UTR)</b> — 12 digits, in your UPI app's payment details
-            <input class="field" id="utr" inputmode="numeric" maxlength="40" placeholder="e.g. 412345678901"></label>
-          <button class="btn line" id="paid" style="margin-top:10px">I've paid ₹${amt.toLocaleString("en-IN")}</button>
+          <p class="small" style="margin:14px 0 0">✓ Nothing to type. Your payment carries your shop's code, so we find it and confirm it <b>automatically</b> — you'll see <b>Paid ✓</b> here.</p>
+          <button class="btn line" id="paid" style="margin-top:10px">I've paid — keep everything on meanwhile</button>
           <div class="paycode"><span>Your payment code</span><b>${ref}</b><button class="link" id="copyref">Copy</button></div>
           <p class="faint tiny" style="margin:6px 0 0">It's already in the UPI note. Paying another way (bank transfer)? Write <b>${ref}</b> in the note so your payment is found automatically.</p>
         </div>` : `<div class="rsec"><p class="small quiet" style="margin:0">${s.cloud ? "Payments open soon — enjoy the free plan. We'll tell you before anything changes." : "Log in with your number to see your plan."}</p></div>`}
         <div class="rsec"><div class="rhd"><b>Payments</b></div><div id="paylist">${pays == null ? '<p class="quiet small">Loading…</p>' : pays.length ? pays.map((x) => `<div class="payrow ${x.status}">
           <span><b>${x.method === "grant" ? "Free months" : "₹" + x.amount.toLocaleString("en-IN")}</b> · ${x.months} month${x.months > 1 ? "s" : ""}<em>${fmt(x.created_at)}${x.ref ? " · " + esc(x.ref) : ""}${x.reason ? " · " + esc(x.reason) : ""}</em></span>
-          <i>${{ claimed: "Checking", confirmed: "Paid ✓", rejected: "Not received" }[x.status]}</i></div>`).join("") : '<p class="quiet small">No payments yet.</p>'}</div></div>
+          <i>${{ claimed: "Confirming…", confirmed: "Paid ✓", rejected: "Not received" }[x.status]}</i></div>`).join("") : '<p class="quiet small">No payments yet.</p>'}</div></div>
         <div class="rsec"><div class="rhd"><b>If a payment is missed</b></div>
           <ol class="gsteps"><li>Days 1–7: everything works, with a reminder.</li><li>Days 8–15: billing and stock work; your website is switched off and analytics stop updating.</li><li>After day 15: read-only — you can still see, back up and export everything.</li></ol>
           <p class="faint tiny" style="margin:6px 0 0">Pay any time and everything turns back on at once. Nothing is ever deleted.</p></div>
@@ -249,10 +248,8 @@
       $("#copyref") && ($("#copyref").onclick = async () => { try { await navigator.clipboard.writeText(ref); U.toast("Payment code copied"); } catch { prompt("Your payment code", ref); } });
       if ($("#payqr")) makeQR(link).then((qr) => { const el = $("#payqr"); if (el) el.innerHTML = qr.createSvgTag({ cellSize: 3, margin: 2, scalable: true }); }).catch(() => { const el = $("#payqr"); el && el.remove(); });
       $("#paid") && ($("#paid").onclick = async (ev) => {
-        const utr = $("#utr").value.replace(/[^A-Za-z0-9]/g, "");
-        if (utr.length < 10) return U.toast("Type the UPI transaction ID (UTR) from your UPI app");
         ev.currentTarget.disabled = true;
-        try { const p = await window.MM_CLOUD.claimPayment(s.id, utr, months); A.store.set("plan:" + s.id, p); U.toast("Thank you! Everything stays on while we check it", 5000); await loadPays(); draw(); }
+        try { const p = await window.MM_CLOUD.claimPayment(s.id, "", months); A.store.set("plan:" + s.id, p); U.toast("Thank you! Everything stays on — it's confirmed as soon as your payment reaches us", 6000); await loadPays(); draw(); }
         catch (x) { ev.currentTarget.disabled = false; U.toast(x.message, 7000); }
       });
     };

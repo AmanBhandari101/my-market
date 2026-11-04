@@ -102,3 +102,21 @@ returns setof public.bank_credits language sql stable security definer set searc
 $$;
 revoke execute on function public.unmatched_credits() from public, anon;
 grant execute on function public.unmatched_credits() to authenticated;
+
+-- "I've paid": no transaction ID to type — the payment is found in the bank statement by the
+-- shop's code. The tap only keeps everything on for 3 days while that happens, once a month.
+create or replace function public.claim_payment(p_shop uuid, p_ref text, p_months integer)
+returns json language plpgsql security definer set search_path = public as $$
+declare r text := nullif(upper(regexp_replace(coalesce(p_ref, ''), '[^A-Za-z0-9]', '', 'g')), '');
+begin
+  if not is_my_shop(p_shop) then raise exception 'Not your shop'; end if;
+  if p_months not in (1, 12) then raise exception 'Choose 1 month or 1 year'; end if;
+  if r is not null and exists (select 1 from payments where ref = r and status <> 'rejected') then raise exception 'This payment is already recorded'; end if;
+  if exists (select 1 from payments where shop_id = p_shop and status = 'claimed' and created_at > now() - interval '30 days') then
+    raise exception 'We already know you paid — it is confirmed automatically as soon as it reaches us';
+  end if;
+  insert into payments (shop_id, amount, months, method, ref) values (p_shop, case when p_months = 12 then 1500 else 150 end, p_months, 'upi', r);
+  return plan_state(p_shop);
+end $$;
+revoke execute on function public.claim_payment(uuid, text, integer) from public, anon;
+grant execute on function public.claim_payment(uuid, text, integer) to authenticated;
