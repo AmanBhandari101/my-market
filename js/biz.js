@@ -22,6 +22,7 @@
     if (sub === "plan") return planView();
     if (sub === "bills") return billsView();
     if (sub === "insights") return insightsView();
+    if (sub === "analytics") return analyticsView(params);
     return billView(); // home = the billing counter
   }
 
@@ -581,6 +582,184 @@
       $("#lnew", el).onclick = () => { U.closeSheet(); newItemSheet(s, (it) => { if (it) { A.setItem(s.id, it.id, { code }); then && then(it); } }); };
     };
     U.openSheet("", draw);
+  }
+
+  // ---------- shop analytics ----------
+  // Standard retail measures, worked out on the phone from the shop's own bills,
+  // items and purchases — each with a plain "what to do".
+  function analyticsView(params) {
+    const s = A.ownerShop();
+    const DAY = 86400000, now = Date.now();
+    const span = [7, 30, 90].includes(+params.get("p")) ? +params.get("p") : 30;
+    const from = now - span * DAY, prevFrom = from - span * DAY;
+    const all = A.billsFor(s.id).filter((x) => !x.cancelled);
+    const bills = all.filter((x) => x.at >= from), prev = all.filter((x) => x.at >= prevFrom && x.at < from);
+    const cancelled = A.billsFor(s.id).filter((x) => x.cancelled && x.at >= from).length;
+    const itemOf = (id) => s.items.find((i) => i.id === id);
+    const pct = (a, b2) => (b2 ? Math.round((a / b2) * 100) : 0);
+    const delta = (a, b2) => (b2 ? Math.round(((a - b2) / b2) * 100) : null);
+    const dChip = (d) => d == null ? "" : `<i class="an-d ${d >= 0 ? "up" : "down"}">${d >= 0 ? "▲" : "▼"} ${Math.abs(d)}%</i>`;
+    const fmtD = (t) => new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+
+    // ---- the basics ----
+    const sumOf = (list) => {
+      let sales = 0, units = 0, disc = 0, cost = 0, costSales = 0;
+      for (const x of list) { sales += x.total; units += x.units; disc += x.discount || 0;
+        for (const l of x.lines) if (l.cost != null) { cost += l.cost * l.qty; costSales += l.price * l.qty; } }
+      return { sales, units, disc, n: list.length, atv: list.length ? sales / list.length : 0, upb: list.length ? units / list.length : 0,
+        profit: costSales - cost - disc * (costSales / Math.max(1, sales + disc)), margin: costSales ? ((costSales - cost) / costSales) * 100 : null, costShare: sales ? costSales / (sales + disc) : 0 };
+    };
+    const K = sumOf(bills), P = sumOf(prev);
+
+    // ---- per item ----
+    const per = {};
+    for (const x of bills) for (const l of x.lines) {
+      const k = l.itemId || "x:" + l.name.toLowerCase();
+      const r = per[k] || (per[k] = { name: l.name, itemId: l.itemId, qty: 0, sales: 0, profit: 0, costKnown: true, below: false, bills: 0, last: 0 });
+      r.qty += l.qty; r.sales += l.qty * l.price; r.bills++; r.last = Math.max(r.last, x.at);
+      if (l.cost == null) r.costKnown = false; else { r.profit += (l.price - l.cost) * l.qty; if (l.price < l.cost) r.below = true; }
+    }
+    const rowsBySales = Object.values(per).sort((p, q) => q.sales - p.sales);
+    // 80/20: the few items that bring most of the money
+    let run = 0; const totalItemSales = rowsBySales.reduce((a2, r) => a2 + r.sales, 0);
+    const aItems = []; for (const r of rowsBySales) { if (run >= totalItemSales * 0.8) break; run += r.sales; aItems.push(r); }
+    const aShare = rowsBySales.length ? pct(aItems.length, rowsBySales.length) : 0;
+    const topProfit = Object.values(per).filter((r) => r.costKnown && r.profit > 0).sort((p, q) => q.profit - p.profit).slice(0, 5);
+    const lowMargin = Object.values(per).filter((r) => r.costKnown && r.sales > 0 && r.profit / r.sales < 0.08).sort((p, q) => p.profit / p.sales - q.profit / q.sales).slice(0, 5);
+    const belowCost = Object.values(per).filter((r) => r.below);
+
+    // ---- when people buy ----
+    const hours = Array(24).fill(0), wdays = Array(7).fill(0), wdaysN = Array(7).fill(0);
+    for (const x of bills) { const d = new Date(x.at); hours[d.getHours()] += x.total; wdays[(d.getDay() + 6) % 7] += x.total; }
+    for (let t = from; t < now; t += DAY) wdaysN[(new Date(t).getDay() + 6) % 7]++;
+    const wAvg = wdays.map((v, i) => (wdaysN[i] ? v / wdaysN[i] : 0));
+    const open0 = Math.max(0, Math.min(23, s.open ?? 9)), close0 = Math.max(open0 + 1, Math.min(24, s.close ?? 21));
+    const hrs = hours.slice(open0, close0), hMax = Math.max(1, ...hrs);
+    const peakH = hours.indexOf(Math.max(...hours)), quietH = hrs.length ? open0 + hrs.indexOf(Math.min(...hrs)) : null;
+    const WD = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], wMax = Math.max(1, ...wAvg);
+    const bestWd = wAvg.indexOf(Math.max(...wAvg)), worstWd = wAvg.indexOf(Math.min(...wAvg.map((v, i) => (wdaysN[i] ? v : Infinity))));
+    const hLabel = (h) => `${h % 12 || 12}${h < 12 ? "am" : "pm"}`;
+
+    // ---- stock: days left, reorder, money stuck, stock-outs ----
+    const sold30 = {}, lastSold = {};
+    for (const x of all) for (const l of x.lines) if (l.itemId) {
+      if (x.at >= now - 30 * DAY) sold30[l.itemId] = (sold30[l.itemId] || 0) + l.qty;
+      lastSold[l.itemId] = Math.max(lastSold[l.itemId] || 0, x.at);
+    }
+    const tracked = s.items.filter((i) => i.qty != null);
+    const reorder = tracked.map((i) => { const rate = (sold30[i.id] || 0) / 30; return { it: i, rate, days: rate ? i.qty / rate : Infinity, need: Math.max(0, Math.ceil(rate * 14 - i.qty)) }; })
+      .filter((r) => r.rate > 0 && r.days <= 7).sort((p, q) => p.days - q.days).slice(0, 8);
+    const outSelling = tracked.filter((i) => i.qty === 0 && (sold30[i.id] || 0) > 0)
+      .map((i) => ({ it: i, perDay: ((sold30[i.id] || 0) / 30) * (i.price || 0), since: i.stockAt || now })).sort((p, q) => q.perDay - p.perDay);
+    const lostPerDay = outSelling.reduce((a2, r) => a2 + r.perDay, 0);
+    const stockValue = tracked.reduce((a2, i) => a2 + i.qty * (i.cost || 0), 0);
+    const costedStock = tracked.filter((i) => i.cost).length;
+    const cogs30 = all.filter((x) => x.at >= now - 30 * DAY).reduce((a2, x) => a2 + x.lines.reduce((c2, l) => c2 + (l.cost || 0) * l.qty, 0), 0);
+    const daysOfStock = cogs30 ? Math.round(stockValue / (cogs30 / 30)) : null;
+    const stuck = tracked.filter((i) => i.qty > 0 && (now - (lastSold[i.id] || i.addedAt || now)) > 45 * DAY).reduce((a2, i) => a2 + i.qty * (i.cost || i.price || 0), 0);
+
+    // ---- customers (bills with a phone number) ----
+    const cust = {};
+    for (const x of all) { const ph = A.normPhone(x.phone); if (ph.length !== 10) continue;
+      const c2 = cust[ph] || (cust[ph] = { ph, n: 0, spend: 0, last: 0, first: x.at, recent: 0 });
+      c2.n++; c2.spend += x.total; c2.last = Math.max(c2.last, x.at); c2.first = Math.min(c2.first, x.at); if (x.at >= from) c2.recent += x.total; }
+    const custs = Object.values(cust), withPhone = bills.filter((x) => A.normPhone(x.phone).length === 10).length;
+    const active = custs.filter((c2) => c2.last >= from), repeat = active.filter((c2) => c2.n > 1);
+    const topCust = custs.filter((c2) => c2.recent > 0).sort((p, q) => q.recent - p.recent).slice(0, 5);
+    const lapsed = custs.filter((c2) => c2.n >= 2 && now - c2.last > 30 * DAY && now - c2.last < 120 * DAY).sort((p, q) => q.spend - p.spend).slice(0, 6);
+
+    // ---- money: payment mix, khata, buying vs selling ----
+    const mix = { cash: 0, upi: 0, card: 0, khata: 0 }; for (const x of bills) mix[x.pay] = (mix[x.pay] || 0) + x.total;
+    const khataBills = bills.filter((x) => x.pay === "khata");
+    const bought = A.purchasesFor(s.id).filter((p2) => p2.at >= from).reduce((a2, p2) => a2 + (p2.total || 0), 0);
+
+    // ---- next 7 days: same weekday, last 4 weeks ----
+    let fc = 0; const fcDays = [];
+    for (let i = 1; i <= 7; i++) {
+      const day = new Date(now + i * DAY); day.setHours(0, 0, 0, 0);
+      let t = 0, n = 0; for (let w = 1; w <= 4; w++) { const d0 = day.getTime() - w * 7 * DAY; t += all.filter((x) => x.at >= d0 && x.at < d0 + DAY).reduce((a2, x) => a2 + x.total, 0); n++; }
+      const v = t / n; fc += v; fcDays.push({ d: day, v });
+    }
+    const fcMax = Math.max(1, ...fcDays.map((x) => x.v));
+
+    const tip = (t) => `<p class="an-tip">💡 ${t}</p>`;
+    const none = (t) => `<p class="quiet small" style="margin:6px 0 0">${t}</p>`;
+    const barRow = (label, v, max, sub) => `<div class="an-bar"><span>${esc(label)}</span><div><i style="width:${Math.max(2, (v / max) * 100)}%"></i></div><b>${sub}</b></div>`;
+
+    U.app.innerHTML = `
+      ${bizTop("Shop analytics")}
+      <div class="pad an-period"><div class="words">${[7, 30, 90].map((k) => `<a class="word ${span === k ? "on" : ""}" href="#/biz/analytics?p=${k}">Last ${k} days</a>`).join("")}</div></div>
+      ${!bills.length ? `<div class="rsec">${none("No bills in this period yet. Analytics fill in as you bill — even a week of bills shows your best times and top sellers.")}</div>` : `
+
+      <div class="rsec"><div class="rhd"><b>The basics</b><span class="faint tiny">vs the ${span} days before</span></div>
+        <div class="an-kpis">
+          <div><em>Sales</em><b>${rupee(K.sales)}</b>${dChip(delta(K.sales, P.sales))}</div>
+          <div><em>Bills</em><b>${K.n}</b>${dChip(delta(K.n, P.n))}</div>
+          <div><em>Average bill</em><b>${rupee(Math.round(K.atv))}</b>${dChip(delta(K.atv, P.atv))}</div>
+          <div><em>Items per bill</em><b>${K.upb.toFixed(1)}</b>${dChip(delta(K.upb, P.upb))}</div>
+          <div><em>Profit margin</em><b>${K.margin == null ? "—" : Math.round(K.margin) + "%"}</b>${K.margin == null ? '<i class="an-d">add cost prices</i>' : ""}</div>
+          <div><em>Discounts given</em><b>${rupee(K.disc)}</b>${K.sales ? `<i class="an-d">${K.disc && pct(K.disc, K.sales + K.disc) < 1 ? "under 1" : pct(K.disc, K.sales + K.disc)}% of sales</i>` : ""}</div>
+        </div>
+        ${K.upb < 2 ? tip("Most customers buy just one thing. Keep small add-ons (tape, batteries, sachets) near the counter and suggest one with every bill — it raises the average bill.") : tip(`Each customer buys ${K.upb.toFixed(1)} items on average. Suggesting one matching item at the counter can lift your average bill above ${rupee(Math.round(K.atv * 1.15))}.`)}
+        ${cancelled ? `<p class="faint tiny" style="margin:6px 0 0">${cancelled} cancelled bill${cancelled > 1 ? "s" : ""} in this period.</p>` : ""}
+      </div>
+
+      <div class="rsec"><div class="rhd"><b>Busiest times</b></div>
+        <div class="an-hours">${hrs.map((v, i) => `<div title="${hLabel(open0 + i)} · ${rupee(v)}"><i style="height:${Math.max(3, (v / hMax) * 100)}%" class="${open0 + i === peakH ? "pk" : ""}"></i><span>${(open0 + i) % 3 === 0 ? hLabel(open0 + i) : ""}</span></div>`).join("")}</div>
+        <div class="an-wd">${WD.map((d, i) => barRow(d, wAvg[i], wMax, rupee(Math.round(wAvg[i])))).join("")}</div>
+        ${tip(`Your rush hour is <b>${hLabel(peakH)}–${hLabel((peakH + 1) % 24)}</b> and your best day is <b>${WD[bestWd]}</b>${quietH != null ? `; ${hLabel(quietH)} is quietest — use it to restock, count and clean` : ""}. ${worstWd !== bestWd && wdaysN[worstWd] ? `${WD[worstWd]} is slowest: try an offer on WhatsApp that morning.` : ""}`)}
+      </div>
+
+      <div class="rsec"><div class="rhd"><b>Your top sellers</b><span class="faint tiny">80/20 rule</span></div>
+        ${rowsBySales.slice(0, 8).map((r) => barRow(r.name, r.sales, rowsBySales[0].sales, `${rupee(r.sales)} · ${r.qty} sold`)).join("")}
+        ${rowsBySales.length >= 5 ? tip(`<b>${aItems.length} item${aItems.length > 1 ? "s" : ""}</b> (${aShare}% of what you sell) bring <b>80% of your sales</b>. Never let these run out — keep extra stock of them and check them every morning.`) : ""}
+      </div>
+
+      <div class="rsec"><div class="rhd"><b>Profit</b><span class="faint tiny">items with a cost price</span></div>
+        ${topProfit.length ? `<div class="an-sub">Earn you the most</div>${topProfit.map((r) => barRow(r.name, r.profit, topProfit[0].profit, `${rupee(Math.round(r.profit))} · ${Math.round((r.profit / r.sales) * 100)}%`)).join("")}` : none("Add cost prices to your items (Stock → item → cost) to see profit per item.")}
+        ${lowMargin.length ? `<div class="an-sub">Thin margin (under 8%)</div>${lowMargin.map((r) => `<div class="an-li"><span>${esc(r.name)}</span><b>${Math.round((r.profit / r.sales) * 100)}%</b></div>`).join("")}${tip("Check these prices: a small increase, or a cheaper supplier, adds straight to your profit.")}` : ""}
+        ${belowCost.length ? `<div class="an-warn">⚠ Sold <b>below cost</b>: ${belowCost.map((r) => esc(r.name)).join(", ")}. Check the price or the cost you entered.</div>` : ""}
+      </div>
+
+      <div class="rsec"><div class="rhd"><b>Order soon</b><span class="faint tiny">at the speed they sell</span></div>
+        ${reorder.length ? reorder.map((r) => `<div class="an-li"><span>${esc(r.it.name)}<em>${r.it.qty} left · sells ${r.rate >= 1 ? Math.round(r.rate) : r.rate.toFixed(1)}/day</em></span><b class="${r.days < 3 ? "bad" : ""}">${r.days < 1 ? "today" : Math.floor(r.days) === 1 ? "1 day" : Math.floor(r.days) + " days"}</b><i class="an-need">order ${r.need || 1}</i></div>`).join("") + tip("“Order” = enough for the next 2 weeks at your current speed.") : none("Nothing will run out in the next 7 days at the current speed.")}
+        ${outSelling.length ? `<div class="an-warn">⚠ Out of stock but selling: ${outSelling.slice(0, 5).map((r) => esc(r.it.name)).join(", ")} — about <b>${rupee(Math.round(lostPerDay))} of sales lost every day</b>.</div>` : ""}
+      </div>
+
+      <div class="rsec"><div class="rhd"><b>Money in your stock</b></div>
+        <div class="an-kpis three">
+          <div><em>Stock value (at cost)</em><b>${rupee(Math.round(stockValue))}</b>${costedStock < tracked.length ? `<i class="an-d">${tracked.length - costedStock} items have no cost</i>` : ""}</div>
+          <div><em>Days of stock</em><b>${daysOfStock == null ? "—" : daysOfStock}</b><i class="an-d">at last 30 days' speed</i></div>
+          <div><em>Stuck 45+ days</em><b>${rupee(Math.round(stuck))}</b><i class="an-d">not sold</i></div>
+        </div>
+        ${daysOfStock != null && daysOfStock > 60 ? tip(`You hold about ${daysOfStock} days of stock — money sitting on shelves. Buy smaller amounts more often, and put the slow items on offer.`) : stuck > 0 ? tip("Put the items that haven't sold in 45+ days on a small offer, or bundle them with a top seller, to turn them back into cash.") : ""}
+        ${bought ? `<div class="an-li"><span>Stock bought in this period</span><b>${rupee(bought)}</b></div><div class="an-li"><span>Sales in this period</span><b>${rupee(K.sales)}</b></div>` : ""}
+      </div>
+
+      <div class="rsec"><div class="rhd"><b>Customers</b><span class="faint tiny">bills with a phone number</span></div>
+        ${custs.length ? `<div class="an-kpis three">
+          <div><em>Customers</em><b>${active.length}</b><i class="an-d">${pct(withPhone, bills.length)}% of bills have a number</i></div>
+          <div><em>Came back</em><b>${pct(repeat.length, active.length)}%</b><i class="an-d">${repeat.length} repeat</i></div>
+          <div><em>Avg per customer</em><b>${active.length ? rupee(Math.round(active.reduce((a2, c2) => a2 + c2.recent, 0) / active.length)) : "—"}</b></div>
+        </div>
+        ${topCust.length ? `<div class="an-sub">Best customers</div>${topCust.map((c2) => `<div class="an-li"><span>+91 ${c2.ph.slice(0, 5)} ${c2.ph.slice(5)}<em>${c2.n} bill${c2.n > 1 ? "s" : ""} · since ${fmtD(c2.first)}</em></span><b>${rupee(c2.recent)}</b></div>`).join("")}` : ""}
+        ${lapsed.length ? `<div class="an-sub">Haven't come in 30+ days</div>${lapsed.map((c2) => `<div class="an-li"><span>+91 ${c2.ph.slice(0, 5)} ${c2.ph.slice(5)}<em>last ${fmtD(c2.last)} · spent ${rupee(c2.spend)}</em></span><button class="link" data-wb="${c2.ph}">WhatsApp</button></div>`).join("")}${tip("A friendly message (“new stock arrived”) brings regulars back.")}` : ""}
+        ${pct(withPhone, bills.length) < 40 ? tip("Add the customer's WhatsApp number to more bills — you'll know your regulars and can bring them back.") : ""}`
+        : none("Add customers' WhatsApp numbers to bills to see your regulars, who came back, and who stopped coming.")}
+      </div>
+
+      <div class="rsec"><div class="rhd"><b>How customers pay</b></div>
+        ${Object.entries(mix).filter(([, v]) => v > 0).map(([k, v]) => barRow(PAYS[k], v, Math.max(...Object.values(mix)), `${rupee(v)} · ${pct(v, K.sales)}%`)).join("")}
+        ${khataBills.length ? tip(`${khataBills.length} khata bill${khataBills.length > 1 ? "s" : ""} worth ${rupee(khataBills.reduce((a2, x) => a2 + x.total, 0))} in this period — remember to collect.`) : ""}
+      </div>
+
+      <div class="rsec"><div class="rhd"><b>Next 7 days</b><span class="faint tiny">estimate</span></div>
+        ${fc > 0 ? `<div class="an-fc">${fcDays.map((x) => `<div><i style="height:${Math.max(3, (x.v / fcMax) * 100)}%"></i><span>${x.d.toLocaleDateString("en-IN", { weekday: "short" })}</span></div>`).join("")}</div>
+          <p class="small" style="margin:8px 0 0">About <b>${rupee(Math.round(fc))}</b> in sales expected — based on the same weekdays over the last 4 weeks.</p>` : none("Needs a few weeks of bills to estimate.")}
+      </div>`}
+      <div style="height:30px"></div>`;
+    bindTop();
+    $$("[data-wb]").forEach((x) => x.onclick = () => U.openWhatsApp(x.dataset.wb, `Namaste! ${s.name} here — new stock has arrived. Visit us soon, or see what's in stock: ${siteLink(s, "share")}`));
   }
 
   // ---------- find & add products: built-in list + shared catalogue + online ----------
@@ -1549,6 +1728,7 @@
     U.app.innerHTML = `
       ${bizTop("Reports")}
       ${backupDue(s) ? `<a class="rsec sitecard due" href="#/biz/backup"><span>${ic("bag")}</span><div><b>Back up your bills</b><em>${backupDue(s)}</em></div>${ic("arrow")}</a>` : ""}
+      <a class="rsec sitecard an-card" href="#/biz/analytics"><span>${ic("chart")}</span><div><b>Shop analytics</b><em>Best times, top sellers, profit, what to reorder, your best customers</em></div>${ic("arrow")}</a>
       <a class="rsec sitecard" href="#/biz/site"><span>${ic("store")}</span><div><b>Your shop's website</b><em>Share it, print the QR poster, add it to Google Maps · see visits</em></div>${ic("arrow")}</a>
 
       <div class="rsec"><div class="rhd"><b>Sales</b><a class="link" href="#/biz/bills">All bills</a></div>
