@@ -1,73 +1,93 @@
-# My Market — v1 prototype
+# My Market
 
-## Live pilot
+Two web apps for local shops in India, in pilot:
 
 | App | For | Open |
 |---|---|---|
-| **My Market** | Customers: find which nearby shop has an item, at what price | https://amanbhandari101.github.io/my-market/ |
-| **My Market Business** | Shops: billing, stock, reports; register with mobile number + 6-digit PIN | https://amanbhandari101.github.io/my-market/business.html |
+| **My Market** | Customers: find which nearby shop has an item, at what price, and walk straight to it | https://amanbhandari101.github.io/my-market/ |
+| **My Market Business** | Shopkeepers: billing, stock, reports, a shop website — log in with mobile number + 6-digit PIN | https://amanbhandari101.github.io/my-market/business.html |
 
-Both install on Android from Chrome (menu → *Install app*). Data lives in a Supabase project (Mumbai);
-the database setup is in `supabase/` (`schema.sql`, `searches.sql`, `catalog.sql`, see `supabase/SETUP.md`).
+Both install on Android from Chrome (menu → *Install app*) and work offline; changes sync to a
+Supabase project (Mumbai region) when the phone is online. There is no demo data — only shops that registered.
 
+## Shop app (My Market Business)
 
-Find which local shop has the item you need, buy or reserve it, and walk straight to it.
-Shops get customers, customer questions and a "what to stock next" report with almost no typing.
+Three tabs, built so a shopkeeper can bill as fast as a calculator.
 
-## Run it
-No build step: it is plain HTML, CSS and JavaScript. From this folder:
+| Tab | What it does |
+|---|---|
+| **Bill** | Tap items to add them to the **cart** (top-bar cart icon shows the count). The cart is saved on the phone, so it survives moving between tabs or closing the app. **Cart page**: quantity −/+, remove, change price, discount, cash / UPI / card / khata, cash received and change, customer WhatsApp number → **Generate bill**. |
+| **Stock** | Items with stock count, low / out of stock, *Stock arrived* (purchases from suppliers), add items by **barcode** (shared catalogue → Open Food Facts → Open Products Facts) with photo and details. |
+| **Reports** | Sales today / week / month with profit, daily chart, running low, not selling, what customers nearby searched for, all bills. |
+
+Also in the shop app:
+- **Bills** — A4 PDF with the shop's details and a small advert. With a customer number, WhatsApp opens on that customer's chat with a link to the bill. Cancelling a bill puts the stock back.
+- **Bill numbers** — each phone gets its own block of numbers from the server, so a shop billing from two phones never prints the same number, even offline.
+- **Bill PDFs online for 2 days** — the customer's bill link works for 2 days, then the shop app deletes the PDF to keep storage free. The bill itself stays on the server and the phone; sending it again makes a fresh link.
+- **Back up bills to Google Drive** — one PDF with every bill plus a sheet (CSV) for Google Sheets / Excel, shared to Drive from the phone. Reports reminds the owner after 7 days without a backup.
+- **My website** — the shop's own page in the customer app: logo, cover, gallery, about, payments, delivery, link + QR poster, visits by source. **Google Maps**: step-by-step with every detail ready to copy (Google only lets the owner add or claim a shop).
+- **Login & security** — main number + backup number (a lost phone or SIM never locks the shop out), change PIN, log out other phones, delete shop.
+- **Safe offline use** — every change goes through a queue (outbox) and is retried; *Sync now* retries refused changes; the app never overwrites unsent changes with a download and warns before logging out with unsent bills; a full phone is detected and the bill is refused rather than silently lost.
+
+## Customer app (My Market)
+
+| Screen | What it does |
+|---|---|
+| Location | GPS or area search (OpenStreetMap) |
+| Home | Map and nearby markets and shops, category filter |
+| Search | English + Hinglish + typos; best match first, which shop has it, price, stock label (in / few / out) |
+| Shop page | The shop's website: photos, about, hours, map, items with prices, WhatsApp and directions |
+| Product page | Photo, price, stock, details, the same item at other shops |
+| Directions | Walk / bike / car route, Google Maps hand-off |
+
+The phone downloads only the **nearest 150 shops within 25 km** (and their items, in pages), so it stays fast
+as more towns join. A shop opened from a shared link, QR poster or bill loads on its own from anywhere;
+moving more than 5 km loads the new area.
+
+## Server (Supabase)
+
+Set up once in the Supabase SQL editor — the files in `supabase/`, in the order given in
+[`supabase/SETUP.md`](supabase/SETUP.md):
+
+`schema.sql` → `searches.sql` → `catalog.sql` → `bills.sql` → `visits.sql` → `shopsite.sql` → `members.sql` → `billno.sql` → `nearby.sql` → `bills_cleanup.sql`
+
+Row-level security keeps each shop's data private; customers read only the public views
+(`public_shops`, `public_items` — stock as a label, never a count). The app holds only the publishable key.
+
+**Free plan limits:** 500 MB database, 1 GB file storage, 5 GB data transfer a month; the project pauses after
+about a week without use. Enough for a pilot of about 100–200 active shops; Supabase Pro takes it to thousands.
+
+## Run it locally
+
+No build step — plain HTML, CSS and JavaScript:
 ```
 python -m http.server 8896
 ```
-Open http://localhost:8896.
-GPS needs `localhost` or `https`, so it won't work from a plain LAN IP on a phone.
-After changing JS/CSS, bump the `?v=` numbers in `index.html` so browsers don't serve stale files.
-
-## Customer side
-| Screen | What it does |
-|---|---|
-| Welcome / location | GPS or area search (OpenStreetMap), Karol Bagh pilot |
-| Home | Map (markets → shops on zoom), markets nearby, category filter |
-| Search | English + Hinglish + typos; best answer first, "Also at", list/map |
-| Shop page | Product grid like Amazon/Flipkart: photo, brand, rating, price, MRP, % off, stock, + Add |
-| Product page `#/item/:shop/:item` | Photo, price, stock, pickup / delivery / reserve, qty, Add to bag, Buy now, **same item at other shops**, details, found-it feedback, notify when back |
-| Bag `#/bag` | Grouped by shop (each shop = one order) |
-| Checkout `#/checkout/:shop` | Pickup or delivery (₹39, free above ₹999); pay at shop / UPI / cash on delivery — **demo, nothing charged** |
-| Order `#/order/:id` | Pickup code, live status timeline, directions, cancel |
-| Ask shops `#/ask` | Question goes to up to 8 matching shops; replies appear live; re-open from Profile |
-| Directions | Real walk/bike/car route, Google Maps hand-off, last-100 m landmarks |
-
-## Shop-owner side (`#/biz`, from Profile → "Own a shop?")
-| Screen | What it does |
-|---|---|
-| Onboarding | Why join, then **Find my shop** (claim with a code) or **Add my shop** |
-| Claim | Pick your listing → verify with a code (demo code shown on screen) |
-| Add shop | Name, category, area, shop no., landmark, hours, holiday, drag pin on map |
-| Setup | "Tap what you sell" from the catalogue — no typing |
-| Dashboard | Visits, questions waiting, active orders, missed searches; answer questions (Yes + price / No); move orders along (Accept → Ready → Collected) |
-| Items | In-stock switch, price box, **Scan shelf** (photo → items, simulated), add from list |
-| Insights | "What to stock next": searches near you that no shop could fill, with "I stock this" |
-
-The same browser plays both roles, so you can ask/reserve as a customer and answer as the owner.
-Other shops reply and move orders forward automatically (simulated).
-
-## Demo data
-24 fictional shops in 3 Karol Bagh markets (`js/data.js`). Profile → "Place demo markets around me" moves them next to you.
-Product photos: Wikimedia Commons under free licences — see [CREDITS.md](CREDITS.md). Only checked photos are used
-(`PHOTOS` list in `js/api.js`); other items show a category drawing. Profile → "Reset all demo activity" clears everything.
+Open http://localhost:8896 (customer) or http://localhost:8896/business.html (shop).
+GPS needs `localhost` or `https`. After changing JS/CSS, bump the `?v=` numbers in **both**
+`index.html` and `business.html` so phones don't keep old files.
 
 ## Files
-- `js/data.js` — demo markets, shops, catalogue
-- `js/api.js` — the only data layer: nearby, search, ask, bag, orders, owner tools, missed sales. **Replace with backend calls in v2.**
-- `js/app.js` — shared UI helpers, router (`ROUTES`), home, search, shop page, ask, directions, profile
-- `js/shop.js` — product page, bag, checkout, orders
-- `js/biz.js` — shop-owner screens
-- `css/app.css` (design tokens, base screens), `css/commerce.css` (shopping + owner screens)
+
+- `js/config.js` — Supabase URL + publishable key
+- `js/data.js` — categories and the starter product catalogue
+- `js/api.js` — data layer on the phone: shops, items, stock ledger, cart/bills, bill numbers, search, storage safety
+- `js/cloud.js` — server sync: outbox, login, download a shop, nearby shops for customers, bill PDFs and their clean-up
+- `js/app.js` — shared UI, router, customer screens, shop website page
+- `js/shop.js` — product page
+- `js/biz.js` — the shop app (bill, cart, stock, reports, website, backup, security)
+- `bill.html` — the page a customer's bill link opens
+- `css/` — `app.css` (base), `commerce.css`, `store.css` (newer screens)
+- `supabase/` — database setup and `SETUP.md`
+
+## Not built yet
+
+- PIN reset by OTP (needs an SMS / WhatsApp provider)
+- A support contact for shopkeepers
+- Server-side bills (bill link drawn from data, no PDF stored)
+- Khata (credit) ledger, Play Store apps
 
 ## Licence
+
 Code: [MIT](LICENSE). Product photos in `img/items/` are not covered by MIT; each keeps its own
 Wikimedia Commons licence, listed in [CREDITS.md](CREDITS.md).
-
-## Not real yet
-Backend + database, accounts/login, real WhatsApp (questions, codes, order alerts), real payments (UPI gateway),
-real shelf-photo AI, delivery partners, ads, billing-software sync.
