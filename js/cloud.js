@@ -96,9 +96,24 @@
     } finally { busy = false; status(); }
     return status();
   }
-  window.addEventListener("online", () => { online = true; schedule(0); });
+  window.addEventListener("online", () => { online = true; schedule(0); const s = A.ownerShop(); if (s && s.cloud) topUpBillNos(s.id); });
   window.addEventListener("offline", () => { online = false; status(); });
   setInterval(() => schedule(0), 20000);
+
+  // ---------- bill numbers: keep at least 100 of this phone's own in hand ----------
+  let topping = null;
+  function topUpBillNos(shopId) {
+    if (topping || !shopId || A.billNosLeft(shopId) >= 100) return topping || Promise.resolve();
+    topping = (async () => {
+      try {
+        const { data, error } = await sb.rpc("claim_bill_numbers", { p_shop: shopId, p_n: 200 });
+        if (!error && Number.isInteger(data)) A.addBillNos(shopId, data, 200);
+        else if (error) console.warn("[MM cloud] bill numbers:", error.message);
+      } catch { /* offline: try again later */ }
+      finally { topping = null; }
+    })();
+    return topping;
+  }
 
   // ---------- login ----------
   function friendly(e) {
@@ -266,7 +281,7 @@
   async function myNumber() { const { data } = await sb.auth.getSession(); const m = (data.session?.user?.email || "").match(/^91(\d{10})@/); return m ? m[1] : ""; }
   async function deleteShop(shopId) { const { error } = await sb.rpc("delete_my_shop", { p_shop: shopId }); if (error) throw new Error(friendly(error)); }
 
-  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, sb, enqueue, flush, status, retryFailed, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
+  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
     pending: () => Q.get().length, failedOps: () => Q.failed() };
 
   // start-up
@@ -281,6 +296,7 @@
       window.dispatchEvent(new Event("mm-markets"));
     });
     flush().then(() => {
+      const me = A.ownerShop(); if (me && me.cloud) topUpBillNos(me.id);
       // a phone that hasn't downloaded for 30 min picks up changes made on the shop's other phones
       const shop = A.ownerShop();
       if (shop && shop.cloud && !Q.get().length && !Q.failed().length && Date.now() - A.store.get("lastPull", 0) > 30 * 60000)

@@ -592,6 +592,7 @@ window.MM_API = (function () {
       q(shop.id, { op: "insert", table: "shops", row: shopRow(shop, uid) });
       await window.MM_CLOUD.flush();
       store.set("lastPull", Date.now());
+      await window.MM_CLOUD.topUpBillNos(shop.id);
       // the backup number can open the same shop if this phone or SIM is lost
       if (bk) { try { await window.MM_CLOUD.addLoginNumber(shop.id, bk, pin); shop.backupAdded = bk; }
                 catch (x) { shop.backupError = x.message; } }
@@ -609,6 +610,7 @@ window.MM_API = (function () {
         await window.MM_CLOUD.signIn(normPhone(phone), String(pin));
         const id = await window.MM_CLOUD.pullShop();
         claimShop(id);
+        await window.MM_CLOUD.topUpBillNos(id);
         return { ok: true, reload: true };
       } catch (e) { return { ok: false, why: e.message }; }
     }
@@ -871,22 +873,48 @@ window.MM_API = (function () {
     const disc = Math.min(Math.max(0, Math.round(discount || 0)), sub);
     return { sub, discount: disc, total: sub - disc, units: lines.reduce((a, l) => a + l.qty, 0) };
   }
+  // ---------- bill numbers ----------
+  // Each phone gets blocks of numbers from the server ([[next, last], …]) so a
+  // shop's phones never print the same number, even offline. Without a block
+  // (shop not on the server yet, or no internet so far) it counts on from the
+  // highest number this phone knows.
+  function takeBillNo(shopId) {
+    const used = new Set(billsFor(shopId).map((b) => b.no));
+    const all = store.get("billNos", {}), list = all[shopId] || [];
+    while (list.length) {
+      const r = list[0];
+      while (r[0] <= r[1] && used.has(r[0])) r[0]++;
+      if (r[0] <= r[1]) { const n = r[0]++; if (r[0] > r[1]) list.shift(); all[shopId] = list; return { n, all }; }
+      list.shift();
+    }
+    all[shopId] = list;
+    const seq = store.get("billSeq", {});
+    return { n: Math.max(seq[shopId] || 1000, 1000, ...used) + 1, all };
+  }
+  const billNosLeft = (shopId) => (store.get("billNos", {})[shopId] || []).reduce((a, r) => a + Math.max(0, r[1] - r[0] + 1), 0);
+  function addBillNos(shopId, first, n) {
+    const all = store.get("billNos", {}), list = all[shopId] || [];
+    if (list.some((r) => r[1] >= first)) return; // already have it
+    list.push([first, first + n - 1]); all[shopId] = list; store.set("billNos", all);
+  }
+
   function saveBill(shopId, { lines, discount = 0, pay = "cash", phone = "", received = null }) {
     lines = (lines || []).map((l) => ({ ...l, name: String(l.name || "Item").slice(0, 120), qty: Math.max(1, count(l.qty)), price: money(l.price) ?? 0 })).filter((l) => l.qty > 0);
     if (!lines.length) throw new Error("The cart is empty");
     if (!["cash", "upi", "card", "khata"].includes(pay)) pay = "cash";
     const t = billTotals(lines, money(discount) || 0);
     if (t.sub > 2000000000) throw new Error("This bill is too large — check the quantities and prices");
-    const seq = store.get("billSeq", {}); const mine = billsFor(shopId).reduce((a, b) => Math.max(a, b.no || 0), 0);
-    seq[shopId] = Math.max(seq[shopId] || 1000, mine) + 1;
+    const seq = store.get("billSeq", {}), next = takeBillNo(shopId);
+    seq[shopId] = Math.max(seq[shopId] || 1000, next.n);
     const b = {
-      id: uuid(), no: seq[shopId], shopId, at: Date.now(),
+      id: uuid(), no: next.n, shopId, at: Date.now(),
       lines: lines.map((l) => ({ id: uuid(), itemId: l.itemId || null, name: l.name, brand: l.brand || "", qty: l.qty, price: l.price, cost: l.cost ?? null })),
       ...t, pay, phone: phone || "", received: pay === "cash" && received ? money(received) : null,
     };
     const all = store.get("bills", []); all.unshift(b);
     if (!store.set("bills", all.slice(0, 2000))) throw new Error(FULL);
-    store.set("billSeq", seq);
+    store.set("billSeq", seq); store.set("billNos", next.all);
+    if (getShop(shopId)?.cloud && window.MM_CLOUD?.topUpBillNos) window.MM_CLOUD.topUpBillNos(shopId);
     q(shopId, { op: "insert", table: "bills", row: { id: b.id, shop_id: shopId, no: b.no, at: iso(b.at), sub: b.sub, discount: b.discount, total: b.total,
       units: b.units, pay, phone: b.phone || null, received: b.received } });
     for (const l of b.lines) q(shopId, { op: "insert", table: "bill_lines", row: { id: l.id, bill_id: b.id, shop_id: shopId, item_id: l.itemId,
@@ -1041,7 +1069,7 @@ window.MM_API = (function () {
     RANGES, getRange, setRange, trip, fmtTrip, nearArea, nearSearch, marketFor,
     REASONS, moveStock, stockLog, inventory, lowAt,
     billTotals, saveBill, cancelBill, billsFor, getBill, daySummary,
-    photoSent, FULL, registerShop, login, updateShop, normPhone, weakPin, addOwnItem, savePurchase, purchasesFor, hydrateShop, mergePublic, uuid, shopHas, saveDetails, productDetails, addPhoto, setBillLink, setShopPhoto, removeGalleryPhoto, getShop, getMarket, isOpen, itemStatus,
+    photoSent, FULL, billNosLeft, addBillNos, registerShop, login, updateShop, normPhone, weakPin, addOwnItem, savePurchase, purchasesFor, hydrateShop, mergePublic, uuid, shopHas, saveDetails, productDetails, addPhoto, setBillLink, setShopPhoto, removeGalleryPhoto, getShop, getMarket, isOpen, itemStatus,
     search, ask, getAsk, replyAsk, pendingAsks, feedback, logSearch, addView,
     ownerShopId, ownerShop, isOwnerShop, claimShop, releaseShop, addShop, persistAddedShop, setItem, addItem, catalogFor, missedSales,
     getBag, addToBag, setQty, bagCount, bagLines, STEPS, placeOrder, getOrders, getOrder, advanceOrder, cancelOrder, ordersFor,
