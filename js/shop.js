@@ -4,9 +4,21 @@
   const U = window.MM_UI, A = U.A, C = U.C, { $, $$, esc, ic, rupee } = U;
 
   // ---------- product page ----------
+  const itemTried = new Set();
   function itemView([, shopId, itemId]) {
     const s = A.getShop(shopId);
     const it = s && s.items.find((x) => x.id === itemId);
+    const CL = window.MM_CLOUD;
+    if (!s && CL && CL.loadShop && CL.publicDone && !itemTried.has(shopId)) { // shared link to a shop outside this area
+      itemTried.add(shopId);
+      U.app.innerHTML = '<div class="empty"><div class="serif">Opening…</div></div>';
+      CL.loadShop(shopId).catch(() => 0).then(() => U.route());
+      return;
+    }
+    if (it && it.needDetails && CL && CL.itemDetails) { // long details come when the page opens
+      const here = location.hash;
+      CL.itemDetails(it.id).catch(() => null).then((d) => { A.addDetails(it, d); if (location.hash === here) U.route(); });
+    }
     if (!it) { U.app.innerHTML = '<div class="empty"><div class="serif">This item isn\'t listed any more.</div><p><a class="link" href="#/">Back</a></p></div>'; return; }
     const loc = U.loc();
     const st = A.itemStatus(it);

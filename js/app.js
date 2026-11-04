@@ -44,7 +44,11 @@
   let recent = A.store.get("recent", []);
   let homeCat = null, homeMarket = null;
   let cleanups = [];
-  const setLoc = (l) => { loc = l; A.store.set("loc", l); };
+  const setLoc = (l) => {
+    loc = l; A.store.set("loc", l);
+    // far from the shops already loaded: fetch that area's shops, then redraw
+    if (window.MM_CLOUD && window.MM_CLOUD.movedTo) window.MM_CLOUD.movedTo(l).then((n) => { if (n) route(); });
+  };
   const addRecent = (q) => {
     q = q.trim(); if (!q) return;
     recent = [q, ...recent.filter((x) => x.toLowerCase() !== q.toLowerCase())].slice(0, 6);
@@ -294,11 +298,18 @@
   // ---------- a shop's own website page ----------
   // Opens from search, from a shared link, the QR poster, a bill or Google Maps
   // (?src=…), even without the visitor's location. Visits are counted for the shop.
-  const visitSrc = {};
+  const visitSrc = {}, shopTried = new Set();
   function shopView(id, params) {
     const s = A.getShop(id);
     if (!s) {
-      const loading = window.MM_CLOUD && !window.MM_CLOUD.publicDone;
+      const CL = window.MM_CLOUD;
+      if (CL && CL.publicDone && CL.loadShop && !shopTried.has(id)) { // a link to a shop outside this area
+        shopTried.add(id);
+        app.innerHTML = '<div class="empty"><div class="serif">Opening the shop…</div></div>';
+        CL.loadShop(id).catch(() => 0).then(() => route());
+        return;
+      }
+      const loading = CL && !CL.publicDone;
       app.innerHTML = loading ? '<div class="empty"><div class="serif">Opening the shop…</div></div>'
         : '<div class="empty"><div class="serif">This shop isn\'t on My Market (any more).</div><p><a class="link" href="#/">Find shops near you</a></p></div>';
       return;

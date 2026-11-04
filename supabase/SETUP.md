@@ -26,6 +26,7 @@ Running it again later is safe.
 7. Then `supabase/shopsite.sql` (logo, cover photo, gallery, about, payments and delivery on each shop's website).
 8. Then `supabase/members.sql` (main + backup login numbers per shop, change PIN, delete shop).
 9. Then `supabase/billno.sql` (each phone gets its own block of bill numbers, so two phones never print the same number).
+10. Then `supabase/nearby.sql` (customers download only the shops near them).
 
 ## 3. Login settings
 

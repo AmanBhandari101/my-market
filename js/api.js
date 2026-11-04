@@ -1002,7 +1002,7 @@ window.MM_API = (function () {
           return enrich({ id: i.id, name: i.name, brand: i.brand || "Generic", cat: i.cat, price: i.price, mrp: i.mrp ?? i.product_mrp ?? null, reorderAt: 3,
             qty, stockAt: qty == null ? null : at, lastConfirmed: qty > 0 ? at : null, photo: photoUrl(i.photo_path),
             ...(i.product_id ? productDetails({ id: i.product_id, barcode: i.barcode, model: i.model, size: i.size, features: i.features, description: i.description,
-              specs: i.specs, keywords: i.keywords, photo_path: i.product_photo_path, photo_url: i.product_photo_url, photo_credit: i.photo_credit, verified: true }, photoUrl, null) : {}) });
+              specs: i.specs || {}, keywords: i.keywords, photo_path: i.product_photo_path, photo_url: i.product_photo_url, photo_credit: i.photo_credit, verified: true }, photoUrl, null) : {}) });
         }),
       };
       if (!sh.marketId || !D.MARKETS.find((m) => m.id === sh.marketId)) {
@@ -1012,9 +1012,16 @@ window.MM_API = (function () {
         const m = { id: "solo-" + r.id, name: r.locality || r.name, area: r.locality || "", locality: r.locality || "", pincode: r.pincode || "", lat: r.lat, lng: r.lng, radiusM: 200, pending: true, tagline: D.CATEGORIES[r.cat]?.name || "" };
         D.MARKETS.push(m); sh.marketId = m.id;
       }
+      for (const it of sh.items) if (it.productId) it.needDetails = true; // list rows come without the long details
       D.shops.push(sh); n++;
     }
     return n;
+  }
+  // long product details arrived for a customer's product page
+  function addDetails(it, d) {
+    it.needDetails = false; if (!d) return it;
+    it.features = d.features || []; it.description = d.description || ""; it.specMap = d.specs || {};
+    return enrich(it);
   }
   function setBillLink(id, link) {
     const all = store.get("bills", []); const b = all.find((x) => x.id === id);
@@ -1069,7 +1076,7 @@ window.MM_API = (function () {
     RANGES, getRange, setRange, trip, fmtTrip, nearArea, nearSearch, marketFor,
     REASONS, moveStock, stockLog, inventory, lowAt,
     billTotals, saveBill, cancelBill, billsFor, getBill, daySummary,
-    photoSent, FULL, billNosLeft, addBillNos, registerShop, login, updateShop, normPhone, weakPin, addOwnItem, savePurchase, purchasesFor, hydrateShop, mergePublic, uuid, shopHas, saveDetails, productDetails, addPhoto, setBillLink, setShopPhoto, removeGalleryPhoto, getShop, getMarket, isOpen, itemStatus,
+    addDetails, photoSent, FULL, billNosLeft, addBillNos, registerShop, login, updateShop, normPhone, weakPin, addOwnItem, savePurchase, purchasesFor, hydrateShop, mergePublic, uuid, shopHas, saveDetails, productDetails, addPhoto, setBillLink, setShopPhoto, removeGalleryPhoto, getShop, getMarket, isOpen, itemStatus,
     search, ask, getAsk, replyAsk, pendingAsks, feedback, logSearch, addView,
     ownerShopId, ownerShop, isOwnerShop, claimShop, releaseShop, addShop, persistAddedShop, setItem, addItem, catalogFor, missedSales,
     getBag, addToBag, setQty, bagCount, bagLines, STEPS, placeOrder, getOrders, getOrder, advanceOrder, cancelOrder, ordersFor,

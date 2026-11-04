@@ -164,15 +164,68 @@
     return shop.id;
   }
 
-  // ---------- customers: real shops from the public views ----------
-  async function loadPublic() {
-    const [m, s, i] = await Promise.all([
-      sb.from("markets").select("*"),
-      sb.from("public_shops").select("*").limit(2000),
-      sb.from("public_items").select("*").limit(20000),
+  // ---------- customers: the shops near them ----------
+  // Only the nearest shops (up to 150 within 25 km) and their items are downloaded,
+  // in pages of 1,000 rows (the server's maximum per request). Long product details
+  // (features, description, specs) are fetched when a product page opens.
+  const NEAR_KM = 25, NEAR_SHOPS = 150, PAGE = 1000;
+  const LIGHT = "id,shop_id,name,brand,cat,price,mrp,photo_path,stock,updated_at,product_id,barcode,model,size,keywords,product_mrp,product_photo_path,product_photo_url,photo_credit";
+  async function pages(build, cap = 60000) {
+    const out = [];
+    for (let from = 0; out.length < cap; from += PAGE) {
+      const r = await build().range(from, from + PAGE - 1);
+      if (r.error) throw r.error;
+      out.push(...r.data);
+      if (r.data.length < PAGE) break;
+    }
+    return out;
+  }
+  async function itemsFor(shopIds) {
+    const chunks = []; for (let i = 0; i < shopIds.length; i += 60) chunks.push(shopIds.slice(i, i + 60));
+    const res = await Promise.all(chunks.map((ids) => pages(() => sb.from("public_items").select(LIGHT).in("shop_id", ids).order("id"))));
+    return res.flat();
+  }
+  const box = (q, loc, km) => { const dl = km / 111, dg = km / (111 * Math.cos(loc.lat * Math.PI / 180));
+    return q.gte("lat", loc.lat - dl).lte("lat", loc.lat + dl).gte("lng", loc.lng - dg).lte("lng", loc.lng + dg); };
+  let loadedAt = null;
+  async function loadPublic(loc) {
+    loc = loc || A.store.get("loc", null) || { lat: 28.6517, lng: 77.1905 };
+    let shops;
+    const near = await sb.rpc("public_shops_near", { p_lat: loc.lat, p_lng: loc.lng, p_km: NEAR_KM, p_limit: NEAR_SHOPS });
+    if (!near.error) shops = near.data || [];
+    else { // server not updated yet: same area, without nearest-first
+      const r = await box(sb.from("public_shops").select("*"), loc, NEAR_KM).limit(NEAR_SHOPS);
+      if (r.error) { console.warn("[MM cloud] shops not loaded", r.error.message); return 0; }
+      shops = r.data;
+    }
+    const [m, items] = await Promise.all([
+      box(sb.from("markets").select("*"), loc, NEAR_KM + 10).limit(PAGE),
+      shops.length ? itemsFor(shops.map((s) => s.id)) : [],
     ]);
-    if (m.error || s.error || i.error) { console.warn("[MM cloud] public load failed", m.error || s.error || i.error); return 0; }
-    return A.mergePublic({ markets: m.data, shops: s.data, items: i.data }, photoUrl);
+    loadedAt = { lat: loc.lat, lng: loc.lng };
+    return A.mergePublic({ markets: m.data || [], shops, items }, photoUrl);
+  }
+  // The customer moved far from where shops were last loaded: load the new area.
+  function movedTo(loc) {
+    if (!loc || !loadedAt || A.distKm(loc, loadedAt) < 5) return Promise.resolve(0);
+    return loadPublic(loc).catch(() => 0);
+  }
+  // One shop by id — a shared link, QR poster or bill can point anywhere in India.
+  const triedShop = new Set();
+  async function loadShop(id) {
+    if (!/^[0-9a-f-]{36}$/.test(id) || triedShop.has(id)) return 0;
+    triedShop.add(id);
+    const s = await sb.from("public_shops").select("*").eq("id", id).maybeSingle();
+    if (s.error || !s.data) return 0;
+    const [m, items] = await Promise.all([
+      s.data.market_id ? sb.from("markets").select("*").eq("id", s.data.market_id) : { data: [] },
+      itemsFor([id]),
+    ]);
+    return A.mergePublic({ markets: m.data || [], shops: [s.data], items }, photoUrl);
+  }
+  async function itemDetails(itemId) {
+    const { data } = await sb.from("public_items").select("features,description,specs").eq("id", itemId).maybeSingle();
+    return data || null;
   }
 
   // ---------- what customers search for ----------
@@ -281,7 +334,7 @@
   async function myNumber() { const { data } = await sb.auth.getSession(); const m = (data.session?.user?.email || "").match(/^91(\d{10})@/); return m ? m[1] : ""; }
   async function deleteShop(shopId) { const { error } = await sb.rpc("delete_my_shop", { p_shop: shopId }); if (error) throw new Error(friendly(error)); }
 
-  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
+  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
     pending: () => Q.get().length, failedOps: () => Q.failed() };
 
   // start-up
