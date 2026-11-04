@@ -48,7 +48,7 @@
           if (r.ok) return show();
           if (expired()) { c.innerHTML = '<div style="font-size:40px">🧾</div><h1>This bill link has expired</h1><p>Bill PDFs stay online for 2 days. Ask the shop to send it again — they keep every bill.</p>' + shopBtn; return; }
           if (++tries < 10) { c.innerHTML = '<div style="font-size:40px">⏳</div><h1>Your bill is on its way</h1><p>The shop is sending it — this page opens it as soon as it arrives.</p>'; setTimeout(check, 3000); }
-          else c.innerHTML = '<h1>Bill not here yet</h1><p>The shop\'s phone may be offline. Open this link again a little later.</p><a class="btn line" href="./">Find shops near you on My Market</a>';
+          else c.innerHTML = '<h1>Bill not available</h1><p>The shop\'s phone may be offline — open this link again a little later. Bill links also expire after 2 days: then ask the shop to send it again.</p><a class="btn line" href="./">Find shops near you on My Market</a>';
         }).catch(function () { show(); });
       };
       check();
