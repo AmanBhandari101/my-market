@@ -565,3 +565,11 @@ body.site-mode.tabs-on #app { padding-bottom: 0; }
 .cart-empty b { font-size: 18px; color: var(--ink); }
 #tabs a .bcount { top: 3px; right: calc(50% - 22px); }
 .biz-app #tabs .bcount { background: #1e8e4e; color: #fff; }
+
+/* ---------- backup reminder, Google copy fields ---------- */
+.sitecard.due { background: #fff6e0; border-color: #f0c870; }
+.gcopy { border: 1px solid var(--line); border-radius: var(--r); margin-top: 10px; background: #fff; }
+.gc { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-top: 1px solid var(--line); }
+.gc:first-child { border-top: 0; }
+.gc > span { flex: 1; min-width: 0; font-size: 13.5px; overflow-wrap: anywhere; }
+.gc em { display: block; font-style: normal; font-size: 11.5px; color: var(--ink-2); }

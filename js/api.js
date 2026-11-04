@@ -1025,7 +1025,7 @@ window.MM_API = (function () {
   }
   function setBillLink(id, link) {
     const all = store.get("bills", []); const b = all.find((x) => x.id === id);
-    if (b) { b.pdfLink = link; store.set("bills", all); }
+    if (b) { b.pdfLink = link; b.pdfAt = Date.now(); store.set("bills", all); }
   }
   const billsFor = (shopId) => store.get("bills", []).filter((b) => b.shopId === shopId);
   const getBill = (id) => store.get("bills", []).find((b) => b.id === id);

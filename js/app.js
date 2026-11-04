@@ -765,7 +765,7 @@
   // ---------- bottom tabs (customer screens only) ----------
   const TAB_ON = { "": "home", item: "home", search: "search", ask: "search", me: "me", orders: "me", order: "me", bag: "bag" };
   // Shop app: three pages — Bill (home), Stock, Reports.
-  const BIZ_ON = { "": "bill", bill: "bill", cart: "bill", inbox: "bill", items: "stock", stockin: "stock", reports: "reports", bills: "reports", insights: "reports", site: "reports", security: "reports" };
+  const BIZ_ON = { "": "bill", bill: "bill", cart: "bill", inbox: "bill", items: "stock", stockin: "stock", reports: "reports", bills: "reports", insights: "reports", site: "reports", security: "reports", backup: "reports" };
   function syncTabs(r, parts = []) {
     const nav = $("#tabs"); if (!nav) return;
     if (BIZ) {

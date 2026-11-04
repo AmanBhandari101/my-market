@@ -18,6 +18,7 @@
     if (sub === "inbox") return dashView();
     if (sub === "bill" && parts[2]) return receiptView(parts[2]);
     if (sub === "cart") return cartView();
+    if (sub === "backup") return backupView(params);
     if (sub === "bills") return billsView();
     if (sub === "insights") return insightsView();
     return billView(); // home = the billing counter
@@ -196,6 +197,7 @@
         ${s.cloud ? `<a class="entry" href="#/biz/security"><div class="body"><div class="name">Login & security</div><div class="note">Backup number, change PIN, log out other phones</div></div>${ic("arrow")}</a>` : ""}
         <button class="entry" id="m-bs"><div class="body"><div class="name">Bill settings</div><div class="note">Advert, phone and GSTIN on your bills</div></div>${ic("arrow")}</button>
         <a class="entry" href="index.html#/shop/${s.id}" target="_blank" rel="noopener"><div class="body"><div class="name">See my shop as customers do</div><div class="note">Opens the My Market customer app</div></div>${ic("arrow")}</a>
+        <a class="entry" href="#/biz/backup"><div class="body"><div class="name">Back up bills</div><div class="note">Save a copy to Google Drive</div></div>${ic("arrow")}</a>
         <a class="entry" href="#/biz/insights"><div class="body"><div class="name">What people searched for</div><div class="note">Items nobody near you had</div></div>${ic("arrow")}</a>
       </div>
       <div class="opts"><button class="link accent" id="m-out">Log out</button></div>`, (el) => {
@@ -670,6 +672,16 @@
   }
 
   // ---------- My website: the shop's page, sharing, QR poster, Google Maps ----------
+  const GCAT = { mobile: "Mobile phone shop", electronics: "Electronics store", electrical: "Electrical supply store", hardware: "Hardware store",
+    plumbing: "Plumbing supply store", clothes: "Clothing store", footwear: "Shoe store", kitchen: "Kitchen supply store", grocery: "Grocery store",
+    pharmacy: "Pharmacy", stationery: "Stationery store", accessories: "Bag shop" };
+  function gfields(s) {
+    const m = A.getMarket(s.marketId);
+    const addr = [s.shopNo && s.shopNo !== "—" ? `Shop ${s.shopNo}` : "", s.floor && s.floor !== "Ground floor" ? s.floor : "", s.landmark || "", m?.name || "",
+      s.locality || m?.locality || "", s.pincode || m?.pincode || ""].filter(Boolean).join(", ");
+    const hours = `${U.fmtHour(s.open)} – ${U.fmtHour(s.close)}${s.closedDay && s.closedDay !== "None" ? `, closed ${s.closedDay}` : ", open all week"}`;
+    return [["Business name", s.name], ["Category", GCAT[s.cat] || "Store"], ["Address", addr || "—"], ["Phone", s.phone || "—"], ["Hours", hours], ["Website", siteLink(s, "gmaps")]];
+  }
   let qrLoad = null;
   const loadQR = () => qrLoad || (qrLoad = new Promise((res, rej) => {
     const sc = document.createElement("script");
@@ -744,15 +756,17 @@
         <div id="qrbox" class="qrbox"><p class="quiet small">Making the QR code…</p></div>
         <div class="two" style="margin-top:10px"><button class="btn" id="post">Download poster (PDF)</button><button class="btn line" id="postp">Print</button></div>
       </div>
-      <div class="rsec"><div class="rhd"><b>Add it to Google Maps</b></div>
-        <p class="small quiet" style="margin:0 0 6px">Everyone who finds your shop on Google Maps can tap <b>Website</b> and see your stock and prices.</p>
+      <div class="rsec"><div class="rhd"><b>Put your shop on Google Maps</b></div>
+        <p class="small quiet" style="margin:0 0 8px">Google lets only the shop's owner add or claim a shop — no app can do it for you. It takes about 5 minutes, and everything you need is here to copy.</p>
         <ol class="gsteps">
-          <li>Open <a class="link" href="https://business.google.com/" target="_blank" rel="noopener">Google Business Profile</a> (or search your shop on Google Maps → <i>Own this business?</i>). Sign in with your Google account.</li>
-          <li>Don't have your shop on Google yet? Choose <b>Add your business</b> — Google checks it's yours by phone, video or a postcard.</li>
-          <li>Go to <b>Edit profile → Contact → Website</b>.</li>
-          <li>Paste this link and save: <button class="link" id="copyg">Copy Google Maps link</button></li>
+          <li><a class="link" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.name + " " + (s.locality || A.getMarket(s.marketId)?.name || ""))}" target="_blank" rel="noopener">Search your shop on Google Maps</a>.
+            Found it? Tap it → <b>Own this business?</b> / <b>Claim this business</b>.</li>
+          <li>Not there? <a class="link" href="https://business.google.com/create" target="_blank" rel="noopener">Add your business on Google</a> and fill in the details below.</li>
+          <li>Google checks it's yours by a phone call, SMS or short video. Then your shop shows on Maps.</li>
         </ol>
-        <p class="faint tiny" style="margin:6px 0 0">The Google link is marked so your Reports can show visits that came from Google Maps.</p>
+        <div class="gcopy">${gfields(s).map(([k, v], i) => `<div class="gc"><span><em>${k}</em>${esc(v)}</span><button class="link" data-gc="${i}">Copy</button></div>`).join("")}</div>
+        <p class="faint tiny" style="margin:6px 0 0">Put the <b>Website</b> link in your Google profile: everyone who finds you on Maps can then see your stock and prices, and your Reports show those visits.
+          <a class="link" href="https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lng}" target="_blank" rel="noopener">Check your pin on the map</a></p>
       </div>
       <div class="rsec"><div class="rhd"><b>Visits</b><div class="words">${[7, 30].map((k) => `<a class="word ${(+params.get("d") || 7) === k ? "on" : ""}" href="#/biz/site?d=${k}">${k}d</a>`).join("")}</div></div>
         <div id="visits"><p class="quiet small">Loading…</p></div>
@@ -778,7 +792,7 @@
     };
     const copy = async (text, msg) => { try { await navigator.clipboard.writeText(text); U.toast(msg); } catch { prompt("Copy this link", text); } };
     $("#copy").onclick = () => copy(link, "Link copied");
-    $("#copyg").onclick = () => copy(siteLink(s, "gmaps"), "Google Maps link copied — paste it in Website");
+    $$("[data-gc]").forEach((x) => x.onclick = () => { const [k, v] = gfields(s)[+x.dataset.gc]; copy(v, `${k} copied — paste it in Google`); });
     $("#wash").onclick = () => U.openWhatsApp("", `${s.name} — see our stock and prices: ${siteLink(s, "share")}`);
     $("#nsh").onclick = async () => { try { await navigator.share({ title: s.name, text: `${s.name} — see our stock and prices`, url: siteLink(s, "share") }); } catch (x) { if (x.name !== "AbortError") copy(siteLink(s, "share"), "Link copied"); } };
     makeQR(siteLink(s, "qr")).then((qr) => { $("#qrbox") && ($("#qrbox").innerHTML = qrSvg(qr, 200) + `<b>${esc(s.name)}</b>`); })
@@ -820,9 +834,10 @@
     const cr = Math.floor(n / 1e7); n %= 1e7; const la = Math.floor(n / 1e5); n %= 1e5; const th = Math.floor(n / 1000); n %= 1000;
     return [cr && inWords(cr) + " Crore", la && two(la) + " Lakh", th && two(th) + " Thousand", n && three(n)].filter(Boolean).join(" ");
   }
-  function makeBillPdf(b, s) {
+  function makeBillPdf(b, s, into) {
     const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
+    const doc = into || new jsPDF({ unit: "mm", format: "a4", compress: true });
+    const firstPage = into ? (into.addPage(), into.getNumberOfPages()) : 1;
     const W = 210, L = 15, R = 195;
     const m = A.getMarket(s.marketId), d = new Date(b.at);
     const NAVY = [23, 35, 49], ORANGE = [255, 164, 28], GREY = [96, 100, 100], LINE = [222, 226, 226], INK = [15, 17, 17], ZEBRA = [247, 249, 249];
@@ -916,15 +931,15 @@
     doc.text(s.cloud ? "See our full stock and prices online: tap here (My Market)" : `See our stock & prices on My Market: search "${s.name}"`, L + 16, y + 6.5 + pl.length * 4.6);
     if (s.cloud) doc.link(L, y, R - L, bh, { url: siteLink(s, "bill") });
     // footer on every page
-    const pages = doc.getNumberOfPages();
-    for (let p = 1; p <= pages; p++) {
+    const last = doc.getNumberOfPages(), pages = last - firstPage + 1;
+    for (let p = firstPage; p <= last; p++) {
       doc.setPage(p);
       doc.setDrawColor(...LINE); doc.setLineWidth(0.3); doc.line(L, 276, R, 276);
       doc.setTextColor(...INK); doc.setFont("helvetica", "bold"); doc.setFontSize(11);
       doc.text("Thank you! Visit again.", L, 283);
       doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
       doc.text("This is a computer-generated bill and does not need a signature.", L, 288);
-      doc.text(`Powered by My Market${pages > 1 ? `  ·  Page ${p} of ${pages}` : ""}`, R, 288, { align: "right" });
+      doc.text(`Powered by My Market${pages > 1 ? `  ·  Page ${p - firstPage + 1} of ${pages}` : ""}`, R, 288, { align: "right" });
     }
     return doc;
   }
@@ -935,7 +950,7 @@
   async function sendBill(b, s) {
     const num = A.normPhone(b.phone);
     if (num.length === 10) {
-      let link = b.pdfLink || null;
+      let link = b.pdfLink && Date.now() - (b.pdfAt || b.at) < 40 * 3600000 ? b.pdfLink : null; // PDFs stay online 2 days
       if (!link && window.jspdf && window.MM_CLOUD && s.cloud) {
         const t = window.MM_CLOUD.billLink(s.id, b.id);
         link = t.link; b.pdfLink = link; A.setBillLink(b.id, link);
@@ -957,6 +972,88 @@
     }
     doc.save(billName(b, s)); U.toast("Bill PDF downloaded");
     return "downloaded";
+  }
+
+  // ---------- back up bills (Google Drive) ----------
+  // Bills are kept on this phone and on the My Market server. The owner keeps a
+  // third copy: one PDF with every bill + a sheet (CSV) for Excel / Google Sheets,
+  // shared straight into Google Drive from the phone's share menu.
+  const lastBackup = (s) => A.store.get("lastBackup:" + s.id, 0);
+  function backupDue(s) {
+    const bills = A.billsFor(s.id); if (!bills.length) return "";
+    const last = lastBackup(s), newer = bills.filter((x) => x.at > last).length;
+    if (!newer) return "";
+    const since = last || Math.min(...bills.map((x) => x.at)), days = Math.floor((Date.now() - since) / 86400000);
+    if (days < 7) return "";
+    return last ? `Last backup ${days} days ago · ${newer} new bill${newer > 1 ? "s" : ""} since — save a copy to Google Drive`
+      : `${newer} bill${newer > 1 ? "s" : ""} not backed up yet — save a copy to Google Drive`;
+  }
+  function billsCsv(list) {
+    const q = (v) => { const t = String(v ?? ""); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+    const rows = [["Bill no", "Date", "Time", "Customer phone", "Paid by", "Item", "Brand", "Qty", "Price", "Line total", "Bill discount", "Bill total", "Cancelled"]];
+    for (const x of list.slice().sort((p, r) => p.at - r.at)) {
+      const d = new Date(x.at), day = d.toLocaleDateString("en-IN"), tm = d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+      x.lines.forEach((l, i) => rows.push([x.no, day, tm, x.phone || "", PAYS[x.pay] || x.pay, l.name, l.brand || "", l.qty, l.price, l.qty * l.price,
+        i === 0 ? x.discount : "", i === 0 ? x.total : "", x.cancelled ? "Yes" : ""]));
+    }
+    return "﻿" + rows.map((r) => r.map(q).join(",")).join("\r\n");
+  }
+  function backupView(params) {
+    const s = A.ownerShop();
+    const now = new Date(), m0 = new Date(now.getFullYear(), now.getMonth(), 1).getTime(), lm0 = new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime();
+    const last = lastBackup(s);
+    const P = {
+      new: ["Since last backup", (x) => x.at > last],
+      month: ["This month", (x) => x.at >= m0],
+      last: ["Last month", (x) => x.at >= lm0 && x.at < m0],
+      all: ["All bills on this phone", () => true],
+    };
+    const pk = P[params.get("p")] ? params.get("p") : last ? "new" : "all";
+    const list = A.billsFor(s.id).filter(P[pk][1]);
+    const fmt = (t) => new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+    U.app.innerHTML = `
+      ${bizTop("Back up bills")}
+      <div class="rsec"><p class="small" style="margin:0 0 8px">Your bills are saved on this phone and on My Market's server. Keep your own copy in <b>Google Drive</b> too — if the phone is lost or reset, nothing is lost.</p>
+        <p class="faint tiny" style="margin:0">${last ? `Last backup: ${fmt(last)}` : "No backup yet."} · Bill PDFs sent to customers stay online for 2 days.</p></div>
+      <div class="rsec"><div class="rhd"><b>Which bills?</b></div>
+        <div class="words">${Object.entries(P).filter(([k]) => k !== "new" || last).map(([k, [l]]) => `<a class="word ${k === pk ? "on" : ""}" href="#/biz/backup?p=${k}">${l}</a>`).join("")}</div>
+        <p class="small" style="margin:12px 0 0"><b>${list.length}</b> bill${list.length === 1 ? "" : "s"}${list.length ? ` · ${fmt(Math.min(...list.map((x) => x.at)))} – ${fmt(Math.max(...list.map((x) => x.at)))}` : ""}</p>
+      </div>
+      <div class="rsec"><div class="rhd"><b>Save to Google Drive</b></div>
+        <ol class="gsteps"><li>Tap the button below.</li><li>In the share menu, choose <b>Drive</b> (Save to Drive).</li><li>Pick a folder, e.g. <i>My Market bills</i>, and tap <b>Save</b>.</li></ol>
+        <p class="faint tiny" style="margin:6px 0 10px">You get 2 files: a PDF with every bill, and a sheet that opens in Google Sheets or Excel.</p>
+        <button class="btn" id="bk" ${list.length ? "" : "disabled"}>Back up ${list.length} bill${list.length === 1 ? "" : "s"}</button>
+      </div>
+      <div style="height:30px"></div>`;
+    bindTop();
+    $("#bk").onclick = async (ev) => {
+      const btn = ev.currentTarget; if (btn.disabled) return;
+      if (!window.jspdf) return U.toast("Making the PDF needs the internet once — try again online");
+      btn.disabled = true; btn.textContent = "Making the files…";
+      await new Promise((r) => setTimeout(r, 30)); // let the button repaint
+      try {
+        const sorted = list.slice().sort((p, r) => p.at - r.at);
+        const { jsPDF } = window.jspdf;
+        const book = new jsPDF({ unit: "mm", format: "a4", compress: true });
+        sorted.forEach((x) => makeBillPdf(x, s, book)); // each bill starts on a new page
+        book.deletePage(1);                               // the empty first page
+        const tag = `${s.name.replace(/[^\w]+/g, "-").replace(/^-|-$/g, "")}-bills-${new Date().toISOString().slice(0, 10)}`;
+        const pdf = new File([book.output("blob")], tag + ".pdf", { type: "application/pdf" });
+        const csv = new File([billsCsv(sorted)], tag + ".csv", { type: "text/csv" });
+        let ok = false;
+        if (navigator.canShare && navigator.canShare({ files: [pdf, csv] })) {
+          try { await navigator.share({ files: [pdf, csv], title: `${s.name} bills` }); ok = true; }
+          catch (x) { if (x.name !== "AbortError") U.toast("Couldn't open the share menu — files downloaded instead"); else { btn.disabled = false; btn.textContent = `Back up ${list.length} bills`; return; } }
+        }
+        if (!ok) { // computer, or a phone browser without file sharing: download both
+          for (const f of [pdf, csv]) { const u = URL.createObjectURL(f), el = document.createElement("a"); el.href = u; el.download = f.name; document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(u), 5000); }
+          U.toast("Downloaded — upload both files to Google Drive", 6000);
+        }
+        A.store.set("lastBackup:" + s.id, Math.max(...list.map((x) => x.at), lastBackup(s)));
+        if (ok) U.toast("Backup ready — check it's in Google Drive", 5000);
+        backupView(params);
+      } catch (x) { btn.disabled = false; btn.textContent = "Try again"; U.toast("Backup failed: " + (x.message || x), 6000); }
+    };
   }
 
   // ---------- stock arrived (purchase) ----------
@@ -1286,6 +1383,7 @@
     const link = (k, v) => { const p = new URLSearchParams(params); p.set(k, v); return `#/biz/reports?${p}`; };
     U.app.innerHTML = `
       ${bizTop("Reports")}
+      ${backupDue(s) ? `<a class="rsec sitecard due" href="#/biz/backup"><span>${ic("bag")}</span><div><b>Back up your bills</b><em>${backupDue(s)}</em></div>${ic("arrow")}</a>` : ""}
       <a class="rsec sitecard" href="#/biz/site"><span>${ic("store")}</span><div><b>Your shop's website</b><em>Share it, print the QR poster, add it to Google Maps · see visits</em></div>${ic("arrow")}</a>
 
       <div class="rsec"><div class="rhd"><b>Sales</b><a class="link" href="#/biz/bills">All bills</a></div>

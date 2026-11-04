@@ -27,6 +27,7 @@ Running it again later is safe.
 8. Then `supabase/members.sql` (main + backup login numbers per shop, change PIN, delete shop).
 9. Then `supabase/billno.sql` (each phone gets its own block of bill numbers, so two phones never print the same number).
 10. Then `supabase/nearby.sql` (customers download only the shops near them).
+11. Then `supabase/bills_cleanup.sql` (bill PDFs are deleted after 2 days by the shop's own app).
 
 ## 3. Login settings
 

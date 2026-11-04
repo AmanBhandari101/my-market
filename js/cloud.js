@@ -281,7 +281,28 @@
   function billLink(shopId, billId) {
     const rand = [...crypto.getRandomValues(new Uint8Array(9))].map((x) => x.toString(36).padStart(2, "0")).join("").slice(0, 14);
     const path = `${shopId}/${billId}-${rand}.pdf`;
-    return { path, link: new URL("bill.html", location.href).href.split("#")[0] + "#" + path };
+    return { path, link: new URL("bill.html", location.href).href.split("#")[0] + "#" + path + "~" + Date.now().toString(36) };
+  }
+  // Bill PDFs live online for 2 days (enough for the customer to open and save it),
+  // then this shop's phone deletes them, so the free storage never fills up.
+  const KEEP_MS = 2 * 86400000;
+  async function cleanOldBills(shopId) {
+    if (!shopId || Date.now() - A.store.get("billClean:" + shopId, 0) < 6 * 3600000) return 0;
+    const cut = Date.now() - KEEP_MS; let gone = 0;
+    try {
+      for (let round = 0; round < 20; round++) {
+        const { data, error } = await sb.storage.from("bills").list(shopId, { limit: 100, offset: 0, sortBy: { column: "created_at", order: "asc" } });
+        if (error) throw error;
+        const old = (data || []).filter((f) => f.created_at && Date.parse(f.created_at) < cut).map((f) => `${shopId}/${f.name}`);
+        if (!old.length) break;
+        const r = await sb.storage.from("bills").remove(old);
+        if (r.error) throw r.error;
+        gone += old.length;
+        if (old.length < 100) break;
+      }
+      A.store.set("billClean:" + shopId, Date.now());
+    } catch (e) { console.warn("[MM cloud] old bill PDFs not cleaned:", e.message || e); }
+    return gone;
   }
   const billFileUrl = (path) => `${C.supabaseUrl}/storage/v1/object/public/bills/${path}`;
 
@@ -334,7 +355,7 @@
   async function myNumber() { const { data } = await sb.auth.getSession(); const m = (data.session?.user?.email || "").match(/^91(\d{10})@/); return m ? m[1] : ""; }
   async function deleteShop(shopId) { const { error } = await sb.rpc("delete_my_shop", { p_shop: shopId }); if (error) throw new Error(friendly(error)); }
 
-  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
+  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
     pending: () => Q.get().length, failedOps: () => Q.failed() };
 
   // start-up
@@ -349,7 +370,7 @@
       window.dispatchEvent(new Event("mm-markets"));
     });
     flush().then(() => {
-      const me = A.ownerShop(); if (me && me.cloud) topUpBillNos(me.id);
+      const me = A.ownerShop(); if (me && me.cloud) { topUpBillNos(me.id); cleanOldBills(me.id); }
       // a phone that hasn't downloaded for 30 min picks up changes made on the shop's other phones
       const shop = A.ownerShop();
       if (shop && shop.cloud && !Q.get().length && !Q.failed().length && Date.now() - A.store.get("lastPull", 0) > 30 * 60000)
