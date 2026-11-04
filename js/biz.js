@@ -13,6 +13,7 @@
     if (sub === "items") return itemsView(params);
     if (sub === "stockin") return stockInView();
     if (sub === "reports") return reportsView(params);
+    if (sub === "site") return siteView(params);
     if (sub === "inbox") return dashView();
     if (sub === "bill" && parts[2]) return receiptView(parts[2]);
     if (sub === "bills") return billsView();
@@ -162,6 +163,7 @@
       <div class="entries" style="margin-top:12px">
         <a class="entry" href="#/biz/inbox"><div class="body"><div class="name">Orders and questions</div><div class="note">${waiting(s)} waiting</div></div>${ic("arrow")}</a>
         ${s.cloud ? `<button class="entry" id="m-sync"><div class="body"><div class="name">Sync now</div><div class="note">Send this phone's changes and get your other phones' — ${window.MM_CLOUD.pending()} waiting</div></div>${ic("arrow")}</button>` : ""}
+        <a class="entry" href="#/biz/site"><div class="body"><div class="name">My website</div><div class="note">Your shop's page: share it, QR poster, add to Google Maps</div></div>${ic("arrow")}</a>
         <button class="entry" id="m-bs"><div class="body"><div class="name">Bill settings</div><div class="note">Advert, phone and GSTIN on your bills</div></div>${ic("arrow")}</button>
         <a class="entry" href="index.html#/shop/${s.id}" target="_blank" rel="noopener"><div class="body"><div class="name">See my shop as customers do</div><div class="note">Opens the My Market customer app</div></div>${ic("arrow")}</a>
         <a class="entry" href="#/biz/insights"><div class="body"><div class="name">What people searched for</div><div class="note">Items nobody near you had</div></div>${ic("arrow")}</a>
@@ -523,113 +525,250 @@
     });
   }
 
-  // A4-wide receipt PDF, drawn as vectors (sharp on any phone). Standard PDF
-  // fonts have no ₹ glyph, so amounts print as "Rs.".
-  const rs = (n) => "Rs. " + Math.round(n).toLocaleString("en-IN");
-  const billName = (b, s) => `${s.name.replace(/[^\w]+/g, "-").replace(/^-|-$/g, "")}-bill-${b.no}.pdf`;
-  function makeBillPdf(b, s) {
-    const { jsPDF } = window.jspdf;
-    const m = A.getMarket(s.marketId);
-    const W = 105, X = 8, R = W - 8;
-    const doc0 = new jsPDF({ unit: "mm", format: [W, 200] });
-    doc0.setFont("helvetica", "normal"); doc0.setFontSize(9.5);
-    const wrapped = b.lines.map((l) => doc0.splitTextToSize(l.name, 46));
-    const H = 124 + wrapped.reduce((a, w) => a + w.length * 4.2 + 3, 0) + (b.discount ? 5 : 0) + (b.received ? 10 : 0) + (s.promo ? 8 : 0);
-    const doc = new jsPDF({ unit: "mm", format: [W, Math.max(150, H)], compress: true });
-    const d = new Date(b.at);
-    // header band
-    doc.setFillColor(23, 35, 49); doc.rect(0, 0, W, 31, "F");
-    doc.setFillColor(255, 164, 28); doc.rect(0, 31, W, 1.4, "F");
-    doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(15);
-    doc.text(doc.splitTextToSize(s.name, R - X)[0], X, 11);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(8.2); doc.setTextColor(214, 224, 233);
-    const addr = [s.shopNo && s.shopNo !== "—" ? `Shop ${s.shopNo}` : "", s.floor && s.floor !== "Ground floor" ? s.floor : "", m?.name || "", [s.locality || m?.locality || "", s.pincode || m?.pincode || ""].filter(Boolean).join(" ")].filter(Boolean).join(", ");
-    const al = doc.splitTextToSize(addr, R - X).slice(0, 2);
-    doc.text(al, X, 17);
-    doc.text([s.phone ? `Ph / WhatsApp: ${s.phone}` : "", s.gst ? `GSTIN: ${s.gst}` : ""].filter(Boolean).join("   "), X, 17 + al.length * 3.6 + 2);
-    // bill meta
-    let y = 41;
-    doc.setTextColor(15, 17, 17); doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.text("BILL", X, y);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(86, 89, 89);
-    doc.text(`No. ${b.no}`, X + 12, y);
-    doc.text(d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) + "  " + d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }), R, y, { align: "right" });
-    if (b.phone) { y += 5; doc.text(`Customer: ${b.phone}`, X, y); }
-    if (b.cancelled) { doc.setTextColor(177, 39, 4); doc.setFont("helvetica", "bold"); doc.text("CANCELLED", R, y + 5, { align: "right" }); }
-    // table
-    y += 7;
-    doc.setFillColor(243, 245, 245); doc.rect(X, y, R - X, 7, "F");
-    doc.setFont("helvetica", "bold"); doc.setFontSize(8.3); doc.setTextColor(86, 89, 89);
-    doc.text("ITEM", X + 2, y + 4.7); doc.text("QTY", 64, y + 4.7, { align: "right" }); doc.text("RATE", 80, y + 4.7, { align: "right" }); doc.text("AMOUNT", R - 2, y + 4.7, { align: "right" });
-    y += 7;
-    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(15, 17, 17);
-    b.lines.forEach((l, i) => {
-      const w = wrapped[i]; const h = w.length * 4.2 + 3;
-      doc.text(w, X + 2, y + 4.6);
-      doc.text(String(l.qty), 64, y + 4.6, { align: "right" });
-      doc.text(Math.round(l.price).toLocaleString("en-IN"), 80, y + 4.6, { align: "right" });
-      doc.text(Math.round(l.qty * l.price).toLocaleString("en-IN"), R - 2, y + 4.6, { align: "right" });
-      y += h; doc.setDrawColor(225, 228, 228); doc.setLineWidth(0.2); doc.line(X, y, R, y);
-    });
-    // totals
-    y += 6; doc.setFontSize(9); doc.setTextColor(86, 89, 89);
-    const row = (label, val) => { doc.text(label, 58, y); doc.text(val, R - 2, y, { align: "right" }); y += 5; };
-    row(`Items (${b.units})`, rs(b.sub));
-    if (b.discount) row("Discount", "- " + rs(b.discount));
-    doc.setFillColor(255, 216, 20); doc.roundedRect(54, y - 3.6, R - 54, 9, 1.5, 1.5, "F");
-    doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.setTextColor(15, 17, 17);
-    doc.text("TOTAL", 57, y + 2.4); doc.text(rs(b.total), R - 2, y + 2.4, { align: "right" });
-    y += 11; doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(86, 89, 89);
-    row("Paid by", { cash: "Cash", upi: "UPI", card: "Card", khata: "Khata (pay later)" }[b.pay]);
-    if (b.received) { row("Cash received", rs(b.received)); row("Returned", rs(Math.max(0, b.received - b.total))); }
-    // the shop's small advert
-    y += 3;
-    const promo = s.promo || `Visit ${s.name} again — new stock every week.`;
-    const pl = doc.splitTextToSize(promo, R - X - 22);
-    doc.setFontSize(7.6);
-    const sub = doc.splitTextToSize(`See our stock & prices on My Market: search "${s.name}"`, R - X - 18);
-    doc.setFontSize(9.5);
-    const bh = 7 + pl.length * 4 + sub.length * 3.3;
-    doc.setFillColor(255, 243, 223); doc.setDrawColor(255, 164, 28); doc.setLineWidth(0.4);
-    doc.roundedRect(X, y, R - X, bh, 2, 2, "FD");
-    doc.setFillColor(255, 164, 28); doc.circle(X + 7, y + bh / 2, 3.6, "F");
-    doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.text("%", X + 7, y + bh / 2 + 1.2, { align: "center" });
-    doc.setTextColor(112, 63, 0); doc.setFontSize(9.5); doc.text(pl, X + 14, y + 5.6);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(7.6); doc.setTextColor(140, 90, 20);
-    doc.text(sub, X + 14, y + 5.2 + pl.length * 4);
-    // footer
-    y += bh + 9;
-    doc.setTextColor(15, 17, 17); doc.setFont("helvetica", "bold"); doc.setFontSize(10.5);
-    doc.text("Thank you! Visit again.", W / 2, y, { align: "center" });
-    doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(138, 145, 145);
-    doc.text("Computer-generated bill · My Market", W / 2, y + 4.5, { align: "center" });
+  const siteLink = (s, src) => (window.MM_CLOUD ? window.MM_CLOUD.shopLink(s.id, src) : "");
+
+  // ---------- My website: the shop's page, sharing, QR poster, Google Maps ----------
+  let qrLoad = null;
+  const loadQR = () => qrLoad || (qrLoad = new Promise((res, rej) => {
+    const sc = document.createElement("script");
+    sc.src = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js";
+    sc.onload = () => res(window.qrcode); sc.onerror = () => { qrLoad = null; rej(new Error("QR needs the internet once")); };
+    document.head.appendChild(sc);
+  }));
+  const makeQR = async (text) => { const qr = (await loadQR())(0, "M"); qr.addData(text); qr.make(); return qr; };
+  function qrSvg(qr, px) {
+    const n = qr.getModuleCount(), c = px / (n + 8); let r = "";
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (qr.isDark(y, x)) r += `<rect x="${(x + 4) * c}" y="${(y + 4) * c}" width="${c + 0.3}" height="${c + 0.3}"/>`;
+    return `<svg viewBox="0 0 ${px} ${px}" width="${px}" height="${px}" style="background:#fff"><g fill="#0f1111">${r}</g></svg>`;
+  }
+  // A4 poster for the counter / shop front, drawn as vectors (sharp when printed)
+  async function posterPdf(s) {
+    const { jsPDF } = window.jspdf; const qr = await makeQR(siteLink(s, "qr"));
+    const doc = new jsPDF({ unit: "mm", format: "a4", compress: true }); const W = 210;
+    doc.setFillColor(23, 35, 49); doc.rect(0, 0, W, 58, "F");
+    doc.setFillColor(255, 164, 28); doc.rect(0, 58, W, 2.5, "F");
+    doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(30);
+    doc.text(doc.splitTextToSize(s.name, W - 30).slice(0, 2), W / 2, 28, { align: "center" });
+    doc.setFont("helvetica", "normal"); doc.setFontSize(13); doc.setTextColor(214, 224, 233);
+    doc.text("See our stock and prices on your phone", W / 2, 48, { align: "center" });
+    const n = qr.getModuleCount(), size = 110, c = size / n, x0 = (W - size) / 2, y0 = 78;
+    doc.setFillColor(15, 17, 17);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (qr.isDark(y, x)) doc.rect(x0 + x * c, y0 + y * c, c + 0.05, c + 0.05, "F");
+    doc.setTextColor(15, 17, 17); doc.setFont("helvetica", "bold"); doc.setFontSize(26);
+    doc.text("Scan with your phone camera", W / 2, y0 + size + 18, { align: "center" });
+    doc.setFont("helvetica", "normal"); doc.setFontSize(14); doc.setTextColor(86, 89, 89);
+    doc.text("Check what's in stock · prices · WhatsApp us · directions", W / 2, y0 + size + 28, { align: "center" });
+    if (s.promo) {
+      doc.setFillColor(255, 243, 223); doc.setDrawColor(255, 164, 28); doc.setLineWidth(0.6);
+      doc.roundedRect(25, y0 + size + 36, W - 50, 20, 3, 3, "FD");
+      doc.setTextColor(112, 63, 0); doc.setFont("helvetica", "bold"); doc.setFontSize(15);
+      doc.text(doc.splitTextToSize(s.promo, W - 60)[0], W / 2, y0 + size + 48.5, { align: "center" });
+    }
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(138, 145, 145);
+    doc.text("Powered by My Market — live stock and prices from shops near you", W / 2, 285, { align: "center" });
     return doc;
   }
-  // Share the bill PDF. Phones: the share sheet opens with the PDF attached
-  // (pick WhatsApp, send). Computers: the PDF downloads and the customer's
-  // WhatsApp chat opens. In v2 the shop's WhatsApp Business number sends it
-  // by itself through the WhatsApp Business API — this is the one place to swap.
-  // Send the bill to the customer's WhatsApp number.
-  // With a number: the PDF goes to the server and WhatsApp opens straight on that
-  // customer's chat (no need to have them in contacts) with the bill and its link —
-  // the shop only taps Send. Without a number: the phone's share menu as before.
-  // Fully automatic sending (no tap) needs the WhatsApp Business API later.
+  function siteView(params) {
+    const s = A.ownerShop();
+    const link = siteLink(s, "link");
+    U.app.innerHTML = `
+      ${bizTop("My website")}
+      ${!s.cloud ? '<div class="banner" style="margin:12px var(--gut) 0"><div class="serif">Not online yet</div><p>Log in with your mobile number and PIN so your shop is on the server — then your website goes live.</p></div>' : ""}
+      <div class="rsec"><div class="rhd"><b>Your shop's website</b><a class="link" href="${esc(siteLink(s, "app"))}" target="_blank" rel="noopener">Open</a></div>
+        <p class="small quiet" style="margin:0 0 8px">Free. Shows your items, prices, stock, hours and location — and lets people WhatsApp or call you.</p>
+        <div class="linkbox"><input class="field" readonly value="${esc(link)}" id="lnk"><button class="btn auto" id="copy">Copy</button></div>
+        <div class="two" style="margin-top:10px"><button class="btn line" id="wash">Share on WhatsApp</button><button class="btn line" id="nsh">Share…</button></div>
+      </div>
+      <div class="rsec"><div class="rhd"><b>QR poster</b></div>
+        <p class="small quiet" style="margin:0 0 8px">Print it for your counter and shop front. Customers scan it to see your stock and prices.</p>
+        <div id="qrbox" class="qrbox"><p class="quiet small">Making the QR code…</p></div>
+        <div class="two" style="margin-top:10px"><button class="btn" id="post">Download poster (PDF)</button><button class="btn line" id="postp">Print</button></div>
+      </div>
+      <div class="rsec"><div class="rhd"><b>Add it to Google Maps</b></div>
+        <p class="small quiet" style="margin:0 0 6px">Everyone who finds your shop on Google Maps can tap <b>Website</b> and see your stock and prices.</p>
+        <ol class="gsteps">
+          <li>Open <a class="link" href="https://business.google.com/" target="_blank" rel="noopener">Google Business Profile</a> (or search your shop on Google Maps → <i>Own this business?</i>). Sign in with your Google account.</li>
+          <li>Don't have your shop on Google yet? Choose <b>Add your business</b> — Google checks it's yours by phone, video or a postcard.</li>
+          <li>Go to <b>Edit profile → Contact → Website</b>.</li>
+          <li>Paste this link and save: <button class="link" id="copyg">Copy Google Maps link</button></li>
+        </ol>
+        <p class="faint tiny" style="margin:6px 0 0">The Google link is marked so your Reports can show visits that came from Google Maps.</p>
+      </div>
+      <div class="rsec"><div class="rhd"><b>Visits</b><div class="words">${[7, 30].map((k) => `<a class="word ${(+params.get("d") || 7) === k ? "on" : ""}" href="#/biz/site?d=${k}">${k}d</a>`).join("")}</div></div>
+        <div id="visits"><p class="quiet small">Loading…</p></div>
+      </div>
+      <div style="height:30px"></div>`;
+    bindTop();
+    const copy = async (text, msg) => { try { await navigator.clipboard.writeText(text); U.toast(msg); } catch { prompt("Copy this link", text); } };
+    $("#copy").onclick = () => copy(link, "Link copied");
+    $("#copyg").onclick = () => copy(siteLink(s, "gmaps"), "Google Maps link copied — paste it in Website");
+    $("#wash").onclick = () => U.openWhatsApp("", `${s.name} — see our stock and prices: ${siteLink(s, "share")}`);
+    $("#nsh").onclick = async () => { try { await navigator.share({ title: s.name, text: `${s.name} — see our stock and prices`, url: siteLink(s, "share") }); } catch (x) { if (x.name !== "AbortError") copy(siteLink(s, "share"), "Link copied"); } };
+    makeQR(siteLink(s, "qr")).then((qr) => { $("#qrbox") && ($("#qrbox").innerHTML = qrSvg(qr, 200) + `<b>${esc(s.name)}</b>`); })
+      .catch((x) => { $("#qrbox") && ($("#qrbox").innerHTML = `<p class="quiet small">${esc(x.message)}</p>`); });
+    const poster = async (print) => {
+      if (!window.jspdf) return U.toast("Needs the internet once");
+      const doc = await posterPdf(s);
+      if (print) { const url = doc.output("bloburl"); const w = window.open(url, "_blank"); if (!w) doc.save("my-market-poster.pdf"); }
+      else doc.save(`${s.name.replace(/[^\w]+/g, "-")}-qr-poster.pdf`);
+    };
+    $("#post").onclick = () => poster(false); $("#postp").onclick = () => poster(true);
+    // visits
+    const box = $("#visits");
+    if (!(window.MM_CLOUD && s.cloud)) { box.innerHTML = '<p class="quiet small">Visits show once your shop is online.</p>'; return; }
+    const SRC = { gmaps: "Google Maps", qr: "QR poster", bill: "Bills", share: "Shared links", link: "Your link", app: "My Market app", search: "Search" };
+    window.MM_CLOUD.visitsSummary(s.id, +params.get("d") || 7).then((rows) => {
+      const views = rows.filter((r) => r.kind === "view"), tot = views.reduce((a, r) => a + +r.n, 0);
+      const act = (k) => rows.filter((r) => r.kind === k).reduce((a, r) => a + +r.n, 0);
+      if (!tot && !rows.length) { box.innerHTML = '<p class="quiet small">No visits yet. Share your link, put up the QR poster and add it to Google Maps.</p>'; return; }
+      const max = Math.max(1, ...views.map((r) => +r.n));
+      box.innerHTML = `<div class="stats" style="padding:0;margin:0 0 12px">
+          <div><b>${tot}</b><span>page visits</span></div><div><b>${act("whatsapp")}</b><span>WhatsApp taps</span></div>
+          <div><b>${act("directions")}</b><span>directions</span></div><div><b>${act("call")}</b><span>calls</span></div></div>
+        <div class="bars">${views.sort((a, b) => b.n - a.n).map((r) => `<div class="bar"><div class="bl"><b>${SRC[r.src] || r.src}</b><span>${r.n}</span></div><div class="bt"><i style="width:${(r.n / max) * 100}%"></i></div></div>`).join("")}</div>`;
+    }).catch((x) => { box.innerHTML = `<p class="quiet small">${esc(x.message)}</p>`; });
+  }
+
+  // ---------- bill PDF: A4 page, invoice layout ----------
+  // Drawn as vectors (sharp on screen and when printed). Standard PDF fonts have
+  // no ₹ sign, so amounts print as "Rs.". Long bills continue on more pages.
+  const rs = (n) => "Rs. " + Math.round(n).toLocaleString("en-IN");
+  const billName = (b, s) => `${s.name.replace(/[^\w]+/g, "-").replace(/^-|-$/g, "")}-bill-${b.no}.pdf`;
+  const ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+  const TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+  const two = (n) => (n < 20 ? ONES[n] : TENS[Math.floor(n / 10)] + (n % 10 ? " " + ONES[n % 10] : ""));
+  const three = (n) => (n >= 100 ? ONES[Math.floor(n / 100)] + " Hundred" + (n % 100 ? " " : "") : "") + (n % 100 ? two(n % 100) : "");
+  function inWords(n) { // Indian system: thousand, lakh, crore
+    n = Math.round(n); if (!n) return "Zero";
+    const cr = Math.floor(n / 1e7); n %= 1e7; const la = Math.floor(n / 1e5); n %= 1e5; const th = Math.floor(n / 1000); n %= 1000;
+    return [cr && inWords(cr) + " Crore", la && two(la) + " Lakh", th && two(th) + " Thousand", n && three(n)].filter(Boolean).join(" ");
+  }
+  function makeBillPdf(b, s) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
+    const W = 210, L = 15, R = 195;
+    const m = A.getMarket(s.marketId), d = new Date(b.at);
+    const NAVY = [23, 35, 49], ORANGE = [255, 164, 28], GREY = [96, 100, 100], LINE = [222, 226, 226], INK = [15, 17, 17], ZEBRA = [247, 249, 249];
+    const money = (n) => Math.round(n).toLocaleString("en-IN");
+    const addr = [s.shopNo && s.shopNo !== "—" ? `Shop ${s.shopNo}` : "", s.floor && s.floor !== "Ground floor" ? s.floor : "", s.landmark || "", m?.name || "",
+      [s.locality || m?.locality || "", s.pincode || m?.pincode || ""].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+    const header = (first) => {
+      doc.setFillColor(...NAVY); doc.rect(0, 0, W, 40, "F");
+      doc.setFillColor(...ORANGE); doc.rect(0, 40, W, 1.6, "F");
+      doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(19);
+      doc.text(doc.splitTextToSize(s.name, 118)[0], L, 16);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(205, 216, 226);
+      const al = doc.splitTextToSize(addr, 118).slice(0, 2);
+      doc.text(al, L, 23);
+      doc.text([s.phone ? `Phone / WhatsApp: ${s.phone}` : "", s.gst ? `GSTIN: ${s.gst}` : ""].filter(Boolean).join("     "), L, 23 + al.length * 4.2 + 1.5);
+      doc.setTextColor(...ORANGE); doc.setFont("helvetica", "bold"); doc.setFontSize(22);
+      doc.text("BILL", R, 16, { align: "right" });
+      doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
+      doc.text(`No. ${b.no}`, R, 23, { align: "right" });
+      doc.text(d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }), R, 28, { align: "right" });
+      doc.text(d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }), R, 33, { align: "right" });
+      if (!first) { doc.setFontSize(8.5); doc.setTextColor(205, 216, 226); doc.text("(continued)", R, 37.5, { align: "right" }); }
+    };
+    const tableHead = (y) => {
+      doc.setFillColor(...NAVY); doc.rect(L, y, R - L, 8.5, "F");
+      doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(8.5);
+      doc.text("#", L + 3, y + 5.6); doc.text("ITEM", L + 12, y + 5.6);
+      doc.text("QTY", 132, y + 5.6, { align: "right" }); doc.text("RATE", 160, y + 5.6, { align: "right" }); doc.text("AMOUNT", R - 3, y + 5.6, { align: "right" });
+      return y + 8.5;
+    };
+    header(true);
+    let y = 50;
+    // billed to / payment
+    doc.setDrawColor(...LINE); doc.setLineWidth(0.3);
+    doc.roundedRect(L, y, 86, 21, 2, 2, "S"); doc.roundedRect(109, y, 86, 21, 2, 2, "S");
+    doc.setFont("helvetica", "bold"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
+    doc.text("BILLED TO", L + 4, y + 6); doc.text("PAYMENT", 113, y + 6);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(...INK);
+    const ph = A.normPhone(b.phone);
+    doc.text(ph.length === 10 ? `Customer: +91 ${ph.slice(0, 5)} ${ph.slice(5)}` : "Walk-in customer", L + 4, y + 13);
+    doc.text({ cash: "Cash", upi: "UPI", card: "Card", khata: "Khata (pay later)" }[b.pay] || b.pay, 113, y + 13);
+    if (b.received) { doc.setFontSize(8.5); doc.setTextColor(...GREY); doc.text(`Received ${rs(b.received)} · Returned ${rs(Math.max(0, b.received - b.total))}`, 113, y + 18); }
+    if (b.cancelled) { doc.setTextColor(177, 39, 4); doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.text("CANCELLED", R - 4, y + 13, { align: "right" }); }
+    y = tableHead(y + 29);
+    // rows
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
+    b.lines.forEach((l, i) => {
+      const nameL = doc.splitTextToSize(l.name + (l.brand && l.brand !== "Generic" ? ` (${l.brand})` : ""), 98);
+      const rh = nameL.length * 4.4 + 4.2;
+      if (y + rh > 262) { // new page
+        doc.setFontSize(8); doc.setTextColor(...GREY); doc.text("Continued on next page", R, 270, { align: "right" });
+        doc.addPage(); header(false); y = tableHead(50); doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
+      }
+      if (i % 2) { doc.setFillColor(...ZEBRA); doc.rect(L, y, R - L, rh, "F"); }
+      doc.setTextColor(...GREY); doc.text(String(i + 1), L + 3, y + 5.6);
+      doc.setTextColor(...INK); doc.text(nameL, L + 12, y + 5.6);
+      doc.text(String(l.qty), 132, y + 5.6, { align: "right" });
+      doc.text(money(l.price), 160, y + 5.6, { align: "right" });
+      doc.text(money(l.qty * l.price), R - 3, y + 5.6, { align: "right" });
+      y += rh; doc.setDrawColor(...LINE); doc.setLineWidth(0.2); doc.line(L, y, R, y);
+    });
+    // totals (right) and amount in words (left)
+    if (y + 52 > 270) { doc.addPage(); header(false); y = 50; }
+    y += 6;
+    const tx = 120, row = (label, val, yy, bold) => {
+      doc.setFont("helvetica", bold ? "bold" : "normal"); doc.setFontSize(9.5); doc.setTextColor(...(bold ? INK : GREY));
+      doc.text(label, tx + 3, yy); doc.text(val, R - 3, yy, { align: "right" });
+    };
+    row(`Items (${b.units})`, rs(b.sub), y + 4);
+    let ty = y + 4;
+    if (b.discount) { ty += 6; row("Discount", "- " + rs(b.discount), ty); }
+    ty += 4;
+    doc.setFillColor(...NAVY); doc.roundedRect(tx, ty, R - tx, 11, 1.5, 1.5, "F");
+    doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(12.5);
+    doc.text("TOTAL", tx + 4, ty + 7.4); doc.text(rs(b.total), R - 4, ty + 7.4, { align: "right" });
+    doc.setFont("helvetica", "bold"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
+    doc.text("AMOUNT IN WORDS", L, y + 4);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...INK);
+    doc.text(doc.splitTextToSize(`Rupees ${inWords(b.total)} Only`, 95), L, y + 9.5);
+    y = ty + 20;
+    // the shop's message / small advert
+    const promo = s.promo || `Visit ${s.name} again — new stock every week.`;
+    doc.setFontSize(10); const pl = doc.splitTextToSize(promo, R - L - 26);
+    const bh = 10 + pl.length * 4.6;
+    doc.setFillColor(255, 243, 223); doc.setDrawColor(...ORANGE); doc.setLineWidth(0.4);
+    doc.roundedRect(L, y, R - L, bh, 2, 2, "FD");
+    doc.setFillColor(...ORANGE); doc.circle(L + 8, y + bh / 2, 4, "F");
+    doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.text("%", L + 8, y + bh / 2 + 1.3, { align: "center" });
+    doc.setTextColor(112, 63, 0); doc.text(pl, L + 16, y + 6.5);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(140, 90, 20);
+    doc.text(s.cloud ? "See our full stock and prices online: tap here (My Market)" : `See our stock & prices on My Market: search "${s.name}"`, L + 16, y + 6.5 + pl.length * 4.6);
+    if (s.cloud) doc.link(L, y, R - L, bh, { url: siteLink(s, "bill") });
+    // footer on every page
+    const pages = doc.getNumberOfPages();
+    for (let p = 1; p <= pages; p++) {
+      doc.setPage(p);
+      doc.setDrawColor(...LINE); doc.setLineWidth(0.3); doc.line(L, 276, R, 276);
+      doc.setTextColor(...INK); doc.setFont("helvetica", "bold"); doc.setFontSize(11);
+      doc.text("Thank you! Visit again.", L, 283);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
+      doc.text("This is a computer-generated bill and does not need a signature.", L, 288);
+      doc.text(`Powered by My Market${pages > 1 ? `  ·  Page ${p} of ${pages}` : ""}`, R, 288, { align: "right" });
+    }
+    return doc;
+  }
+  // Send the bill to the customer's WhatsApp number — call straight from the tap.
+  // With a number: the bill's link is decided now, WhatsApp opens at once on that
+  // customer's chat (no contacts needed) and the PDF uploads in the background
+  // (retried until it's there). Without a number: the phone's share menu.
   async function sendBill(b, s) {
     const num = A.normPhone(b.phone);
     if (num.length === 10) {
-      // open the window now, while the tap still counts, or the phone blocks it
-      const win = window.open("", "_blank");
-      if (win) win.document.write('<p style="font:16px sans-serif;padding:24px">Opening WhatsApp…</p>');
-      let link = null;
-      try {
-        if (window.jspdf && window.MM_CLOUD && s.cloud)
-          link = await window.MM_CLOUD.uploadBill(s.id, b.id, makeBillPdf(b, s).output("blob"));
-      } catch (x) { console.warn("[MM] bill upload failed", x); }
+      let link = b.pdfLink || null;
+      if (!link && window.jspdf && window.MM_CLOUD && s.cloud) {
+        const t = window.MM_CLOUD.billLink(s.id, b.id);
+        link = t.link; b.pdfLink = link; A.setBillLink(b.id, link);
+        window.MM_CLOUD.enqueue({ op: "billpdf", path: t.path, dataUrl: makeBillPdf(b, s).output("datauristring") });
+      }
       const msg = link
-        ? `*${s.name}*\nBill #${b.no} · ${rs(b.total)} · ${PAYS[b.pay]}\nYour bill (PDF): ${link}\nThank you! Visit again.`
+        ? `*${s.name}*\nBill #${b.no} · ${rs(b.total)} · ${PAYS[b.pay]}\nYour bill (PDF): ${link}\nOur stock & prices: ${siteLink(s, "bill")}\nThank you! Visit again.`
         : billText(b, s);
-      const url = `https://wa.me/91${num}?text=${encodeURIComponent(msg)}`;
-      if (win && !win.closed) win.location.href = url; else location.href = url;
-      if (!link) U.toast(navigator.onLine ? "Sent as text — the PDF link needs your shop to be synced" : "No internet — sent the bill as text");
+      U.openWhatsApp(num, msg);
+      if (!link) U.toast("Sent as text — log in so bills go out as PDF links");
       return link ? "link" : "text";
     }
     if (!window.jspdf) { U.toast("PDF needs the internet once"); return "none"; }
@@ -969,6 +1108,7 @@
     const link = (k, v) => { const p = new URLSearchParams(params); p.set(k, v); return `#/biz/reports?${p}`; };
     U.app.innerHTML = `
       ${bizTop("Reports")}
+      <a class="rsec sitecard" href="#/biz/site"><span>${ic("store")}</span><div><b>Your shop's website</b><em>Share it, print the QR poster, add it to Google Maps · see visits</em></div>${ic("arrow")}</a>
 
       <div class="rsec"><div class="rhd"><b>Sales</b><a class="link" href="#/biz/bills">All bills</a></div>
         <div class="salesrows">${rows.map(([label, a, b, word]) => `<div class="srow">
@@ -1122,5 +1262,5 @@
   }
 
   U.ROUTES.biz = biz;
-  Object.assign(U, { makeBillPdf, sendBill });
+  Object.assign(U, { makeBillPdf, sendBill, posterPdf });
 })();

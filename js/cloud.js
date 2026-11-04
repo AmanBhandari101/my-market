@@ -50,6 +50,11 @@
       // our own catalogue product gets the photo too (ignored if it isn't ours)
       if (!r.error && op.productId) await sb.from("catalog_products").update({ photo_path: path }).eq("id", op.productId).is("photo_path", null);
     }
+    else if (op.op === "billpdf") {
+      const blob = await (await fetch(op.dataUrl)).blob();
+      r = await sb.storage.from("bills").upload(op.path, blob, { contentType: "application/pdf", upsert: false });
+      if (r.error && /exist|duplicate/i.test(r.error.message || "")) r = { error: null }; // sent before
+    }
     if (r && r.error) throw r.error;
   }
   // A database answer (has a code / status) is permanent; a thrown fetch error is a network problem.
@@ -185,9 +190,31 @@
     if (error) throw error;
     return new URL("bill.html", location.href).href.split("#")[0] + "#" + path;
   }
+  // The link is decided first, so WhatsApp can open at once (inside the tap);
+  // the PDF goes up through the queue a moment later and is retried until it's there.
+  function billLink(shopId, billId) {
+    const rand = [...crypto.getRandomValues(new Uint8Array(9))].map((x) => x.toString(36).padStart(2, "0")).join("").slice(0, 14);
+    const path = `${shopId}/${billId}-${rand}.pdf`;
+    return { path, link: new URL("bill.html", location.href).href.split("#")[0] + "#" + path };
+  }
   const billFileUrl = (path) => `${C.supabaseUrl}/storage/v1/object/public/bills/${path}`;
 
-  window.MM_CLOUD = { ready: true, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, sb, enqueue, flush, status, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
+  // ---------- shop website visits ----------
+  const SRCS = ["app", "qr", "bill", "share", "gmaps", "link", "search"];
+  function logVisit(shopId, kind, src) {
+    if (!/^[0-9a-f-]{36}$/.test(shopId)) return;
+    sb.from("shop_visits").insert({ shop_id: shopId, kind, src: SRCS.includes(src) ? src : "link" })
+      .then(({ error }) => error && console.warn("[MM cloud] visit not logged", error.message));
+  }
+  async function visitsSummary(shopId, days = 7) {
+    const { data, error } = await sb.rpc("shop_visits_summary", { p_shop: shopId, p_days: days });
+    if (error) throw new Error(friendly(error));
+    return data || [];
+  }
+  // the shop's public web page (customer app), with where the link was used
+  const shopLink = (shopId, src) => new URL("index.html", location.href).href.split("#")[0] + `#/shop/${shopId}${src ? `?src=${src}` : ""}`;
+
+  window.MM_CLOUD = { ready: true, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, sb, enqueue, flush, status, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
     pending: () => Q.get().length, failedOps: () => Q.failed() };
 
   // start-up
@@ -208,6 +235,7 @@
         pullShop().then(() => location.reload()).catch(() => {});
     });
   } else {
-    loadPublic().then((n) => { if (n && window.MM_UI) window.MM_UI.route(); }).catch(() => {});
+    loadPublic().then((n) => { window.MM_CLOUD.publicDone = true; if (window.MM_UI) window.MM_UI.route(); })
+      .catch(() => { window.MM_CLOUD.publicDone = true; if (window.MM_UI) window.MM_UI.route(); });
   }
 })();

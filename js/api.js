@@ -866,6 +866,10 @@ window.MM_API = (function () {
     }
     return n;
   }
+  function setBillLink(id, link) {
+    const all = store.get("bills", []); const b = all.find((x) => x.id === id);
+    if (b) { b.pdfLink = link; store.set("bills", all); }
+  }
   const billsFor = (shopId) => store.get("bills", []).filter((b) => b.shopId === shopId);
   const getBill = (id) => store.get("bills", []).find((b) => b.id === id);
   // Today's money: sales by payment type and profit (where the cost is known).
@@ -915,7 +919,7 @@ window.MM_API = (function () {
     RANGES, getRange, setRange, trip, fmtTrip, nearArea, nearSearch, marketFor,
     REASONS, moveStock, stockLog, inventory, lowAt,
     billTotals, saveBill, cancelBill, billsFor, getBill, daySummary,
-    registerShop, login, updateShop, normPhone, addOwnItem, savePurchase, purchasesFor, hydrateShop, mergePublic, uuid, shopHas, saveDetails, productDetails, addPhoto, getShop, getMarket, isOpen, itemStatus,
+    registerShop, login, updateShop, normPhone, addOwnItem, savePurchase, purchasesFor, hydrateShop, mergePublic, uuid, shopHas, saveDetails, productDetails, addPhoto, setBillLink, getShop, getMarket, isOpen, itemStatus,
     search, ask, getAsk, replyAsk, pendingAsks, feedback, logSearch, addView,
     ownerShopId, ownerShop, isOwnerShop, claimShop, releaseShop, addShop, persistAddedShop, setItem, addItem, catalogFor, missedSales,
     getBag, addToBag, setQty, bagCount, bagLines, STEPS, placeOrder, getOrders, getOrder, advanceOrder, cancelOrder, ordersFor,

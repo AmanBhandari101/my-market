@@ -365,3 +365,32 @@ details.more label { margin-top: 10px; display: grid; gap: 6px; }
 textarea.field { resize: vertical; font-family: var(--sans); font-size: 15px; line-height: 1.4; }
 .feat { margin: 0; padding-left: 20px; line-height: 1.6; }
 .feat li { margin: 2px 0; }
+
+/* ---------- shop website page ---------- */
+.site-logo { width: 54px; height: 54px; border-radius: 12px; background: var(--c); color: #fff; display: grid; place-items: center; font-size: 26px; font-weight: 700; margin-bottom: 10px; }
+.site-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 14px var(--gut) 0; }
+.site-actions > * { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 4px; border-radius: var(--r); background: #fff; border: 1px solid var(--line); font-size: 12.5px; font-weight: 600; color: var(--ink); cursor: pointer; }
+.site-actions .i { width: 22px; height: 22px; color: var(--teal); }
+.site-actions #wa .i { color: #1e8e4e; }
+.site-promo { display: flex; gap: 10px; align-items: center; margin: 12px var(--gut) 0; padding: 12px; border-radius: var(--r); background: #fff3df; border: 1px solid #ffa41c; color: #703f00; font-weight: 600; }
+.site-promo b { flex: none; width: 28px; height: 28px; border-radius: 50%; background: #ffa41c; color: #fff; display: grid; place-items: center; }
+.site-about { display: grid; gap: 10px; }
+.site-about > div { display: grid; gap: 2px; }
+.site-about span { font-size: 12px; color: var(--ink-2); }
+.site-about b { font-size: 14.5px; font-weight: 600; }
+.site-about em { font-style: normal; font-size: 13px; color: var(--ink-2); }
+.site-foot { display: flex; align-items: center; gap: 10px; margin: 24px var(--gut) 30px; padding: 14px; border-radius: var(--r); background: var(--nav); color: #fff; }
+.site-foot img { width: 34px; height: 34px; border-radius: 8px; }
+.site-foot div { flex: 1; display: grid; }
+.site-foot span { font-size: 12px; color: #c9d4de; }
+.site-foot .btn { height: 38px; padding: 0 14px; font-size: 13px; }
+/* shop app: My website */
+.linkbox { display: flex; gap: 8px; }
+.linkbox .field { flex: 1; min-width: 0; font-size: 13px; }
+.qrbox { display: grid; justify-items: center; gap: 6px; padding: 10px; border: 1px dashed #c9cfcf; border-radius: var(--r); }
+.gsteps { margin: 0; padding-left: 20px; line-height: 1.55; font-size: 14px; }
+.gsteps li { margin: 6px 0; }
+a.sitecard { display: flex; align-items: center; gap: 12px; color: var(--ink); background: #eaf6ee; border-color: #bfe3cb; }
+a.sitecard > span .i { width: 26px; height: 26px; color: #17733f; }
+a.sitecard div { flex: 1; display: grid; }
+a.sitecard em { font-style: normal; font-size: 12.5px; color: var(--ink-2); }

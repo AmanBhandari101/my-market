@@ -31,11 +31,22 @@
       c.innerHTML = "<h1>Bill not found</h1><p>This link looks incomplete. Ask the shop to send it again.</p>";
     } else {
       var url = MM_CONFIG.supabaseUrl + "/storage/v1/object/public/bills/" + path;
-      c.innerHTML = '<div style="font-size:40px">🧾</div><h1>Your bill is ready</h1><p>Thank you for shopping. Open it below, or save it to your phone.</p>' +
+      var show = function () { c.innerHTML = '<div style="font-size:40px">🧾</div><h1>Your bill is ready</h1><p>Thank you for shopping. Open it below, or save it to your phone.</p>' +
         '<a class="btn" href="' + url + '">Open bill (PDF)</a>' +
         '<a class="btn line" href="' + url + '?download=bill.pdf">Download</a>' +
+        '<a class="btn line" href="./#/shop/' + path.split("/")[0] + '?src=bill">See this shop\'s stock and prices</a>' +
         '<a class="btn line" href="./">Find more shops near you on My Market</a>' +
-        '<small>Sent by the shop through My Market.</small>';
+        '<small>Sent by the shop through My Market.</small>'; };
+      // the shop's phone sends the PDF a moment after the message — wait for it
+      var tries = 0;
+      var check = function () {
+        fetch(url, { method: "HEAD", cache: "no-store" }).then(function (r) {
+          if (r.ok) return show();
+          if (++tries < 10) { c.innerHTML = '<div style="font-size:40px">⏳</div><h1>Your bill is on its way</h1><p>The shop is sending it — this page opens it as soon as it arrives.</p>'; setTimeout(check, 3000); }
+          else c.innerHTML = '<h1>Bill not here yet</h1><p>The shop\'s phone may be offline. Open this link again a little later.</p><a class="btn line" href="./">Find shops near you on My Market</a>';
+        }).catch(function () { show(); });
+      };
+      check();
     }
   </script>
 </body>

@@ -55,7 +55,7 @@
   const go = (h) => { location.hash = h; };
   const fmtHour = (h) => (h % 12 || 12) + (h < 12 ? " am" : " pm");
   const rupee = (p) => "₹" + p.toLocaleString("en-IN");
-  const dist = (s) => A.fmtDist(A.distKm(loc, s));
+  const dist = (s) => (loc ? A.fmtDist(A.distKm(loc, s)) : "");
   const away = (km) => `${A.fmtDist(km)} · ${A.fmtTrip(km)}`;
   const stWord = (st) => (st.few ? "Only a few left" : statusWord[st.key]);
   // Walking / Short ride / Whole city: caps how far "near me" looks.
@@ -103,11 +103,27 @@
   const shopPopup = (s) => `<div class="pop"><div class="serif">${esc(s.name)}</div><div class="tiny">${esc(C[s.cat].name)} · ${dist(s)}</div>
     <div class="btn-row"><a class="link" href="#/shop/${s.id}">View</a><a class="link accent" href="#/route/${s.id}">Directions</a></div></div>`;
 
+  // Open WhatsApp on a chat (10-digit Indian number) or the "send to…" list (no number).
+  // Must be called straight from a tap. On Android we open the WhatsApp app itself
+  // (works for WhatsApp and WhatsApp Business); the wa.me web page is only a fallback
+  // if the app doesn't open — that page is what asked people to download WhatsApp.
+  function openWhatsApp(num, text) {
+    const enc = encodeURIComponent(text);
+    const web = `https://wa.me/${num ? "91" + num : ""}?text=${enc}`;
+    if (/Android/i.test(navigator.userAgent)) {
+      let left = false;
+      const gone = () => { if (document.visibilityState === "hidden") left = true; };
+      document.addEventListener("visibilitychange", gone);
+      window.addEventListener("blur", () => { left = true; }, { once: true });
+      location.href = `whatsapp://send?${num ? `phone=91${num}&` : ""}text=${enc}`;
+      setTimeout(() => { document.removeEventListener("visibilitychange", gone); if (!left) location.href = web; }, 2000);
+    } else window.open(web, "_blank", "noopener");
+  }
   // Open a WhatsApp chat with the shop (its registered number).
   function waShop(s, text) {
     const d = String(s.phone || "").replace(/\D/g, "").slice(-10);
     if (d.length !== 10) return toast("This shop hasn't added a WhatsApp number");
-    window.open(`https://wa.me/91${d}?text=${encodeURIComponent(text)}`, "_blank", "noopener");
+    openWhatsApp(d, text);
   }
 
   // ---------- shared pieces ----------
@@ -275,60 +291,108 @@
     sync();
   }
 
+  // ---------- a shop's own website page ----------
+  // Opens from search, from a shared link, the QR poster, a bill or Google Maps
+  // (?src=…), even without the visitor's location. Visits are counted for the shop.
+  const visitSrc = {};
   function shopView(id, params) {
     const s = A.getShop(id);
-    if (!s) { app.innerHTML = '<div class="empty"><div class="serif">This shop isn\'t here.</div><p><a class="link" href="#/">Back</a></p></div>'; return; }
+    if (!s) {
+      const loading = window.MM_CLOUD && !window.MM_CLOUD.publicDone;
+      app.innerHTML = loading ? '<div class="empty"><div class="serif">Opening the shop…</div></div>'
+        : '<div class="empty"><div class="serif">This shop isn\'t on My Market (any more).</div><p><a class="link" href="#/">Find shops near you</a></p></div>';
+      return;
+    }
     const m = A.getMarket(s.marketId);
     const isSaved = saved.includes(id);
     const hl = params.get("item");
+    const src = params.get("src") || visitSrc[id] || "app";
+    visitSrc[id] = src;
     A.addView(id);
+    // count one view per shop per half hour on this phone
+    try {
+      const k = "mm.v." + id, last = +sessionStorage.getItem(k) || 0;
+      if (Date.now() - last > 30 * 60000) { sessionStorage.setItem(k, Date.now()); window.MM_CLOUD?.logVisit(id, "view", src); }
+    } catch {}
+    const tap = (kind) => window.MM_CLOUD?.logVisit(id, kind, src);
     const open = A.isOpen(s);
+    const cats = [...new Set(s.items.map((it) => it.cat))];
+    const phone = String(s.phone || "").replace(/\D/g, "").slice(-10);
+    const where = [s.shopNo && s.shopNo !== "—" ? `Shop ${s.shopNo}` : "", s.floor && s.floor !== "Ground floor" ? s.floor : "", m?.name, [s.locality || m?.locality, s.pincode || m?.pincode].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+    const gmaps = `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}`;
+    const hours = `${fmtHour(s.open)} – ${fmtHour(s.close)}${s.closedDay && s.closedDay !== "None" ? ` · closed ${s.closedDay}` : " · open all week"}`;
     app.innerHTML = `
       <div class="shop-band" style="${catVars(s.cat)}">
       <div class="shop-top">
         <button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button>
         <div class="btn-row" style="gap:10px">
+          <button class="iconbtn" id="share" aria-label="Share this shop">${ic("arrow")}</button>
           <button class="iconbtn" id="save" aria-label="Save" style="${isSaved ? "color:var(--terracotta)" : ""}">${ic(isSaved ? "heartF" : "heart")}</button>
-          ${bagBtn()}
         </div>
       </div>
       <div class="shop-head">
-        <div class="eyebrow">${esc(C[s.cat].name)} · ${esc(m.name)}</div>
+        <div class="site-logo" style="${catVars(s.cat)}">${esc(s.name[0])}</div>
+        <div class="eyebrow">${esc(C[s.cat].name)}${m ? ` · ${esc(m.name)}` : ""}</div>
         <h1 class="title">${esc(s.name)}</h1>
         <div class="facts">
           <span class="pill ${open ? "open" : "closed"}">${openWord(s)}</span>
-          ${s.rating ? `<span class="pill star">★ ${s.rating}</span>` : '<span class="pill star">New</span>'}
-          <span class="pill">${away(A.distKm(loc, s))}</span>
+          ${loc ? `<span class="pill">${away(A.distKm(loc, s))}</span>` : ""}
           ${s.verified ? '<span class="pill">✓ Verified</span>' : ""}
+          <span class="pill">${s.items.length} item${s.items.length === 1 ? "" : "s"}</span>
         </div>
       </div>
       </div>
-      <div class="shop-actions">
-        <a class="btn" href="#/route/${s.id}">Directions</a>
-        <button class="link" id="msg">WhatsApp</button>
+      <div class="site-actions">
+        <button id="wa">${ic("chat")}WhatsApp</button>
+        ${phone ? `<a id="call" href="tel:+91${phone}">${ic("user")}Call</a>` : ""}
+        <a id="dir" href="${loc ? `#/route/${s.id}` : gmaps}" ${loc ? "" : 'target="_blank" rel="noopener"'}>${ic("pin")}Directions</a>
+        <button id="share2">${ic("arrow")}Share</button>
       </div>
-      <div class="reach"><div class="eyebrow">How to reach</div>${reachSteps(s)}</div>
+      ${s.promo ? `<div class="site-promo"><b>%</b><span>${esc(s.promo)}</span></div>` : ""}
       <div class="block">
-        <div class="eyebrow"><span>In this shop · ${s.items.length}</span></div>
+        <div class="eyebrow"><span>Items · ${s.items.length}</span></div>
         <div class="inshop">${ic("search")}<input id="ishop" placeholder="Find in this shop" autocomplete="off"></div>
-        <div class="pgrid">${s.items.map((it) => productCard(s, it, it.id === hl)).join("") || '<p class="quiet">This shop hasn\'t listed items yet.</p>'}</div>
+        ${cats.length > 1 ? `<div class="words" id="scats" style="margin:8px 0 4px"><button class="word on" data-sc="">All</button>${cats.map((c) => `<button class="word" data-sc="${c}">${esc(C[c]?.name || c)}</button>`).join("")}</div>` : ""}
+        <div class="pgrid">${s.items.map((it) => productCard(s, it, it.id === hl)).join("") || '<p class="quiet">This shop hasn\'t listed items yet — WhatsApp them to ask.</p>'}</div>
       </div>
-      <div class="ask-line"><p>Not what you need?</p><button class="link" id="askshop">Ask this shop</button></div>`;
+      <div class="block"><div class="eyebrow"><span>About the shop</span></div>
+        <div class="site-about">
+          <div><span>Address</span><b>${esc(where || "—")}</b>${s.landmark ? `<em>${esc(s.landmark)}</em>` : ""}</div>
+          <div><span>Hours</span><b>${esc(hours)}</b></div>
+          ${phone ? `<div><span>Phone / WhatsApp</span><b>+91 ${phone.slice(0, 5)} ${phone.slice(5)}</b></div>` : ""}
+        </div>
+        <div class="map" id="smap" style="margin:12px 0 0;height:200px;min-height:0"></div>
+        <a class="link" href="${gmaps}" target="_blank" rel="noopener" style="display:inline-block;margin-top:8px">Open in Google Maps</a>
+      </div>
+      <div class="site-foot">
+        <img src="icons/icon-192.png" alt=""><div><b>Powered by My Market</b><span>Live stock and prices from shops near you</span></div>
+        <a class="btn auto" href="#/">Find more shops</a>
+      </div>`;
     $("#back").onclick = () => (history.length > 1 ? history.back() : go("#/"));
     $("#save").onclick = () => {
       saved = isSaved ? saved.filter((x) => x !== id) : [id, ...saved]; A.store.set("saved", saved);
       toast(isSaved ? "Removed from saved" : "Saved"); shopView(id, params);
     };
-    $("#msg").onclick = () => waShop(s, `Hi ${s.name}, I found your shop on My Market.`);
-    $("#askshop").onclick = () => waShop(s, `Hi ${s.name}, do you have `);
-    $("#ishop").addEventListener("input", (e) => {
-      const q = e.target.value.trim().toLowerCase();
-      $$("[data-item]").forEach((b) => {
-        const it = s.items.find((x) => x.id === b.dataset.item);
-        b.classList.toggle("hidden", !!q && !`${it.name} ${it.brand}`.toLowerCase().includes(q));
-      });
+    $("#wa").onclick = () => { tap("whatsapp"); waShop(s, `Hi ${s.name}, I found your shop on My Market.`); };
+    $("#call") && $("#call").addEventListener("click", () => tap("call"));
+    $("#dir").addEventListener("click", () => tap("directions"));
+    const share = async () => {
+      tap("share");
+      const url = window.MM_CLOUD ? window.MM_CLOUD.shopLink(s.id, "share") : location.href;
+      const text = `${s.name} — see their stock and prices on My Market`;
+      try { if (navigator.share) return await navigator.share({ title: s.name, text, url }); } catch (x) { if (x.name === "AbortError") return; }
+      try { await navigator.clipboard.writeText(url); toast("Link copied"); } catch { prompt("Copy this link", url); }
+    };
+    $("#share").onclick = share; $("#share2").onclick = share;
+    let catF = "", q = "";
+    const filter = () => $$("[data-item]").forEach((b) => {
+      const it = s.items.find((x) => x.id === b.dataset.item);
+      b.classList.toggle("hidden", (!!q && !`${it.name} ${it.brand}`.toLowerCase().includes(q)) || (!!catF && it.cat !== catF));
     });
+    $("#ishop").addEventListener("input", (e) => { q = e.target.value.trim().toLowerCase(); filter(); });
+    $$("[data-sc]").forEach((b) => b.onclick = () => { catF = b.dataset.sc; $$("[data-sc]").forEach((x) => x.classList.toggle("on", x === b)); filter(); });
     bindAdd(app);
+    try { const map = newMap("smap"); map.setView([s.lat, s.lng], 16); L.marker([s.lat, s.lng], { icon: dotIcon("best", s) }).addTo(map); } catch {}
     if (hl) setTimeout(() => $(`#it-${hl}`)?.scrollIntoView({ block: "center" }), 60);
   }
 
@@ -626,7 +690,7 @@
   // ---------- bottom tabs (customer screens only) ----------
   const TAB_ON = { "": "home", shop: "home", item: "home", search: "search", ask: "search", me: "me", orders: "me", order: "me", bag: "bag" };
   // Shop app: three pages — Bill (home), Stock, Reports.
-  const BIZ_ON = { "": "bill", bill: "bill", inbox: "bill", items: "stock", stockin: "stock", reports: "reports", bills: "reports", insights: "reports" };
+  const BIZ_ON = { "": "bill", bill: "bill", inbox: "bill", items: "stock", stockin: "stock", reports: "reports", bills: "reports", insights: "reports", site: "reports" };
   function syncTabs(r, parts = []) {
     const nav = $("#tabs"); if (!nav) return;
     if (BIZ) {
@@ -665,7 +729,7 @@
       if (!loc) loc = PILOT_ORIG;
       if (parts[0] !== "biz") { go("#/biz"); return; }
     } else if (parts[0] === "biz") { location.replace("business.html" + location.hash); return; }
-    if (!loc && parts[0] !== "welcome") { go("#/welcome"); return; }
+    if (!loc && !["welcome", "shop", "item"].includes(parts[0])) { go("#/welcome"); return; }
     if (loc && parts[0] === "welcome") { go("#/"); return; }
     const fn = ROUTES[parts[0] || ""] || home;
     fn(parts, params);
@@ -679,7 +743,7 @@
     ask: (p, q) => askView(q.get("q"), q.get("id")), route: (p) => routeView(p[1]),
   };
   window.MM_UI = {
-    BIZ, A, C, $, $$, app, esc, ic, toast, openSheet, closeSheet, go, rupee, dist, away, openWord, statusWord, stWord, catVars, mono, reverseName, stars, amt,
+    BIZ, A, C, $, $$, app, esc, ic, toast, fmtHour, openWhatsApp, openSheet, closeSheet, go, rupee, dist, away, openWord, statusWord, stWord, catVars, mono, reverseName, stars, amt,
     newMap, meIcon, dotIcon, shopPopup, reachSteps, shopEntry, productCard, priceLine, pimg, art, off, bindAdd, bagBtn, refreshBag, orderEntry,
     loc: () => loc, addCleanup: (f) => cleanups.push(f), ROUTES, route,
   };

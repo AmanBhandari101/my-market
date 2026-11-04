@@ -11,7 +11,7 @@
     const loc = U.loc();
     const st = A.itemStatus(it);
     const m = A.getMarket(s.marketId);
-    const other = A.elsewhere(it, s.id, loc);
+    const other = loc ? A.elsewhere(it, s.id, loc) : [];
     let qty = 1;
     const o = U.off(it);
     U.app.innerHTML = `
@@ -38,7 +38,7 @@
 
       <div class="pad" style="margin-top:20px;display:grid;gap:10px">
         <button class="btn" id="wa">Ask the shop on WhatsApp</button>
-        <a class="btn line" href="#/route/${s.id}">Directions</a>
+        <a class="btn line" href="${loc ? `#/route/${s.id}` : `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}`}" ${loc ? "" : 'target="_blank" rel="noopener"'}>Directions</a>
       </div>
 
       ${other.length ? `<div class="block"><div class="eyebrow"><span>Also at</span><span class="faint">compare</span></div><div class="entries">
@@ -64,7 +64,7 @@
     $("#wa").onclick = () => {
       const d = String(s.phone || "").replace(/\D/g, "").slice(-10);
       if (d.length !== 10) return U.toast("This shop hasn't added a WhatsApp number");
-      window.open(`https://wa.me/91${d}?text=${encodeURIComponent(`Hi ${s.name}, I saw ${it.name}${it.price ? ` (${rupee(it.price)})` : ""} on My Market. Is it available?`)}`, "_blank", "noopener");
+      U.openWhatsApp(d, `Hi ${s.name}, I saw ${it.name}${it.price ? ` (${rupee(it.price)})` : ""} on My Market. Is it available?`);
     };
   }
 
