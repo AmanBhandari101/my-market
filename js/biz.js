@@ -141,13 +141,16 @@
       if (f.backup.trim() && A.normPhone(f.backup) === A.normPhone(f.phone)) return err("The backup number must be a different number");
       const p = pin.getLatLng();
       e.submitter && (e.submitter.disabled = true, e.submitter.textContent = "Creating your shop…");
-      // pincode + locality for the address; give up after 4 s (works offline too)
-      const addr = await Promise.race([U.reverseName(p.lat, p.lng), new Promise((r) => setTimeout(() => r({}), 4000))]);
+      const step = (m) => { if (e.submitter) e.submitter.textContent = m; };
+      step("Finding your address…");
+      // pincode + locality for the address; give up after 3 s (works offline too)
+      const addr = await Promise.race([U.reverseName(p.lat, p.lng), new Promise((r) => setTimeout(() => r({}), 3000))]);
       let shop;
       try {
-        shop = await A.registerShop({ ...f, name: f.name.trim(), owner: f.owner.trim(), promo: f.promo.trim(), gst: f.gst.trim().toUpperCase(), cat }, { lat: p.lat, lng: p.lng }, addr, { phone: f.phone, pin: f.pin, backup: f.backup.trim() });
+        shop = await A.registerShop({ ...f, name: f.name.trim(), owner: f.owner.trim(), promo: f.promo.trim(), gst: f.gst.trim().toUpperCase(), cat }, { lat: p.lat, lng: p.lng }, addr, { phone: f.phone, pin: f.pin, backup: f.backup.trim(), step });
       } catch (x) { return err(x.message); }
-      U.toast(shop.backupError ? `Shop registered — but the backup number wasn't added: ${shop.backupError}. Add it in ☰ → Login & security.` : shop.backupAdded ? "Shop registered — backup number added" : "Shop registered — you're logged in");
+      U.toast(shop.backupError ? `Shop registered — but the backup number wasn't added: ${shop.backupError}. Add it in ☰ → Login & security.`
+        : shop.slowSync ? "Shop registered — the internet is slow, so it finishes uploading in the background" : shop.backupAdded ? "Shop registered — backup number added" : "Shop registered — you're logged in", 6000);
       U.go("#/biz/items?setup=1");
     };
   }

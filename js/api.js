@@ -583,7 +583,9 @@ window.MM_API = (function () {
     if (phone && normPhone(phone).endsWith(pin)) return "Don't use the end of your mobile number as your PIN";
     return "";
   }
-  async function registerShop(f, loc, addr, { phone, pin, backup = "" }) {
+  // a server step that never answers must not leave "Creating your shop…" on screen forever
+  const within = (p, ms, msg) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error(msg)), ms))]);
+  async function registerShop(f, loc, addr, { phone, pin, backup = "", step = () => {} }) {
     const ph = normPhone(phone), bk = normPhone(backup);
     if (ph.length !== 10) throw new Error("Enter a 10-digit mobile number");
     const weak = weakPin(pin, ph); if (weak) throw new Error(weak);
@@ -591,17 +593,27 @@ window.MM_API = (function () {
     if (bk && bk === ph) throw new Error("The backup number must be a different number");
     if (cloudOn()) {
       // server account first: if the number is taken, nothing is created here
-      const uid = await window.MM_CLOUD.signUp(ph, pin);
+      step("Checking your number…");
+      const uid = await within(window.MM_CLOUD.signUp(ph, pin), 25000, "The server didn't answer in 25 seconds. Check your internet and try again");
       const shop = addShop({ ...f, phone: `+91 ${ph.slice(0, 5)} ${ph.slice(5)}` }, loc, addr);
       shop.cloud = true; persistAddedShop(shop);
       if (shop.market) q(shop.id, { op: "insert", table: "markets", row: marketRow(shop.market) });
       q(shop.id, { op: "insert", table: "shops", row: shopRow(shop, uid) });
-      await window.MM_CLOUD.flush();
+      // from here the shop exists on this phone: a slow step only delays the upload, it keeps trying by itself
+      const t0 = Date.now(), slow = [];
+      step("Saving your shop…");
+      try { await within(window.MM_CLOUD.flush(), 20000, "save"); } catch { slow.push("save"); }
       store.set("lastPull", Date.now());
-      await window.MM_CLOUD.topUpBillNos(shop.id);
+      step("Getting bill numbers…");
+      try { await within(window.MM_CLOUD.topUpBillNos(shop.id), 15000, "billnos"); } catch { slow.push("billnos"); }
       // the backup number can open the same shop if this phone or SIM is lost
-      if (bk) { try { await window.MM_CLOUD.addLoginNumber(shop.id, bk, pin); shop.backupAdded = bk; }
-                catch (x) { shop.backupError = x.message; } }
+      if (bk) {
+        step("Adding the backup number…");
+        try { await within(window.MM_CLOUD.addLoginNumber(shop.id, bk, pin), 20000, "The server was too slow"); shop.backupAdded = bk; }
+        catch (x) { shop.backupError = x.message; }
+      }
+      if (slow.length) shop.slowSync = true;
+      console.info("[MM] register steps took", Date.now() - t0, "ms", slow.length ? "slow: " + slow.join(", ") : "");
       return shop;
     }
     if (accountFor(ph)) throw new Error("This number already has a shop — log in instead");

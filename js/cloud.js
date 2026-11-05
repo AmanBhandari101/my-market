@@ -84,8 +84,11 @@
       for (;;) {
         const o = Q.get(); if (!o.length) break;
         const op = o[0];
-        try { await run(op); lastError = ""; }
+        // a request that hangs on weak mobile data must not freeze the queue: give up after 30 s and
+        // try again on the next round (inserts and updates are safe to send twice)
+        try { await Promise.race([run(op), new Promise((_, no) => setTimeout(() => no(new Error("timeout")), 30000))]); lastError = ""; }
         catch (e) {
+          if (e && e.message === "timeout") { lastError = "Slow internet — will retry"; break; }
           if (isNetwork(e)) { online = false; lastError = "No internet"; break; }
           lastError = e.message || String(e);
           console.warn("[MM sync] not saved:", op, e);
