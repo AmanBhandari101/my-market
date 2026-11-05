@@ -38,7 +38,7 @@
         </div>
       </div>
       <div class="block" id="login"><div class="eyebrow"><span>Log in to your shop</span></div>
-        <form class="form" id="lf" style="margin-top:0">
+        <form class="form" id="lf" style="margin-top:0" novalidate>
           <label>Mobile number<input class="field" name="phone" inputmode="tel" autocomplete="username" placeholder="98765 43210" required></label>
           <label>6-digit PIN<input class="field" name="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="6" placeholder="••••••" required></label>
           <p class="small" id="lerr" style="color:var(--out);margin:0;min-height:1em"></p>
@@ -60,6 +60,9 @@
     $("#lf").onsubmit = async (e) => {
       e.preventDefault();
       const f = Object.fromEntries(new FormData(e.target));
+      const bad = (n, m) => U.badField(e.target, n, m, "#lerr");
+      if (A.normPhone(f.phone).length !== 10) return bad("phone", "Enter your 10-digit mobile number");
+      if (!/^\d{6}$/.test(f.pin)) return bad("pin", "Enter your 6-digit PIN");
       const btn = e.target.querySelector("[type=submit]"); btn.disabled = true; btn.textContent = "Logging in…";
       const r = await A.login(f.phone, f.pin);
       btn.disabled = false; btn.textContent = "Log in";
@@ -67,7 +70,7 @@
       if (r.reload) { location.hash = "#/biz"; location.reload(); return; }
       U.toast("Welcome back"); U.go("#/biz");
     };
-    $$("#lf input").forEach((i) => i.addEventListener("input", () => { $("#lerr").textContent = ""; }));
+    $$("#lf input").forEach((i) => i.addEventListener("input", () => { $("#lerr").textContent = ""; i.classList.remove("bad"); }));
     $("#lhelp").onclick = () => U.openSheet(`<div class="eyebrow">Can't get in?</div><div class="title">Getting back into your shop</div>
       <div class="help">
         <div><b>Lost your phone or SIM?</b><p>Your shop is safe on the server. On any phone, log in with your <b>main number</b> or your <b>backup number</b> and your PIN. Then open ☰ → <b>Login & security</b> → <b>Log out all other devices</b>, so the lost phone can't open your shop.</p></div>
@@ -82,7 +85,7 @@
     U.app.innerHTML = `
       <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button><span class="eyebrow faint">About 2 minutes</span></div>
       <div class="pad" style="margin-top:22px"><div class="eyebrow">Add your shop</div><h1 class="title" style="margin-top:8px">Tell customers where you are.</h1></div>
-      <form id="f" class="pad form">
+      <form id="f" class="pad form" novalidate>
         <label>Shop name<input class="field" name="name" required maxlength="80" placeholder="e.g. Sharma Hardware"></label>
         <label>Your name<input class="field" name="owner" required maxlength="60" placeholder="e.g. Ramesh Sharma"></label>
         <label>Mobile number <span class="faint tiny">— your login, and the shop's WhatsApp for bills</span><input class="field" name="phone" inputmode="tel" autocomplete="username" required placeholder="98765 43210"></label>
@@ -109,6 +112,7 @@
         <p class="faint tiny" style="text-align:center;margin:6px 0 40px">${window.MM_CLOUD ? "Your shop is saved on the My Market server — log in from any phone with your number and PIN. Needs internet to register." : "Demo — your shop and login are saved on this device only."}</p>
       </form>`;
     $("#back").onclick = () => history.back();
+    $$("#f .field").forEach((i) => i.addEventListener("input", () => { i.classList.remove("bad"); $("#ferr").textContent = ""; }));
     $$("#cats [data-cat]").forEach((b) => b.onclick = () => { cat = b.dataset.cat; $$("#cats .word").forEach((x) => x.classList.toggle("on", x === b)); });
     const map = U.newMap("pinmap");
     map.setView([loc.lat, loc.lng], 17);
@@ -132,13 +136,20 @@
     $("#f").onsubmit = async (e) => {
       e.preventDefault();
       const f = Object.fromEntries(new FormData(e.target));
-      const err = (m) => { $("#ferr").textContent = m; e.submitter && (e.submitter.disabled = false, e.submitter.textContent = "Create my shop"); };
-      if (!f.name.trim()) return err("Enter your shop's name");
-      if (A.normPhone(f.phone).length !== 10) return err("Enter a 10-digit mobile number");
-      const weak = A.weakPin(f.pin, f.phone); if (weak) return err(weak);
-      if (f.pin !== f.pin2) return err("The two PINs don't match");
-      if (f.backup.trim() && A.normPhone(f.backup).length !== 10) return err("Backup number must be 10 digits");
-      if (f.backup.trim() && A.normPhone(f.backup) === A.normPhone(f.phone)) return err("The backup number must be a different number");
+      const sub = e.submitter || e.target.querySelector("[type=submit]");
+      const err = (m) => { $("#ferr").textContent = m; U.toast(m, 5000); if (sub) { sub.disabled = false; sub.textContent = "Create my shop"; } };
+      const bad = (n, m) => { if (sub) { sub.disabled = false; sub.textContent = "Create my shop"; } return U.badField(e.target, n, m, "#ferr"); };
+      if (!f.name.trim()) return bad("name", "Enter your shop's name");
+      if (!f.owner.trim()) return bad("owner", "Enter your name");
+      if (!f.phone.trim()) return bad("phone", "Enter your mobile number");
+      if (A.normPhone(f.phone).length !== 10) return bad("phone", "Mobile number must be 10 digits");
+      if (!f.pin) return bad("pin", "Create a 6-digit PIN");
+      const weak = A.weakPin(f.pin, f.phone); if (weak) return bad("pin", weak);
+      if (!f.pin2) return bad("pin2", "Type the same PIN again in Repeat PIN");
+      if (f.pin !== f.pin2) return bad("pin2", "The two PINs don't match — type them again");
+      if (f.backup.trim() && A.normPhone(f.backup).length !== 10) return bad("backup", "Backup number must be 10 digits (or leave it empty)");
+      if (f.backup.trim() && A.normPhone(f.backup) === A.normPhone(f.phone)) return bad("backup", "The backup number must be a different number");
+      if (f.gst.trim() && !/^[0-9]{2}[A-Z0-9]{13}$/i.test(f.gst.trim())) return bad("gst", "GSTIN must be 15 letters and numbers (or leave it empty)");
       const p = pin.getLatLng();
       e.submitter && (e.submitter.disabled = true, e.submitter.textContent = "Creating your shop…");
       const step = (m) => { if (e.submitter) e.submitter.textContent = m; };

@@ -1004,8 +1004,18 @@
     shop: (p, q) => shopView(p[1], q), search: (p, q) => searchView(q.get("q") || ""),
     ask: (p, q) => askView(q.get("q"), q.get("id")), route: (p) => routeView(p[1]),
   };
+  // a form field that needs fixing: red outline, scrolled into view, focused, and the message shown
+  // under the button and as a toast (browsers' own "required" bubbles don't show in installed apps)
+  function badField(form, name, msg, errSel) {
+    const el = form.querySelector(`[name="${name}"]`);
+    form.querySelectorAll(".field.bad").forEach((x) => x.classList.remove("bad"));
+    if (el) { el.classList.add("bad"); el.scrollIntoView({ block: "center", behavior: "smooth" }); setTimeout(() => el.focus({ preventScroll: true }), 300); }
+    const out = errSel && document.querySelector(errSel); if (out) out.textContent = msg;
+    toast(msg, 5000);
+    return false;
+  }
   window.MM_UI = {
-    BIZ, A, C, $, $$, app, esc, ic, toast, fmtHour, openWhatsApp, openSheet, closeSheet, go, rupee, dist, away, openWord, statusWord, stWord, catVars, mono, reverseName, stars, amt,
+    BIZ, A, C, $, $$, app, esc, ic, toast, badField, fmtHour, openWhatsApp, openSheet, closeSheet, go, rupee, dist, away, openWord, statusWord, stWord, catVars, mono, reverseName, stars, amt,
     sc, siteCheckout, paintSiteCart, newMap, meIcon, dotIcon, shopPopup, reachSteps, shopEntry, productCard, priceLine, pimg, art, off, bindAdd, bagBtn, refreshBag, orderEntry,
     loc: () => loc, addCleanup: (f) => cleanups.push(f), ROUTES, route,
   };

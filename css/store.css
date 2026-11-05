@@ -876,3 +876,6 @@ body.has-scb .s-foot { padding-bottom: 110px; }
 .paycode span { font-size: 12px; color: var(--ink-2); }
 .paycode b { font-size: 18px; letter-spacing: .08em; font-family: ui-monospace, Consolas, monospace; }
 .paycode .link { margin-left: auto; }
+
+/* a field the form check sent you to */
+.field.bad { border-color: var(--out, #b0392b) !important; box-shadow: 0 0 0 3px rgba(176, 57, 43, .18); }
