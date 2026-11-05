@@ -125,8 +125,22 @@
     if (/fetch|network/i.test(m)) return "No internet — this needs a connection";
     return m || "Something went wrong — try again";
   }
+  // A shop's login stays when the shop is deleted. Registering again with that number reuses
+  // the login (same PIN), as long as no shop is linked to it any more.
+  async function hasShop(uid) {
+    const [m, o] = await Promise.all([sb.from("shop_members").select("shop_id").eq("user_id", uid).limit(1), sb.from("shops").select("id").eq("owner_id", uid).limit(1)]);
+    if (m.error || o.error) throw new Error(friendly(m.error || o.error));
+    return !!(m.data.length || o.data.length);
+  }
   async function signUp(ph, pin) {
     const { data, error } = await sb.auth.signUp({ email: emailFor(ph), password: pin });
+    if (error && /already registered|already exists/i.test(error.message)) {
+      const r = await sb.auth.signInWithPassword({ email: emailFor(ph), password: pin });
+      if (r.error) throw new Error(/invalid login/i.test(r.error.message)
+        ? "This number already has a My Market login. Use the same PIN as before, or tap Log in" : friendly(r.error));
+      if (await hasShop(r.data.user.id)) { await signOut(); throw new Error("This number already has a shop — log in instead"); }
+      return r.data.user.id;
+    }
     if (error) throw new Error(friendly(error));
     if (!data.session) throw new Error("The server asks for email confirmation — it must be switched off in Supabase");
     return data.user.id;
@@ -146,7 +160,7 @@
     const mem = await one(sb.from("shop_members").select("shop_id").eq("user_id", uid).limit(1));
     const shop = mem.length ? await one(sb.from("shops").select("*").eq("id", mem[0].shop_id).maybeSingle())
       : await one(sb.from("shops").select("*").eq("owner_id", uid).maybeSingle()); // before members existed
-    if (!shop) throw new Error("No shop is linked to this number");
+    if (!shop) { await signOut(); throw new Error("No shop is linked to this number. To start a new shop, tap Register and use the same number and PIN"); }
     // the server keeps ~45 days of documents and one summary row per day before that
     const [items, docs, daily, markets] = await Promise.all([
       one(sb.from("items").select("*").eq("shop_id", shop.id)),
