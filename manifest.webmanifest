@@ -33,5 +33,5 @@
       "purpose": "maskable"
     }
   ],
-  "scope": "./"
+  "scope": "./index.html"
 }
