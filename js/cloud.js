@@ -18,7 +18,30 @@
   // Mobile number + 6-digit PIN become an email-style login. No email is ever sent
   // (email confirmation is off in the project), the address is only an identifier.
   const emailFor = (ph) => `91${ph}@phone.mymarket.in`;
-  const photoUrl = (path) => (path ? `${C.supabaseUrl}/storage/v1/object/public/item-photos/${path}` : null);
+  // Photos live in Cloudflare R2 (path "r2/<shop>/<file>") once C.photosUrl is set; older ones stay in Supabase storage.
+  const photoUrl = (path) => (!path ? null : path.startsWith("r2/") && C.photosUrl ? `${C.photosUrl}/p/${path.slice(3)}`
+    : `${C.supabaseUrl}/storage/v1/object/public/item-photos/${path}`);
+  // the path a new photo gets: "r2/…" when the Cloudflare photo service is on
+  const newPhotoPath = (p) => (C.photosUrl ? "r2/" + p : p);
+  // save one photo at its path ("r2/…" → Cloudflare, otherwise Supabase storage)
+  async function putPhoto(path, blob, replacePrefix = "") {
+    if (!path.startsWith("r2/")) {
+      const r = await sb.storage.from("item-photos").upload(path, blob, { upsert: true, contentType: "image/jpeg" });
+      if (r.error) throw r.error;
+      return;
+    }
+    if (!C.photosUrl) throw Object.assign(new Error("The photo service isn't set up"), { code: "photo" });
+    const { data } = await sb.auth.getSession();
+    if (!data.session) throw Object.assign(new Error("Not logged in"), { code: "auth" });
+    let res;
+    try {
+      res = await fetch(`${C.photosUrl}/p/${path.slice(3)}`, { method: "PUT", body: blob,
+        headers: { Authorization: `Bearer ${data.session.access_token}`, "Content-Type": "image/jpeg", ...(replacePrefix ? { "X-Replace-Prefix": replacePrefix } : {}) } });
+    } catch (e) { throw new Error("network: " + e.message); }        // offline: retried later
+    // an expired login or a busy service is retried later; a refused photo (wrong shop, too large) is not
+    if (res.status === 401 || res.status >= 500) throw new Error("network: photo service " + res.status);
+    if (!res.ok) { const j = await res.json().catch(() => ({})); throw Object.assign(new Error(j.msg || "Photo not saved"), { code: "photo" + res.status }); }
+  }
 
   const Q = {
     get: () => A.store.get("outbox", []),
@@ -51,16 +74,17 @@
     else if (op.op === "update") r = await sb.from(op.table).update(op.patch).eq("id", op.id);
     else if (op.op === "photo") {
       const blob = await (await fetch(op.dataUrl)).blob();
-      const path = `${op.shopId}/${op.itemId}.jpg`;
-      r = await sb.storage.from("item-photos").upload(path, blob, { upsert: true, contentType: "image/jpeg" });
-      if (!r.error) r = await sb.from("items").update({ photo_path: path }).eq("id", op.itemId);
+      // Cloudflare: a new file name per photo (customers' phones keep photos cached for long); the item's older photo is removed
+      const path = C.photosUrl ? `r2/${op.shopId}/${op.itemId}-${Date.now().toString(36)}.jpg` : `${op.shopId}/${op.itemId}.jpg`;
+      await putPhoto(path, blob, C.photosUrl ? op.itemId + "-" : "");
+      r = await sb.from("items").update({ photo_path: path }).eq("id", op.itemId);
       // our own catalogue product gets the photo too (ignored if it isn't ours)
       if (!r.error && op.productId) await sb.from("catalog_products").update({ photo_path: path }).eq("id", op.productId).is("photo_path", null);
     }
     else if (op.op === "shopphoto") {
       const blob = await (await fetch(op.dataUrl)).blob();
-      r = await sb.storage.from("item-photos").upload(op.path, blob, { upsert: true, contentType: "image/jpeg" });
-      if (!r.error) r = await sb.from("shops").update(op.kind === "gallery" ? { gallery: op.gallery } : { [op.kind + "_path"]: op.path }).eq("id", op.shopId);
+      await putPhoto(op.path, blob);    // the path already says where it lives ("r2/…" or Supabase)
+      r = await sb.from("shops").update(op.kind === "gallery" ? { gallery: op.gallery } : { [op.kind + "_path"]: op.path }).eq("id", op.shopId);
     }
     else if (op.op === "billpdf") {
       const blob = await (await fetch(op.dataUrl)).blob();
@@ -458,7 +482,7 @@
   async function myNumber() { const { data } = await sb.auth.getSession(); const m = (data.session?.user?.email || "").match(/^91(\d{10})@/); return m ? m[1] : ""; }
   async function deleteShop(shopId) { const { error } = await sb.rpc("delete_my_shop", { p_shop: shopId }); if (error) throw new Error(friendly(error)); }
 
-  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, isAdmin, importStatement, searchCatalog, searchOnline, myPlan, claimPayment, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl,
+  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, isAdmin, importStatement, searchCatalog, searchOnline, myPlan, claimPayment, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl, newPhotoPath,
     pending: () => Q.get().length, failedOps: () => Q.failed() };
 
   // start-up

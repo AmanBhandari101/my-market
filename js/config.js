@@ -8,4 +8,6 @@ window.MM_CONFIG = {
   // While it is empty the plan page only shows the free trial and nothing is ever locked.
   payUpi: "8923060977@ibl",
   payName: "My Market",
+  // Item and shop photos: the Cloudflare photo service (cloudflare/photos-worker.js). Empty = Supabase storage.
+  photosUrl: "",
 };

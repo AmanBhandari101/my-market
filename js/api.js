@@ -717,7 +717,7 @@ window.MM_API = (function () {
   function setShopPhoto(id, kind, dataUrl, galleryIndex = null) {
     const sh = getShop(id); if (!sh) return;
     const rand = Math.random().toString(36).slice(2, 8);
-    const path = `${id}/shop-${kind}-${rand}.jpg`;
+    const raw = `${id}/shop-${kind}-${rand}.jpg`, path = window.MM_CLOUD?.newPhotoPath ? window.MM_CLOUD.newPhotoPath(raw) : raw;
     if (kind === "gallery") {
       sh.gallery = sh.gallery || []; sh.galleryPaths = sh.galleryPaths || [];
       if (galleryIndex == null) { sh.gallery.push(dataUrl); sh.galleryPaths.push(path); }

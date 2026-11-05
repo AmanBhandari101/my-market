@@ -71,7 +71,7 @@
   <main><div id="c"><div class="card"><p>Loading your bill…</p></div></div></main>
   <script src="js/config.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
-  <script src="js/billpdf.js?v=63"></script>
+  <script src="js/billpdf.js?v=64"></script>
   <script>
     var c = document.getElementById("c");
     var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (x) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[x]; }); };
@@ -102,7 +102,8 @@
         var addr = [s.shop_no && s.shop_no !== "—" ? "Shop " + s.shop_no : "", s.floor && s.floor !== "Ground floor" ? s.floor : "", s.landmark || "", m.name || "",
           [s.locality || m.locality || "", s.pincode || m.pincode || ""].filter(Boolean).join(" ")].filter(Boolean).join(", ");
         var shopUrl = new URL("./", location.href).href + "#/shop/" + s.id + "?src=bill";
-        var logo = s.logo_path ? CFG.supabaseUrl + "/storage/v1/object/public/item-photos/" + s.logo_path : "";
+        var logo = !s.logo_path ? "" : s.logo_path.indexOf("r2/") === 0 && CFG.photosUrl ? CFG.photosUrl + "/p/" + s.logo_path.slice(3)
+          : CFG.supabaseUrl + "/storage/v1/object/public/item-photos/" + s.logo_path;
         document.title = "Bill #" + b.no + " · " + s.name;
         c.innerHTML =
           '<div class="bill">' +
