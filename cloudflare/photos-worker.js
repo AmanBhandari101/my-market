@@ -1,21 +1,63 @@
-// My Market — photo storage on Cloudflare R2 (free: 10 GB, no charge when customers view photos).
+// My Market — photo storage on Cloudflare (free plan, no card needed).
 //
-// GET    /p/<shopId>/<file>.jpg   anyone: the photo (cached at Cloudflare's edge)
+// GET    /p/<shopId>/<file>.jpg   anyone: the photo (cached at Cloudflare's edge for a year)
 // PUT    /p/<shopId>/<file>.jpg   a logged-in member of that shop: save a photo
 // DELETE /p/<shopId>/<file>.jpg   a logged-in member of that shop: remove a photo
+//
+// Photos are kept in a D1 database (free: 5 GB, no card). If an R2 bucket is bound
+// as PHOTOS instead (R2 needs a card on file), that is used.
 //
 // A write must carry the shopkeeper's own login token (Authorization: Bearer …).
 // The worker asks Supabase "is this my shop?" with that token, so no secret key
 // is needed anywhere: only the public Supabase URL and publishable key.
 //
 // Settings (Cloudflare dashboard → Worker → Settings):
-//   R2 bucket binding  PHOTOS        → the bucket, e.g. "mymarket-photos"
-//   Variable           SUPABASE_URL  → https://dhcpzdwzbndntnekuiud.supabase.co
-//   Variable           SUPABASE_KEY  → the publishable key (same as js/config.js)
-//   Variable           ALLOW_ORIGIN  → https://amanbhandari101.github.io  (where the apps run)
+//   D1 database binding  DB            → the database, e.g. "mymarket-photos"
+//   Variable             SUPABASE_URL  → https://dhcpzdwzbndntnekuiud.supabase.co
+//   Variable             SUPABASE_KEY  → the publishable key (same as js/config.js)
+//   Variable             ALLOW_ORIGIN  → https://amanbhandari101.github.io  (where the apps run)
 
-const MAX_BYTES = 1_500_000;                       // the apps send ~60–200 KB; this is a hard ceiling
+const MAX_BYTES = 1_500_000;                       // the apps send ~60–200 KB; D1 rows can hold up to 2 MB
 const PATH = /^\/p\/([0-9a-f-]{36})\/([A-Za-z0-9_-]{1,100}\.(?:jpg|webp))$/;
+
+// ---------- storage: D1 (default) or R2 ----------
+let ready = false;
+function store(env) {
+  if (env.PHOTOS) return {
+    get: async (k) => { const o = await env.PHOTOS.get(k); return o && { body: o.body, type: o.httpMetadata?.contentType }; },
+    put: (k, shop, type, buf) => env.PHOTOS.put(k, buf, { httpMetadata: { contentType: type } }),
+    del: (k) => env.PHOTOS.delete(k),
+    dropOthers: async (shop, prefix, keep) => {
+      const l = await env.PHOTOS.list({ prefix: `${shop}/${prefix}`, limit: 50 });
+      const old = l.objects.map((o) => o.key).filter((k) => k !== keep); if (old.length) await env.PHOTOS.delete(old);
+    },
+  };
+  const db = env.DB;
+  const init = async () => {
+    if (ready) return;
+    await db.exec("CREATE TABLE IF NOT EXISTS photos (key TEXT PRIMARY KEY, shop TEXT NOT NULL, type TEXT NOT NULL, size INTEGER NOT NULL, at INTEGER NOT NULL, data BLOB NOT NULL)");
+    await db.exec("CREATE INDEX IF NOT EXISTS photos_shop ON photos (shop)");
+    ready = true;
+  };
+  return {
+    get: async (k) => {
+      await init();
+      const r = await db.prepare("SELECT type, data FROM photos WHERE key = ?").bind(k).first();
+      return r && { body: new Uint8Array(r.data), type: r.type };
+    },
+    put: async (k, shop, type, buf) => {
+      await init();
+      await db.prepare("INSERT INTO photos (key, shop, type, size, at, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6) " +
+        "ON CONFLICT(key) DO UPDATE SET type = ?3, size = ?4, at = ?5, data = ?6").bind(k, shop, type, buf.byteLength, Date.now(), buf).run();
+    },
+    del: async (k) => { await init(); await db.prepare("DELETE FROM photos WHERE key = ?").bind(k).run(); },
+    dropOthers: async (shop, prefix, keep) => {
+      await init();
+      // prefix is checked to be letters, digits, "-" and "_" only, so it is safe inside LIKE
+      await db.prepare("DELETE FROM photos WHERE shop = ?1 AND key LIKE ?2 AND key <> ?3").bind(shop, `${shop}/${prefix}%`, keep).run();
+    },
+  };
+}
 
 export default {
   async fetch(req, env, ctx) {
@@ -36,18 +78,19 @@ export default {
     const m = url.pathname.match(PATH);
     if (!m) return reply(404, "Not found");
     const [, shopId, file] = m, key = `${shopId}/${file}`;
+    const S = store(env);
 
     // ---------- read: public, cached for a year (file names change when a photo changes) ----------
     if (req.method === "GET" || req.method === "HEAD") {
       const cache = caches.default, ck = new Request(url.origin + url.pathname);
       let res = await cache.match(ck);
       if (res) return res;
-      const obj = await env.PHOTOS.get(key);
+      const obj = await S.get(key);
       if (!obj) return reply(404, "Not found");
       res = new Response(req.method === "HEAD" ? null : obj.body, { headers: {
-        "Content-Type": obj.httpMetadata?.contentType || "image/jpeg",
+        "Content-Type": obj.type || "image/jpeg",
         "Cache-Control": "public, max-age=31536000, immutable",
-        ETag: obj.httpEtag, "Access-Control-Allow-Origin": "*" } });
+        "Access-Control-Allow-Origin": "*" } });
       if (req.method === "GET") ctx.waitUntil(cache.put(ck, res.clone()));
       return res;
     }
@@ -66,7 +109,7 @@ export default {
     if (!chk.ok || (await chk.json()) !== true) return reply(403, "Not your shop");
 
     if (req.method === "DELETE") {
-      await env.PHOTOS.delete(key);
+      await S.del(key);
       ctx.waitUntil(caches.default.delete(new Request(url.origin + url.pathname)));
       return reply(200, "Removed");
     }
@@ -77,17 +120,11 @@ export default {
     const body = await req.arrayBuffer();
     if (body.byteLength > MAX_BYTES) return reply(413, "Photo too large");
     if (body.byteLength < 200) return reply(400, "Empty photo");
-    await env.PHOTOS.put(key, body, { httpMetadata: { contentType: type } });
+    await S.put(key, shopId, type, body);
 
     // the item's older photos (same name start, e.g. "<itemId>-") are removed, so storage doesn't grow
     const prefix = (req.headers.get("x-replace-prefix") || "").trim();
-    if (/^[A-Za-z0-9_-]{8,100}-$/.test(prefix)) {
-      ctx.waitUntil((async () => {
-        const list = await env.PHOTOS.list({ prefix: `${shopId}/${prefix}`, limit: 50 });
-        const old = list.objects.map((o) => o.key).filter((k) => k !== key);
-        if (old.length) await env.PHOTOS.delete(old);
-      })());
-    }
+    if (/^[A-Za-z0-9_-]{8,100}-$/.test(prefix)) ctx.waitUntil(S.dropOthers(shopId, prefix, key));
     return reply(200, "Saved");
   },
 };
