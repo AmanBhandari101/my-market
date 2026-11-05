@@ -195,11 +195,12 @@ window.MM_API = (function () {
     for (const sh of D.shops) for (const it of sh.items) {
       const log = byItem[it.id], b = base[it.id]; if (!log && !b) continue;
       if (b) { it.qty = Math.max(0, b.q); it.qtyRaw = b.q; it.stockAt = b.at; if (b.q > 0) it.lastConfirmed = it.lastConfirmed || b.at; }
-      else if (it.qty0 !== undefined) { it.qty = it.qty0; it.qtyRaw = undefined; it.stockAt = it.stockAt0; }
+      else if (it.qty0 !== undefined) { it.qtyRaw = it.qty0 ?? undefined; it.qty = it.qty0 == null ? null : Math.max(0, it.qty0); it.stockAt = it.stockAt0; }
       for (const e of (log || []).sort((a, b) => a.at - b.at)) applyEntry(it, e);
     }
   }
-  function moveStock(shopId, itemId, { delta = 0, set = null, reason = "count", ref = null }) {
+  // local: the change is already inside a bill / delivery document that goes to the server
+  function moveStock(shopId, itemId, { delta = 0, set = null, reason = "count", ref = null, local = false }) {
     const it = getShop(shopId)?.items.find((x) => x.id === itemId); if (!it) return;
     const before = it.qty ?? 0;
     const e = { id: uuid(), shopId, itemId, delta: set != null ? set - before : delta, set, reason, at: Date.now(), ...(ref ? { ref } : {}) };
@@ -216,7 +217,11 @@ window.MM_API = (function () {
     }
     store.set("ledger", log);
     applyEntry(it, e);
-    q(shopId, { op: "insert", table: "stock_moves", row: { id: e.id, shop_id: shopId, item_id: itemId, delta: e.delta, set_to: set, reason, ref, at: iso(e.at) } });
+    if (!local) {
+      const type = set != null ? "count" : e.delta >= 0 ? "in" : "out";
+      q(shopId, { op: "insert", table: "docs", row: { id: e.id, shop_id: shopId, type, at: iso(e.at), note: reason,
+        lines: [{ i: itemId, n: it.name, q: set != null ? set : Math.abs(e.delta) }] } });
+    }
     return it;
   }
   const stockLog = (itemId) => store.get("ledger", []).filter((e) => e.itemId === itemId).sort((a, b) => b.at - a.at);
@@ -782,10 +787,10 @@ window.MM_API = (function () {
     if (!p.lines.length) throw new Error("Nothing to add");
     const pall = store.get("purchases", []); pall.unshift(p); if (!store.set("purchases", pall.slice(0, 1000))) throw new Error(FULL);
     p.total = p.lines.reduce((a, l) => a + (l.cost || 0) * l.qty, 0);
-    q(shopId, { op: "insert", table: "purchases", row: { id: p.id, shop_id: shopId, at: iso(p.at), supplier: p.supplier || null, pay, total: p.total } });
-    for (const l of p.lines) q(shopId, { op: "insert", table: "purchase_lines", row: { id: l.id, purchase_id: p.id, shop_id: shopId, item_id: l.itemId, name: l.name, qty: l.qty, cost: l.cost } });
+    q(shopId, { op: "insert", table: "docs", row: { id: p.id, shop_id: shopId, type: "in", at: iso(p.at), note: p.supplier || null, pay, total: p.total,
+      lines: p.lines.map((l) => ({ i: l.itemId, n: l.name, q: l.qty, c: l.cost ?? undefined })) } });
     for (const l of p.lines) {
-      moveStock(shopId, l.itemId, { delta: l.qty, reason: "received", ref: p.id });
+      moveStock(shopId, l.itemId, { delta: l.qty, reason: "received", ref: p.id, local: true });
       if (l.cost) setItem(shopId, l.itemId, { cost: l.cost });
       const it = getShop(shopId)?.items.find((x) => x.id === l.itemId); if (it && l.cost) it.cost = l.cost;
     }
@@ -925,7 +930,7 @@ window.MM_API = (function () {
   // an older bill (made before links) gets its code when it is sent again
   function billToken(id) {
     const all = store.get("bills", []); const b = all.find((x) => x.id === id); if (!b) return null;
-    if (!b.shareToken) { b.shareToken = shareToken(); store.set("bills", all); q(b.shopId, { op: "update", table: "bills", id: b.id, patch: { share_token: b.shareToken } }); }
+    if (!b.shareToken) { b.shareToken = shareToken(); store.set("bills", all); q(b.shopId, { op: "update", table: "docs", id: b.id, patch: { share_token: b.shareToken } }); }
     return b.shareToken;
   }
 
@@ -946,13 +951,12 @@ window.MM_API = (function () {
     if (!store.set("bills", all.slice(0, 2000))) throw new Error(FULL);
     store.set("billSeq", seq); store.set("billNos", next.all);
     if (getShop(shopId)?.cloud && window.MM_CLOUD?.topUpBillNos) window.MM_CLOUD.topUpBillNos(shopId);
-    q(shopId, { op: "insert", table: "bills", row: { id: b.id, shop_id: shopId, no: b.no, at: iso(b.at), sub: b.sub, discount: b.discount, total: b.total,
-      units: b.units, pay, phone: b.phone || null, received: b.received, share_token: b.shareToken } });
-    b.lines.forEach((l, i) => q(shopId, { op: "insert", table: "bill_lines", row: { id: l.id, bill_id: b.id, shop_id: shopId, item_id: l.itemId,
-      name: l.name, brand: l.brand || null, qty: l.qty, price: l.price, cost: l.cost, pos: i } }));
+    q(shopId, { op: "insert", table: "docs", row: { id: b.id, shop_id: shopId, type: "sale", no: b.no, at: iso(b.at), sub: b.sub, discount: b.discount,
+      total: b.total, units: b.units, pay, phone: b.phone || null, received: b.received, share_token: b.shareToken,
+      lines: b.lines.map((l) => ({ i: l.itemId || undefined, n: l.name, b: l.brand || undefined, q: l.qty, p: l.price, c: l.cost ?? undefined })) } });
     for (const l of b.lines) {
       const it = l.itemId && getShop(shopId)?.items.find((x) => x.id === l.itemId);
-      if (it && it.qty != null) moveStock(shopId, l.itemId, { delta: -l.qty, reason: "sold", ref: b.id });
+      if (it && it.qty != null) moveStock(shopId, l.itemId, { delta: -l.qty, reason: "sold", ref: b.id, local: true });
     }
     return b;
   }
@@ -960,15 +964,17 @@ window.MM_API = (function () {
     const all = store.get("bills", []); const b = all.find((x) => x.id === id);
     if (!b || b.cancelled) return;
     b.cancelled = Date.now(); store.set("bills", all);
-    q(b.shopId, { op: "update", table: "bills", id: b.id, patch: { cancelled_at: iso(b.cancelled) } });
+    q(b.shopId, { op: "update", table: "docs", id: b.id, patch: { cancelled_at: iso(b.cancelled) } });
     for (const l of b.lines) {
       const it = l.itemId && getShop(b.shopId)?.items.find((x) => x.id === l.itemId);
-      if (it && it.qty != null) moveStock(b.shopId, l.itemId, { delta: l.qty, reason: "returned", ref: b.id });
+      if (it && it.qty != null) moveStock(b.shopId, l.itemId, { delta: l.qty, reason: "returned", ref: b.id, local: true });
     }
   }
   // A logged-in shop's data from the server replaces what this phone had for it.
   // The caller reloads the page afterwards so every screen starts from it.
-  function hydrateShop({ shop: r, items, bills, purchases, markets, products }, photoUrl) {
+  function hydrateShop({ shop: r, items, docs, daily, markets, products }, photoUrl) {
+    const L = (d) => (d.lines || []).map((l, k) => ({ id: d.id + ":" + k, itemId: l.i || null, name: l.n || "Item", brand: l.b || "", qty: +l.q || 0, price: +l.p || 0, cost: l.c ?? null }));
+    const bills = (docs || []).filter((d) => d.type === "sale"), purchases = (docs || []).filter((d) => d.type === "in");
     const prod = {}; for (const p of products || []) prod[p.id] = p;
     const cm = (markets || []).map((m) => ({ id: m.id, name: m.name, area: m.area || "", locality: m.locality || "", pincode: m.pincode || "",
       lat: m.lat, lng: m.lng, radiusM: m.radius_m, pending: m.pending, tagline: m.tagline || "" }));
@@ -983,7 +989,7 @@ window.MM_API = (function () {
     store.set("shopsAdded", [...store.get("shopsAdded", []).filter((s) => s.id !== r.id), shop]);
     const its = (items || []).filter((i) => !i.removed).map((i) => ({
       id: i.id, name: i.name, brand: i.brand || "Generic", cat: i.cat, price: i.price, mrp: i.mrp, cost: i.cost, reorderAt: i.reorder_at, code: i.code || null,
-      qty: i.qty, qty0: i.qty, stockAt: ms(i.stock_at), stockAt0: ms(i.stock_at), lastConfirmed: i.qty > 0 ? ms(i.stock_at) : null,
+      qty: i.qty == null ? null : Math.max(0, i.qty), qtyRaw: i.qty ?? undefined, qty0: i.qty, stockAt: ms(i.stock_at), stockAt0: ms(i.stock_at), lastConfirmed: i.qty > 0 ? ms(i.stock_at) : null,
       photo: photoUrl(i.photo_path), addedAt: ms(i.created_at),
       ...(prod[i.product_id] ? productDetails(prod[i.product_id], photoUrl, r.id) : {}),
     }));
@@ -994,12 +1000,14 @@ window.MM_API = (function () {
     const lb = store.get("ledgerBase", {}); for (const k of Object.keys(lb)) if (lb[k].shopId === r.id) delete lb[k]; store.set("ledgerBase", lb);
     const bl = (bills || []).map((b) => ({ id: b.id, no: b.no, shopId: r.id, at: ms(b.at), sub: b.sub, discount: b.discount, total: b.total, units: b.units,
       pay: b.pay, phone: b.phone || "", received: b.received, shareToken: b.share_token || null, ...(b.cancelled_at ? { cancelled: ms(b.cancelled_at) } : {}),
-      lines: (b.bill_lines || []).slice().sort((p, r) => (p.pos ?? 999) - (r.pos ?? 999)).map((l) => ({ id: l.id, itemId: l.item_id, name: l.name, brand: l.brand || "", qty: l.qty, price: l.price, cost: l.cost })) }));
+      lines: L(b) }));
     store.set("bills", [...bl, ...store.get("bills", []).filter((b) => b.shopId !== r.id)].sort((a, b) => b.at - a.at));
     const seq = store.get("billSeq", {}); seq[r.id] = Math.max(seq[r.id] || 1000, ...bl.map((b) => b.no)); store.set("billSeq", seq);
-    const pu = (purchases || []).map((p) => ({ id: p.id, shopId: r.id, at: ms(p.at), supplier: p.supplier || "", pay: p.pay, total: p.total,
-      lines: (p.purchase_lines || []).map((l) => ({ id: l.id, itemId: l.item_id, name: l.name, qty: l.qty, cost: l.cost })) }));
+    const pu = (purchases || []).map((p) => ({ id: p.id, shopId: r.id, at: ms(p.at), supplier: p.note || "", pay: p.pay, total: p.total,
+      lines: L(p).map(({ id, itemId, name, qty, cost }) => ({ id, itemId, name, qty, cost })) }));
     store.set("purchases", [...pu, ...store.get("purchases", []).filter((p) => p.shopId !== r.id)]);
+    // older days arrive as one summary row per day (bills older than ~45 days live only on the phone that made them)
+    store.set("daily:" + r.id, (daily || []).map((d) => ({ day: d.day, sales: d.sales, bills: d.bills, profit: d.profit, known: d.profit_known, pay: d.pay || {}, bought: d.bought })));
     return shop;
   }
   const siteDetails = (r, photoUrl) => ({

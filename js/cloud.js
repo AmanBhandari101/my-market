@@ -147,11 +147,11 @@
     const shop = mem.length ? await one(sb.from("shops").select("*").eq("id", mem[0].shop_id).maybeSingle())
       : await one(sb.from("shops").select("*").eq("owner_id", uid).maybeSingle()); // before members existed
     if (!shop) throw new Error("No shop is linked to this number");
-    const since = new Date(Date.now() - 120 * 86400000).toISOString();
-    const [items, bills, purchases, markets] = await Promise.all([
+    // the server keeps ~45 days of documents and one summary row per day before that
+    const [items, docs, daily, markets] = await Promise.all([
       one(sb.from("items").select("*").eq("shop_id", shop.id)),
-      one(sb.from("bills").select("*, bill_lines(*)").eq("shop_id", shop.id).gte("at", since).order("at", { ascending: false }).limit(2000)),
-      one(sb.from("purchases").select("*, purchase_lines(*)").eq("shop_id", shop.id).gte("at", since).order("at", { ascending: false }).limit(1000)),
+      one(sb.from("docs").select("*").eq("shop_id", shop.id).order("at", { ascending: false }).limit(5000)),
+      one(sb.from("daily").select("day,sales,bills,profit,profit_known,pay,bought").eq("shop_id", shop.id).order("day", { ascending: false }).limit(800)),
       one(sb.from("markets").select("*")),
     ]);
     const pids = [...new Set(items.map((i) => i.product_id).filter(Boolean))];
@@ -159,7 +159,7 @@
     // never replace the phone's copy while it still holds changes the server doesn't have
     if (Q.get().length || (Q.failed().length && A.ownerShopId() === shop.id))
       throw new Error("Some changes on this phone haven't reached the server yet — connect to the internet and tap Sync now again");
-    A.hydrateShop({ shop, items, bills, purchases, markets, products }, photoUrl);
+    A.hydrateShop({ shop, items, docs, daily, markets, products }, photoUrl);
     A.store.set("lastPull", Date.now());
     return shop.id;
   }

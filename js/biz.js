@@ -1691,8 +1691,11 @@
     const month0 = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
     const lastMonth0 = new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime();
     const bills = A.billsFor(s.id).filter((b) => !b.cancelled);
+    const oldest = bills.reduce((m, b) => Math.min(m, b.at), Date.now());
+    const daily = A.store.get("daily:" + s.id, []).map((d) => ({ ...d, t0: new Date(d.day + "T00:00:00").getTime() })).filter((d) => d.t0 + DAYMS <= sod(oldest));
     const sum = (from, to) => {
       let t = 0, p = 0, n = 0, noCost = false;
+      for (const d of daily) if (d.t0 >= from && d.t0 < to) { t += d.sales; n += d.bills; p += d.profit; if (!d.known) noCost = true; }
       for (const b of bills) if (b.at >= from && b.at < to) {
         t += b.total; n++; p -= b.discount;
         for (const l of b.lines) { if (l.cost == null) noCost = true; else p += (l.price - l.cost) * l.qty; }

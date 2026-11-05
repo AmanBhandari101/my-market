@@ -35,6 +35,7 @@ Running it again later is safe.
 16. Then `supabase/billing_v2.sql` (stricter missed-payment rules: website and analytics off after 7 days, read-only after 15 — enforced by the server).
 17. Then `supabase/payments_match.sql` (bank statement lines with a shop's payment code mark its plan paid). Add your own number as staff once: `insert into public.admins (phone) values ('98XXXXXXXX');`
 18. Then `supabase/admin.sql` (functions for the staff app, admin.html: overview, shops, payments, demand, activity log). Open **admin.html** and log in with a staff number.
+19. Then `supabase/lite.sql` (lite data model: one docs table for bills/stock in/counts, stock kept by the server from documents, documents older than 45 days folded nightly into one row per shop per day). Run it **before** publishing app v58+.
 
 ## 3. Login settings
 
