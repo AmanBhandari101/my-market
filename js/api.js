@@ -899,6 +899,8 @@ window.MM_API = (function () {
   // takes the units out of stock (for items the shop counts) and records the
   // sale. Bills are never edited: a cancel is a new "returned" stock entry.
   // lines: [{ itemId|null, name, qty, price, cost }]
+  // what the customer saved against the shop's selling prices (bargained items + bill discount)
+  const billSaved = (b) => Math.max(0, (b.lines || []).reduce((t, l) => t + l.qty * Math.max(0, (l.list || l.price) - l.price), 0) + (b.discount || 0));
   function billTotals(lines, discount = 0) {
     const sub = lines.reduce((a, l) => a + l.qty * l.price, 0);
     const disc = Math.min(Math.max(0, Math.round(discount || 0)), sub);
@@ -956,7 +958,9 @@ window.MM_API = (function () {
     seq[shopId] = Math.max(seq[shopId] || 1000, next.n);
     const b = {
       id: uuid(), no: next.n, shopId, shareToken: shareToken(), at: Date.now(),
-      lines: lines.map((l) => ({ id: uuid(), itemId: l.itemId || null, name: l.name, brand: l.brand || "", qty: l.qty, price: l.price, cost: l.cost ?? null })),
+      // list = the shop's selling price when a lower price was agreed with the customer
+      lines: lines.map((l) => ({ id: uuid(), itemId: l.itemId || null, name: l.name, brand: l.brand || "", qty: l.qty, price: l.price, cost: l.cost ?? null,
+        ...(money(l.list) > l.price ? { list: money(l.list) } : {}) })),
       ...t, pay, phone: phone || "", received: pay === "cash" && received ? money(received) : null,
     };
     const all = store.get("bills", []); all.unshift(b);
@@ -965,7 +969,7 @@ window.MM_API = (function () {
     if (getShop(shopId)?.cloud && window.MM_CLOUD?.topUpBillNos) window.MM_CLOUD.topUpBillNos(shopId);
     q(shopId, { op: "insert", table: "docs", row: { id: b.id, shop_id: shopId, type: "sale", no: b.no, at: iso(b.at), sub: b.sub, discount: b.discount,
       total: b.total, units: b.units, pay, phone: b.phone || null, received: b.received, share_token: b.shareToken,
-      lines: b.lines.map((l) => ({ i: l.itemId || undefined, n: l.name, b: l.brand || undefined, q: l.qty, p: l.price, c: l.cost ?? undefined })) } });
+      lines: b.lines.map((l) => ({ i: l.itemId || undefined, n: l.name, b: l.brand || undefined, q: l.qty, p: l.price, c: l.cost ?? undefined, m: l.list ?? undefined })) } });
     for (const l of b.lines) {
       const it = l.itemId && getShop(shopId)?.items.find((x) => x.id === l.itemId);
       if (it && it.qty != null) moveStock(shopId, l.itemId, { delta: -l.qty, reason: "sold", ref: b.id, local: true });
@@ -985,7 +989,7 @@ window.MM_API = (function () {
   // A logged-in shop's data from the server replaces what this phone had for it.
   // The caller reloads the page afterwards so every screen starts from it.
   function hydrateShop({ shop: r, items, docs, daily, markets, products }, photoUrl) {
-    const L = (d) => (d.lines || []).map((l, k) => ({ id: d.id + ":" + k, itemId: l.i || null, name: l.n || "Item", brand: l.b || "", qty: +l.q || 0, price: +l.p || 0, cost: l.c ?? null }));
+    const L = (d) => (d.lines || []).map((l, k) => ({ id: d.id + ":" + k, itemId: l.i || null, name: l.n || "Item", brand: l.b || "", qty: +l.q || 0, price: +l.p || 0, cost: l.c ?? null, ...(l.m ? { list: +l.m } : {}) }));
     const bills = (docs || []).filter((d) => d.type === "sale"), purchases = (docs || []).filter((d) => d.type === "in");
     const prod = {}; for (const p of products || []) prod[p.id] = p;
     const cm = (markets || []).map((m) => ({ id: m.id, name: m.name, area: m.area || "", locality: m.locality || "", pincode: m.pincode || "",
@@ -1127,7 +1131,7 @@ window.MM_API = (function () {
     RANGES, getRange, setRange, trip, fmtTrip, nearArea, nearSearch, marketFor,
     REASONS, moveStock, stockLog, inventory, lowAt,
     billTotals, saveBill, cancelBill, billsFor, getBill, daySummary,
-    catalogSearch, itemByCode, billToken, addDetails, photoSent, FULL, billNosLeft, addBillNos, registerShop, login, updateShop, normPhone, weakPin, addOwnItem, savePurchase, purchasesFor, hydrateShop, mergePublic, uuid, shopHas, saveDetails, productDetails, addPhoto, setBillLink, setShopPhoto, removeGalleryPhoto, getShop, getMarket, isOpen, itemStatus,
+    catalogSearch, itemByCode, billSaved, billToken, addDetails, photoSent, FULL, billNosLeft, addBillNos, registerShop, login, updateShop, normPhone, weakPin, addOwnItem, savePurchase, purchasesFor, hydrateShop, mergePublic, uuid, shopHas, saveDetails, productDetails, addPhoto, setBillLink, setShopPhoto, removeGalleryPhoto, getShop, getMarket, isOpen, itemStatus,
     search, ask, getAsk, replyAsk, pendingAsks, feedback, logSearch, addView,
     ownerShopId, ownerShop, isOwnerShop, claimShop, releaseShop, addShop, persistAddedShop, setItem, addItem, catalogFor, missedSales,
     getBag, addToBag, setQty, bagCount, bagLines, STEPS, placeOrder, getOrders, getOrder, advanceOrder, cancelOrder, ordersFor,

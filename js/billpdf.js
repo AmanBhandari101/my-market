@@ -96,6 +96,9 @@
     doc.setFillColor(...NAVY); doc.roundedRect(tx, ty, R - tx, 11, 1.5, 1.5, "F");
     doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(12.5);
     doc.text("TOTAL", tx + 4, ty + 7.4); doc.text(rs(b.total), R - 4, ty + 7.4, { align: "right" });
+    // bargained items + bill discount, against the shop's selling prices
+    const saved = Math.max(0, (b.lines || []).reduce((t, l) => t + l.qty * Math.max(0, (l.list || l.price) - l.price), 0) + (b.discount || 0));
+    if (saved) { doc.setFontSize(9); doc.setTextColor(30, 120, 70); doc.text(`You saved ${rs(saved)}`, R - 4, ty + 16, { align: "right" }); }
     doc.setFont("helvetica", "bold"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
     doc.text("AMOUNT IN WORDS", L, y + 4);
     doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...INK);

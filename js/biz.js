@@ -965,7 +965,10 @@
     let cart = cartGet(s);
     const keep = () => cartSet(s, cart);
     const draw = () => {
+      // each line remembers the shop's selling price; "price" is what was agreed with the customer
+      cart.lines.forEach((l) => { if (l.list == null) l.list = l.price; });
       const t = A.billTotals(cart.lines, cart.discount);
+      const listSub = cart.lines.reduce((a, l) => a + l.qty * (l.list ?? l.price), 0), saved = Math.max(0, listSub - t.total);
       const change = cart.pay === "cash" && +cart.received > t.total ? +cart.received - t.total : 0;
       if (!cart.lines.length) {
         U.app.innerHTML = `${bizTop("Cart")}
@@ -980,16 +983,20 @@
           return `<div class="cline">
             <span class="thumb" style="${it ? U.catVars(it.cat) : ""}">${it ? U.pimg(it) : U.art(s.cat, 30)}</span>
             <div class="body"><div class="name">${esc(l.name)}</div>
-              <button class="link" data-price="${i}">${rupee(l.price)} each · change</button></div>
+              <button class="link" data-price="${i}">${l.price < l.list ? `<s class="faint">${rupee(l.list)}</s> <b>${rupee(l.price)}</b> each · agreed` : `${rupee(l.price)} each · change price`}</button></div>
             <div class="cright"><b>${rupee(l.qty * l.price)}</b>
               <span class="stepper sm"><button data-m="${i}" aria-label="One less">−</button><span>${l.qty}</span><button data-p="${i}" aria-label="One more">+</button></span></div>
             <button class="crm" data-rm="${i}" aria-label="Remove ${esc(l.name)}">×</button>
           </div>`; }).join("")}</div>
         <div class="rsec">
           <table class="specs bill">
+            ${listSub > t.sub ? `<tr><th>Selling price</th><td><s class="faint">${rupee(listSub)}</s></td></tr>` : ""}
             <tr><th>Items (${t.units})</th><td>${rupee(t.sub)}</td></tr>
-            <tr><th>Discount ₹</th><td><input class="field" id="disc" inputmode="numeric" value="${cart.discount || ""}" placeholder="0" style="width:96px;text-align:right;padding:6px 8px"></td></tr>
+            <tr><th>Customer pays ₹<br><span class="faint tiny" style="font-weight:400">the price you agreed for the whole bill</span></th>
+              <td><input class="field" id="final" inputmode="numeric" value="${cart.discount ? t.total : ""}" placeholder="${t.sub}" style="width:110px;text-align:right;padding:6px 8px"></td></tr>
+            ${saved ? `<tr><th>Discount given</th><td>−${rupee(saved)}</td></tr>` : ""}
             <tr class="total"><th>Total</th><td>${rupee(t.total)}</td></tr></table>
+          <p class="faint tiny" style="margin:6px 0 0">Bargained? Type the final amount above, or tap an item's price to set the price agreed for that item.</p>
         </div>
         <div class="rsec"><div class="rhd"><b>Paid by</b></div>
           <div class="words">${Object.entries(PAYS).map(([k, v]) => `<button class="word ${cart.pay === k ? "on" : ""}" data-pay="${k}">${v}</button>`).join("")}</div>
@@ -1009,12 +1016,41 @@
       $$("[data-m]").forEach((b) => b.onclick = () => { cart.lines[ix(b, "m")].qty--; cart.lines = cart.lines.filter((l) => l.qty > 0); keep(); draw(); });
       $$("[data-p]").forEach((b) => b.onclick = () => { cart.lines[ix(b, "p")].qty++; keep(); draw(); });
       $$("[data-rm]").forEach((b) => b.onclick = () => { cart.lines.splice(ix(b, "rm"), 1); keep(); draw(); });
-      $$("[data-price]").forEach((b) => b.onclick = () => {
-        const l = cart.lines[ix(b, "price")]; const a = prompt(`Price for ${l.name} (₹)`, l.price); if (a == null) return;
-        const v = Math.round(+String(a).replace(/[^\d.]/g, ""));
-        if (v > 0 && v <= 10000000) { l.price = v; keep(); draw(); } else U.toast("Type a price in rupees");
+      $$("[data-price]").forEach((b) => b.onclick = () => priceSheet(cart.lines[ix(b, "price")]));
+      // "give it to me for 500": the agreed amount for the whole bill; the difference becomes the discount
+      $("#final").onchange = (e) => {
+        const raw = String(e.target.value).replace(/[^\d.]/g, "");
+        if (!raw) { cart.discount = 0; keep(); return draw(); }
+        const v = Math.round(+raw), sub = A.billTotals(cart.lines, 0).sub;
+        if (v > sub) { U.toast(`That's more than the items add up to (${rupee(sub)})`); e.target.value = cart.discount ? sub - cart.discount : ""; return; }
+        cart.discount = sub - v; keep(); draw();
+      };
+      // the price agreed for one item: per piece, or for all pieces together
+      const priceSheet = (l) => U.openSheet(`<div class="eyebrow">Agreed price</div><div class="title">${esc(l.name)}</div>
+        <p class="small quiet" style="margin:4px 0 12px">Your selling price: <b>${rupee(l.list)}</b>${l.qty > 1 ? ` each · ${l.qty} pieces = ${rupee(l.qty * l.list)}` : ""}</p>
+        <div class="form" style="margin-top:0">
+          <label>Customer pays for one ₹<input class="field" id="pe" inputmode="numeric" value="${l.price}" style="font-size:20px"></label>
+          ${l.qty > 1 ? `<label>…or for all ${l.qty} together ₹<input class="field" id="pt" inputmode="numeric" placeholder="${l.qty * l.price}"></label>` : ""}
+          <p class="small" id="pmsg" style="margin:0;min-height:1.2em"></p>
+          <button class="btn" id="pok">Use this price</button>
+          ${l.price !== l.list ? `<button class="link" id="preset" style="justify-self:center">Back to selling price (${rupee(l.list)})</button>` : ""}
+        </div>`, (el) => {
+        const num = (x) => { const r = String(x || "").replace(/[^\d.]/g, ""); return r ? Math.round(+r) : null; };
+        const show = () => {
+          const each = num($("#pt", el)?.value) != null ? Math.round(num($("#pt", el).value) / l.qty) : num($("#pe", el).value);
+          $("#pmsg", el).innerHTML = each == null ? "" : each < l.list ? `Discount <b>${rupee((l.list - each) * l.qty)}</b>${l.qty > 1 ? ` (${rupee(each)} each)` : ""}` : each > l.list ? `<span class="down">Above your selling price</span>` : "";
+        };
+        $("#pe", el).oninput = () => { if ($("#pt", el)) $("#pt", el).value = ""; show(); };
+        if ($("#pt", el)) $("#pt", el).oninput = show;
+        $("#pok", el).onclick = () => {
+          const tot = num($("#pt", el)?.value), each = tot != null ? Math.round(tot / l.qty) : num($("#pe", el).value);
+          if (!each || each < 0 || each > 10000000) return U.toast("Type a price in rupees");
+          l.price = each; keep(); U.closeSheet(); draw();
+          if (tot != null && each * l.qty !== tot) U.toast(`${rupee(each)} each = ${rupee(each * l.qty)} (rounded to whole rupees)`);
+        };
+        if ($("#preset", el)) $("#preset", el).onclick = () => { l.price = l.list; keep(); U.closeSheet(); draw(); };
+        setTimeout(() => $("#pe", el).select(), 200);
       });
-      $("#disc").onchange = (e) => { cart.discount = Math.max(0, Math.round(+e.target.value || 0)); keep(); draw(); };
       $$("[data-pay]").forEach((b) => b.onclick = () => { cart.pay = b.dataset.pay; keep(); draw(); });
       $("#recv") && ($("#recv").oninput = (e) => { cart.received = e.target.value; keep(); const c = +e.target.value - A.billTotals(cart.lines, cart.discount).total; $("#chg").innerHTML = c > 0 ? `Return <b style="font-size:18px">${rupee(c)}</b>` : ""; });
       $("#ph").oninput = (e) => { cart.phone = e.target.value.replace(/[^\d+ ]/g, ""); keep(); };
@@ -1839,7 +1875,8 @@
     return [`🧾 *${s.name}*`, `Bill #${b.no} · ${d}`, "",
       ...shown.map((l) => `• ${l.name} — ${l.qty} × ₹${l.price.toLocaleString("en-IN")} = ₹${(l.qty * l.price).toLocaleString("en-IN")}`),
       more > 0 ? `• …and ${more} more item${more > 1 ? "s" : ""}` : null, "",
-      b.discount ? `Discount: −₹${b.discount.toLocaleString("en-IN")}` : null, `*Total: ₹${b.total.toLocaleString("en-IN")}*`, `Paid by: ${PAYS[b.pay]}`,
+      b.discount ? `Discount: −₹${b.discount.toLocaleString("en-IN")}` : null, `*Total: ₹${b.total.toLocaleString("en-IN")}*`,
+      A.billSaved(b) ? `You saved ₹${A.billSaved(b).toLocaleString("en-IN")}` : null, `Paid by: ${PAYS[b.pay]}`,
       link ? "" : null, link ? `Full bill & PDF: ${link}` : null,
       s.cloud ? `Our stock & prices: ${siteLink(s, "bill")}` : null, "", "Thank you! Visit again 🙏"].filter((x) => x !== null).join("\n");
   }
@@ -1855,9 +1892,10 @@
         <div class="rhead"><b>${esc(s.name)}</b><span>${esc(m?.name || "")}${s.shopNo && s.shopNo !== "—" ? ` · Shop ${esc(s.shopNo)}` : ""}${s.pincode ? ` · ${esc(s.locality || "")} ${esc(s.pincode)}` : ""}</span>${s.phone ? `<span>${esc(s.phone)}</span>` : ""}</div>
         <div class="rmeta"><span>Bill #${b.no}</span><span>${d}</span></div>
         <table class="rtable"><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Amount</th></tr>
-          ${b.lines.map((l) => `<tr><td>${esc(l.name)}</td><td>${l.qty}</td><td>${rupee(l.price)}</td><td>${rupee(l.qty * l.price)}</td></tr>`).join("")}</table>
+          ${b.lines.map((l) => `<tr><td>${esc(l.name)}</td><td>${l.qty}</td><td>${l.list > l.price ? `<s class="faint">${rupee(l.list)}</s><br>` : ""}${rupee(l.price)}</td><td>${rupee(l.qty * l.price)}</td></tr>`).join("")}</table>
         <div class="rtot">${b.discount ? `<div><span>Items</span><span>${rupee(b.sub)}</span></div><div><span>Discount</span><span>−${rupee(b.discount)}</span></div>` : ""}
           <div class="big"><span>Total</span><span>${rupee(b.total)}</span></div>
+          ${A.billSaved(b) ? `<div><span>You saved</span><span>${rupee(A.billSaved(b))}</span></div>` : ""}
           <div><span>Paid by</span><span>${PAYS[b.pay]}</span></div>
           ${b.received ? `<div><span>Cash received</span><span>${rupee(b.received)}</span></div><div><span>Returned</span><span>${rupee(Math.max(0, b.received - b.total))}</span></div>` : ""}</div>
         <div class="rad"><b>%</b><span>${esc(s.promo || `Visit ${s.name} again — new stock every week.`)}<em>See our stock and prices on My Market</em></span></div>
