@@ -86,7 +86,16 @@ export default {
       const cache = caches.default, ck = new Request(url.origin + url.pathname);
       let res = await cache.match(ck);
       if (res) return res;
-      const obj = await S.get(key);
+      let obj = await S.get(key);
+      // a photo saved before the move to Cloudflare: copy it once from Supabase's public photo store
+      if (!obj && env.SUPABASE_URL) {
+        const old = await fetch(`${env.SUPABASE_URL}/storage/v1/object/public/item-photos/${key}`);
+        const type = (old.headers.get("content-type") || "").split(";")[0].trim();
+        if (old.ok && ["image/jpeg", "image/webp", "image/png"].includes(type)) {
+          const buf = await old.arrayBuffer();
+          if (buf.byteLength >= 200 && buf.byteLength <= MAX_BYTES) { await S.put(key, shopId, type, buf); obj = { body: new Uint8Array(buf), type }; }
+        }
+      }
       if (!obj) return reply(404, "Not found");
       res = new Response(req.method === "HEAD" ? null : obj.body, { headers: {
         "Content-Type": obj.type || "image/jpeg",
