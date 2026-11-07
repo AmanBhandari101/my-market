@@ -538,16 +538,13 @@
           <div class="pad" style="margin:12px 0 40px;padding:0"><a class="btn" href="#/biz">Done — start billing</a></div></div>` : `
         <div class="addstock">
           <a class="as-main" href="#/biz/stockin">${ic("truck")}<b>Stock arrived</b><span>Add quantities from a supplier</span></a>
-          <button class="as-main" id="newit">${ic("camera")}<b>New item</b><span>Photo, name, price, quantity</span></button>
+          <button class="as-main" id="newit">${ic("search")}<b>Add item</b><span>Search by name or scan the barcode</span></button>
         </div>
         <div class="stats">
           <div><b>${inv.units}</b><span>units counted</span></div>
           <div><b>${rupee(inv.value)}</b><span>stock value at cost</span></div>
           <button data-f="low" class="${inv.low.length ? "hot" : ""}"><b>${inv.low.length}</b><span>running low</span></button>
           <button data-f="out" class="${inv.out.length ? "hot" : ""}"><b>${inv.out.length}</b><span>out of stock</span></button>
-        </div>
-        <div class="pad" style="margin-top:12px;display:flex;gap:10px">
-          <button class="btn line auto" id="addcat" style="flex:1;height:40px;font-size:13.5px">${ic("search")} Find & add products</button>
         </div>
         <div class="block">
           <div class="words" id="filt">${Object.entries(FILTERS).map(([k, l]) => `<button class="word ${filter === k ? "on" : ""}" data-f="${k}">${l}</button>`).join("")}</div>
@@ -566,7 +563,7 @@
           </div>`; }).join("") || `<p class="quiet small" style="margin-top:14px">${s.items.length ? "Nothing here." : "No items yet."}</p>`}</div>
           <p class="faint tiny" style="margin:16px 0 40px;line-height:1.6">“Count” starts tracking an item. Items you don't count yet still show as “Ask to confirm” to customers. Few left = at or below the alert level you set (default 3).</p></div>`}`;
       bindTop();
-      $("#newit") && ($("#newit").onclick = () => newItemSheet(s, draw));
+      $("#newit") && ($("#newit").onclick = () => addItemsSheet(s, "", draw));
       $$("[data-pick]").forEach((b) => b.onclick = () => {
         const c = cat.find((x) => x.name === b.dataset.pick);
         if (b.classList.contains("on")) {
@@ -834,7 +831,7 @@
     return out.map((i) => [sc(i), i]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).slice(0, limit).map((x) => CAT.rows[x[1]]);
   }
 
-  function addItemsSheet(s, q0 = "", after) {
+  function addItemsSheet(s, q0 = "", after, onAdd) {
     let q = q0, shared = [], online = null, offBusy = false, timer = null, seq = 0, catErr = false;
     const added = new Set();
     const have = (name, code) => code
@@ -861,7 +858,8 @@
         ${online && online.length ? `<div class="eyebrow" style="margin-top:14px">Online product databases</div>${online.map((p, i) => row("o" + i, p.img, p.name, [p.brand, p.size, p.label].filter(Boolean).join(" · "), p.cat || s.cat)).join("")}` : ""}
         ${q ? `<div class="pick-more">
           ${online == null ? `<button class="btn line" id="ponl">${ic("search")} Search online for “${esc(q)}”</button>` : online.length ? "" : offBusy ? `<p class="quiet small" style="margin:0 0 8px">Online search is busy — try again in a minute.</p><button class="btn line" id="ponl">Try again</button>` : `<p class="quiet small" style="margin:0 0 8px">Nothing online for “${esc(q)}”.</p>`}
-          <button class="btn" id="pnew">+ Add “${esc(q)}” as a new item</button></div>` : `<p class="faint tiny" style="margin:12px 0 0">Type to search every product — or scan a barcode in New item.</p>`}`;
+          <button class="btn" id="pnew">+ Add “${esc(q)}” as my own item</button></div>` : `<p class="faint tiny" style="margin:12px 0 10px">Type a name or tap Scan to find the product. Not in the list? Add your own with a photo:</p>
+          <button class="btn line" id="pnew">${ic("camera")} + Add my own item</button>`}`;
       const L = local, S = sharedNew, O = online || [], K = cat;
       $$("[data-k]", box).forEach((x) => x.onclick = async () => {
         const k = x.dataset.k, i = +k.slice(1);
@@ -878,6 +876,7 @@
               details: { barcode: r[0] || undefined, size: r[3] || undefined, productPhoto: catImg(r) || undefined, photoCredit: catCredit(r) || undefined, source: "catalog" } });
             if (!it) { U.toast("You already have this item"); return; }
             added.add(r[1].toLowerCase()); if (r[0]) added.add("#" + noZeros(r[0]));
+            onAdd && onAdd(it);
           }
           else if (k[0] === "l") { const it = L[i]; A.addItem(s.id, it.tmpl, it.cat); added.add(it.name.toLowerCase()); }
           else if (k[0] === "s") {
@@ -1568,12 +1567,13 @@
       <div class="pad billhead"><b>What arrived?</b><span class="quiet small">Tap or scan each piece</span></div>
       <div class="pad scanrow"><div class="inshop">${ic("search")}<input id="bq" placeholder="Find an item" autocomplete="off"></div><button class="btn auto scanbtn" id="scanb">${ic("camera")} Scan</button></div>
       <div class="bgrid" id="bgrid"></div>
-      <div class="pad" style="margin:12px 0 0"><button class="btn line" id="newit">${ic("camera")} New item (with photo)</button></div>
+      <div class="pad" style="margin:12px 0 0"><button class="btn line" id="newit">${ic("search")} Add an item not in your list</button></div>
       <div style="height:110px"></div>
       <div class="billbar"><div id="bsum"></div><button class="btn auto" id="bgo">Review</button></div>`;
     bindTop();
     $("#bq").addEventListener("input", (e) => { q = e.target.value.trim().toLowerCase(); paint(); });
-    $("#newit").onclick = () => newItemSheet(s, (it) => { if (it) add(it, 0); paint(); });
+    // a product picked here joins this delivery with 1 piece (change it with − / +)
+    $("#newit").onclick = () => addItemsSheet(s, "", (it) => { if (it && !lineOf(it.id)) add(it, 1); paint(); }, (it) => add(it, 1));
     $("#scanb").onclick = async () => {
       const code = await scanBarcode({ any: true, title: "Scan stock in", hint: "Scan each piece as you unpack it", onCode: (c) => {
         const it = A.itemByCode(s.id, c); if (!it) return false;
