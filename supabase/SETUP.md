@@ -36,6 +36,7 @@ Running it again later is safe.
 17. Then `supabase/payments_match.sql` (bank statement lines with a shop's payment code mark its plan paid). Add your own number as staff once: `insert into public.admins (phone) values ('98XXXXXXXX');`
 18. Then `supabase/admin.sql` (functions for the staff app, admin.html: overview, shops, payments, demand, activity log). Open **admin.html** and log in with a staff number.
 19. Then `supabase/lite.sql` (lite data model: one docs table for bills/stock in/counts, stock kept by the server from documents, documents older than 45 days folded nightly into one row per shop per day). Run it **before** publishing app v58+.
+20. Then `supabase/photos_cloudflare.sql` (photos live on Cloudflare: removes upload rights on the item-photos store; reading stays public). Run it **after** the app uses `photosUrl` (v70+).
 
 ## 3. Login settings
 
