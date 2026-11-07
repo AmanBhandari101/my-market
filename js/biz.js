@@ -793,33 +793,93 @@
   }
 
   // ---------- find & add products: built-in list + shared catalogue + online ----------
+  // ---------- the My Market product catalogue (catalog/products.json, ~31,000 products) ----------
+  // Downloaded once (~0.7 MB) and kept by the phone, so search works offline and costs the server nothing.
+  let CAT = null, catLoading = null;
+  const IMGHOST = { f: "images.openfoodfacts.org", b: "images.openbeautyfacts.org", p: "images.openproductsfacts.org" };
+  const CREDIT = { f: "Open Food Facts", b: "Open Beauty Facts", p: "Open Products Facts" };
+  const noZeros = (c) => String(c || "").replace(/^0+/, "");
+  function loadCatalog() {
+    if (CAT) return Promise.resolve(CAT);
+    return catLoading || (catLoading = fetch("catalog/products.json").then((r) => { if (!r.ok) throw new Error("catalogue " + r.status); return r.json(); })
+      .then((j) => {
+        const norm = (x) => String(x || "").toLowerCase().replace(/[^\p{L}\p{N} ]+/gu, " ");
+        CAT = { aisles: j.aisles, rows: j.rows, hay: j.rows.map((r) => norm(`${r[1]} ${r[2]} ${r[3]} ${r[6]} ${j.aisles[r[4]][1]}`)),
+          byCode: new Map(j.rows.filter((r) => r[0]).map((r, i) => [noZeros(r[0]), r])) };
+        return CAT;
+      }).catch((e) => { catLoading = null; throw e; }));
+  }
+  // photo address from the short form in the file
+  function catImg(r) {
+    const v = r[5] || ""; if (!v) return "";
+    if (v.startsWith("w:")) return v.slice(2);
+    const code = r[0]; let p = code;
+    if (code.length > 8) { const c = code.padStart(13, "0"); p = `${c.slice(0, 3)}/${c.slice(3, 6)}/${c.slice(6, 9)}/${c.slice(9)}`; }
+    return `https://${IMGHOST[v[0]]}/images/products/${p}/${v.slice(2)}.200.jpg`;
+  }
+  const catCredit = (r) => (!r[5] ? "" : r[5].startsWith("w:") ? "Photo: Wikimedia Commons (free licence)" : `Photo: ${CREDIT[r[5][0]]} contributors (CC BY-SA)`);
+  // by barcode (typed or scanned), or by words in the name / brand / size / Hindi name
+  function catSearch(q, limit = 40) {
+    if (!CAT || !q) return [];
+    const digits = q.replace(/\s/g, "");
+    if (/^\d{6,14}$/.test(digits)) { const r = CAT.byCode.get(noZeros(digits)); return r ? [r] : []; }
+    const words = q.toLowerCase().replace(/[^\p{L}\p{N} ]+/gu, " ").split(/\s+/).filter((w) => w.length > 1);
+    if (!words.length) return [];
+    const out = [];
+    for (let i = 0; i < CAT.rows.length && out.length < 400; i++) if (words.every((w) => CAT.hay[i].includes(w))) out.push(i);
+    // names starting with the first word first, then whole-word matches; otherwise the catalogue's popularity order
+    // a Hindi / local name that is exactly the search ("aloo" → Potato) comes first of all
+    const w0 = words[0], kw = (i) => (CAT.rows[i][6] || "").toLowerCase().split(/\s*,\s*/).includes(words.join(" "));
+    const sc = (i) => (kw(i) ? 0 : CAT.hay[i].startsWith(w0) ? 1 : (" " + CAT.hay[i]).includes(" " + w0) ? 2 : 3);
+    return out.map((i) => [sc(i), i]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).slice(0, limit).map((x) => CAT.rows[x[1]]);
+  }
+
   function addItemsSheet(s, q0 = "", after) {
-    let q = q0, shared = [], online = null, offBusy = false, timer = null, seq = 0;
+    let q = q0, shared = [], online = null, offBusy = false, timer = null, seq = 0, catErr = false;
     const added = new Set();
-    const have = (name) => s.items.some((i) => i.name.toLowerCase() === String(name).toLowerCase()) || added.has(String(name).toLowerCase());
+    const have = (name, code) => code
+      ? s.items.some((i) => noZeros(i.barcode || i.code) === noZeros(code)) || added.has("#" + noZeros(code))
+      : s.items.some((i) => i.name.toLowerCase() === String(name).toLowerCase()) || added.has(String(name).toLowerCase());
     const photoUrl = (pp) => window.MM_CLOUD?.photoUrl(pp);
-    const row = (key, img, name, sub, cat) => `<button class="entry pick-row ${have(name) ? "on" : ""}" data-k="${esc(key)}" style="width:100%;text-align:left">
-        <span class="thumb" style="${U.catVars(cat || s.cat)}">${img ? `<img src="${esc(img)}" alt="" loading="lazy">` : U.art(cat || s.cat, 28)}</span>
+    const row = (key, img, name, sub, cat, code) => `<button class="entry pick-row ${have(name, code) ? "on" : ""}" data-k="${esc(key)}" style="width:100%;text-align:left">
+        <span class="thumb" style="${U.catVars(cat || s.cat)}">${img ? `<img src="${esc(img)}" alt="" loading="lazy" onerror="this.remove()">` : U.art(cat || s.cat, 28)}</span>
         <div class="body"><div class="name">${esc(name)}</div><div class="note">${esc(sub)}</div></div>
-        <span class="pick-add">${have(name) ? ic("check") : ic("plus")}</span></button>`;
+        <span class="pick-add">${have(name, code) ? ic("check") : ic("plus")}</span></button>`;
     const draw = (el) => {
-      const local = q ? A.catalogSearch(q, s.cat) : A.catalogFor(s.cat).map((x) => ({ ...x, cat: s.cat }));
-      const sharedNew = shared.filter((p) => !local.some((l) => l.name.toLowerCase() === p.name.toLowerCase()));
+      const isCode = /^\d{6,14}$/.test(q.replace(/\s/g, ""));
+      const local = !q ? A.catalogFor(s.cat).map((x) => ({ ...x, cat: s.cat })) : isCode ? [] : A.catalogSearch(q, s.cat);
+      const cat = q ? catSearch(q).filter((r) => !local.some((l) => l.name.toLowerCase() === r[1].toLowerCase())) : [];
+      const sharedNew = shared.filter((p) => !local.some((l) => l.name.toLowerCase() === p.name.toLowerCase()) && !cat.some((r) => r[1].toLowerCase() === p.name.toLowerCase()));
       const box = $("#pres", el);
       box.innerHTML = `
-        ${local.length ? `<div class="eyebrow" style="margin-top:6px">${q ? "From the My Market list" : "Popular in " + esc(C[s.cat].name)}</div>${local.map((x, i) => row("l" + i, x.img, x.name, `${x.brand !== "Generic" ? x.brand + " · " : ""}${C[x.cat]?.name || ""}`, x.cat)).join("")}` : ""}
+        ${cat.length ? `<div class="eyebrow" style="margin-top:6px">${isCode ? "Barcode " + esc(q) : "My Market catalogue"}</div>${cat.map((r, i) => row("c" + i, catImg(r), r[1],
+          [r[2], r[3], CAT.aisles[r[4]][1]].filter(Boolean).join(" · ") + (r[0] && !isCode ? ` · ${r[0]}` : ""), CAT.aisles[r[4]][2], r[0])).join("")}` : ""}
+        ${q && !CAT ? `<p class="quiet small" style="margin:8px 0">${catErr ? "Couldn't load the product catalogue — check the internet and type again." : "Loading the product catalogue…"}</p>` : ""}
+        ${isCode && CAT && !cat.length ? `<p class="quiet small" style="margin:8px 0">Barcode ${esc(q)} isn't in the catalogue — search online below, or add it as a new item.</p>` : ""}
+        ${local.length ? `<div class="eyebrow" style="margin-top:${cat.length ? 14 : 6}px">${q ? "From the My Market list" : "Popular in " + esc(C[s.cat].name)}</div>${local.map((x, i) => row("l" + i, x.img, x.name, `${x.brand !== "Generic" ? x.brand + " · " : ""}${C[x.cat]?.name || ""}`, x.cat)).join("")}` : ""}
         ${sharedNew.length ? `<div class="eyebrow" style="margin-top:14px">Added by shops on My Market</div>${sharedNew.map((p, i) => row("s" + i, p.photo_path ? photoUrl(p.photo_path) : p.photo_url, p.name, [p.brand, p.size, C[p.cat]?.name].filter(Boolean).join(" · "), p.cat)).join("")}` : ""}
         ${online && online.length ? `<div class="eyebrow" style="margin-top:14px">Online product databases</div>${online.map((p, i) => row("o" + i, p.img, p.name, [p.brand, p.size, p.label].filter(Boolean).join(" · "), p.cat || s.cat)).join("")}` : ""}
         ${q ? `<div class="pick-more">
           ${online == null ? `<button class="btn line" id="ponl">${ic("search")} Search online for “${esc(q)}”</button>` : online.length ? "" : offBusy ? `<p class="quiet small" style="margin:0 0 8px">Online search is busy — try again in a minute.</p><button class="btn line" id="ponl">Try again</button>` : `<p class="quiet small" style="margin:0 0 8px">Nothing online for “${esc(q)}”.</p>`}
           <button class="btn" id="pnew">+ Add “${esc(q)}” as a new item</button></div>` : `<p class="faint tiny" style="margin:12px 0 0">Type to search every product — or scan a barcode in New item.</p>`}`;
-      const L = local, S = sharedNew, O = online || [];
+      const L = local, S = sharedNew, O = online || [], K = cat;
       $$("[data-k]", box).forEach((x) => x.onclick = async () => {
         const k = x.dataset.k, i = +k.slice(1);
         if (x.classList.contains("on")) return;
         x.classList.add("on"); x.querySelector(".pick-add").innerHTML = ic("check");
         try {
-          if (k[0] === "l") { const it = L[i]; A.addItem(s.id, it.tmpl, it.cat); added.add(it.name.toLowerCase()); }
+          if (k[0] === "c") {
+            // from the catalogue: name, brand, size, barcode and photo come along; the shop sets its price
+            const r = K[i], a = CAT.aisles[r[4]];
+            // two packs with the same name ("Maggi" 70 g and 280 g): the size goes into the name
+            const clash = s.items.some((x) => x.name.toLowerCase() === r[1].toLowerCase() && (x.brand || "Generic").toLowerCase() === (r[2] || "Generic").toLowerCase());
+            const name = clash && r[3] ? `${r[1]} ${r[3]}` : clash && r[0] ? `${r[1]} (${r[0].slice(-4)})` : r[1];
+            const it = A.addOwnItem(s.id, { name, brand: r[2] || "", cat: C[a[2]] ? a[2] : s.cat, price: null,
+              details: { barcode: r[0] || undefined, size: r[3] || undefined, productPhoto: catImg(r) || undefined, photoCredit: catCredit(r) || undefined, source: "catalog" } });
+            if (!it) { U.toast("You already have this item"); return; }
+            added.add(r[1].toLowerCase()); if (r[0]) added.add("#" + noZeros(r[0]));
+          }
+          else if (k[0] === "l") { const it = L[i]; A.addItem(s.id, it.tmpl, it.cat); added.add(it.name.toLowerCase()); }
           else if (k[0] === "s") {
             const p = S[i];
             A.addOwnItem(s.id, { name: p.name, brand: p.brand || "", cat: p.cat || s.cat, price: null, details: A.productDetails(p, photoUrl, s.id) });
@@ -845,17 +905,26 @@
       $("#pnew", box) && ($("#pnew", box).onclick = () => { U.closeSheet(); newItemSheet(s, (it) => { after && after(it); }, q); });
     };
     U.openSheet(`<div class="eyebrow">Stock</div><div class="title">Find & add products</div>
-      <div class="inshop" style="margin-top:10px">${ic("search")}<input id="pq" placeholder="e.g. hammer, LED bulb 9W, atta" autocomplete="off" value="${esc(q)}"></div>
+      <div class="scanrow" style="margin-top:10px"><div class="inshop">${ic("search")}<input id="pq" placeholder="Name, brand or barcode — e.g. maggi, LED bulb 9W" autocomplete="off" value="${esc(q)}"></div>
+        <button class="btn auto scanbtn" id="pscan" type="button">${ic("camera")} Scan</button></div>
       <div id="pres" class="pick-list"></div>
       <div class="opts" style="margin-top:14px"><button class="link" id="pdone">Done</button></div>`, (el) => {
       el.classList.add("pick-sheet");
       draw(el);
+      loadCatalog().then(() => { if (document.body.contains(el)) draw(el); }).catch(() => { catErr = true; if (document.body.contains(el)) draw(el); });
+      $("#pscan", el).onclick = async () => {
+        const code = await scanBarcode({ title: "Scan to find the product" });
+        if (!code) return;
+        q = code; $("#pq", el).value = code; clearTimeout(timer);
+        try { await loadCatalog(); } catch { catErr = true; }
+        draw(el); run();
+      };
       const run = async () => {
         const my = ++seq; shared = []; online = null;
         if (q && window.MM_CLOUD && window.MM_CLOUD.searchCatalog) { try { const r = await window.MM_CLOUD.searchCatalog(q); if (my === seq) shared = r; } catch {} }
         if (my === seq) draw(el);
       };
-      $("#pq", el).oninput = (e) => { q = e.target.value.trim(); clearTimeout(timer); draw(el); timer = setTimeout(run, 350); };
+      $("#pq", el).oninput = (e) => { q = e.target.value.trim(); clearTimeout(timer); if (catErr) { catErr = false; loadCatalog().then(() => draw(el)).catch(() => { catErr = true; draw(el); }); } draw(el); timer = setTimeout(run, 350); };
       $("#pdone", el).onclick = () => { U.closeSheet(); after && after(); };
       if (q) run();
       setTimeout(() => $("#pq", el)?.focus(), 50);
