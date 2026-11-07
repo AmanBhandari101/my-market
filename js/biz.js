@@ -801,20 +801,25 @@
     return catLoading || (catLoading = fetch("catalog/products.json").then((r) => { if (!r.ok) throw new Error("catalogue " + r.status); return r.json(); })
       .then((j) => {
         const norm = (x) => String(x || "").toLowerCase().replace(/[^\p{L}\p{N} ]+/gu, " ");
-        CAT = { aisles: j.aisles, rows: j.rows, hay: j.rows.map((r) => norm(`${r[1]} ${r[2]} ${r[3]} ${r[6]} ${j.aisles[r[4]][1]}`)),
-          byCode: new Map(j.rows.filter((r) => r[0]).map((r, i) => [noZeros(r[0]), r])) };
+        const byCode = new Map();
+        for (const r of j.rows) for (const c of [r[0], ...String(r[7] || "").split(" ")]) if (c) byCode.set(noZeros(c), r);
+        CAT = { img: j.img || "", aisles: j.aisles, rows: j.rows, byCode,
+          hay: j.rows.map((r) => norm(`${r[1]} ${r[2]} ${r[3]} ${r[6]} ${j.aisles[r[4]][1]}`)) };
         return CAT;
       }).catch((e) => { catLoading = null; throw e; }));
   }
   // photo address from the short form in the file
   function catImg(r) {
     const v = r[5] || ""; if (!v) return "";
+    if (v === "s" && CAT && CAT.img && r[0]) return `${CAT.img}/p/bc-${r[0]}.webp`;
     if (v.startsWith("w:")) return v.slice(2);
     const code = r[0]; let p = code;
     if (code.length > 8) { const c = code.padStart(13, "0"); p = `${c.slice(0, 3)}/${c.slice(3, 6)}/${c.slice(6, 9)}/${c.slice(9)}`; }
     return `https://${IMGHOST[v[0]]}/images/products/${p}/${v.slice(2)}.200.jpg`;
   }
-  const catCredit = (r) => (!r[5] ? "" : r[5].startsWith("w:") ? "Photo: Wikimedia Commons (free licence)" : `Photo: ${CREDIT[r[5][0]]} contributors (CC BY-SA)`);
+  const catCredit = (r) => (!r[5] ? "" : r[5].startsWith("w:") ? "Photo: Wikimedia Commons (free licence)"
+    : r[5] === "s" ? "Photo: Open Food / Beauty / Products Facts contributors (CC BY-SA), cleaned up by My Market"
+    : `Photo: ${CREDIT[r[5][0]]} contributors (CC BY-SA)`);
   // by barcode (typed or scanned), or by words in the name / brand / size / Hindi name
   function catSearch(q, limit = 40) {
     if (!CAT || !q) return [];
@@ -850,7 +855,7 @@
       const box = $("#pres", el);
       box.innerHTML = `
         ${cat.length ? `<div class="eyebrow" style="margin-top:6px">${isCode ? "Barcode " + esc(q) : "My Market catalogue"}</div>${cat.map((r, i) => row("c" + i, catImg(r), r[1],
-          [r[2], r[3], CAT.aisles[r[4]][1]].filter(Boolean).join(" · ") + (r[0] && !isCode ? ` · ${r[0]}` : ""), CAT.aisles[r[4]][2], r[0])).join("")}` : ""}
+          [r[8] === "veg" ? "🟢 Veg" : r[8] === "nonveg" ? "🔴 Non-veg" : "", r[2], r[3], CAT.aisles[r[4]][1]].filter(Boolean).join(" · ") + (r[0] && !isCode ? ` · ${r[0]}` : ""), CAT.aisles[r[4]][2], r[0])).join("")}` : ""}
         ${q && !CAT ? `<p class="quiet small" style="margin:8px 0">${catErr ? "Couldn't load the product catalogue — check the internet and type again." : "Loading the product catalogue…"}</p>` : ""}
         ${isCode && CAT && !cat.length ? `<p class="quiet small" style="margin:8px 0">Barcode ${esc(q)} isn't in the catalogue — search online below, or add it as a new item.</p>` : ""}
         ${local.length ? `<div class="eyebrow" style="margin-top:${cat.length ? 14 : 6}px">${q ? "From the My Market list" : "Popular in " + esc(C[s.cat].name)}</div>${local.map((x, i) => row("l" + i, x.img, x.name, `${x.brand !== "Generic" ? x.brand + " · " : ""}${C[x.cat]?.name || ""}`, x.cat)).join("")}` : ""}
