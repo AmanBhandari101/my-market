@@ -1003,7 +1003,7 @@ window.MM_API = (function () {
       id: r.id, marketId: r.market_id, market: null, name: r.name, owner: r.owner_name || "", phone: r.phone || "", cat: r.cat,
       cats: r.cats && r.cats.length ? r.cats : [r.cat], shopNo: r.shop_no || "—", floor: r.floor || "Ground floor", landmark: r.landmark || "",
       locality: r.locality || "", pincode: r.pincode || "", lat: r.lat, lng: r.lng, open: r.open_h, close: r.close_h, closedDay: r.closed_day,
-      promo: r.promo || "", gst: r.gst || "", verified: r.verified, needsCheck: r.needs_check, rating: 0, ratings: 0, trust: 0.7, items: [], own: true, cloud: true,
+      promo: r.promo || "", gst: r.gst || "", slug: r.slug || null, verified: r.verified, needsCheck: r.needs_check, rating: 0, ratings: 0, trust: 0.7, items: [], own: true, cloud: true,
       ...siteDetails(r, photoUrl),
     };
     store.set("shopsAdded", [...store.get("shopsAdded", []).filter((s) => s.id !== r.id), shop]);
@@ -1052,7 +1052,7 @@ window.MM_API = (function () {
       const sh = {
         id: r.id, marketId: r.market_id || null, name: r.name, cat: r.cat, cats: r.cats && r.cats.length ? r.cats : [r.cat],
         shopNo: r.shop_no || "—", floor: r.floor || "Ground floor", landmark: r.landmark || "", locality: r.locality || "", pincode: r.pincode || "",
-        lat: r.lat, lng: r.lng, open: r.open_h, close: r.close_h, closedDay: r.closed_day, phone: r.phone || "", promo: r.promo || "", takesOrders: r.takes_orders !== false,
+        lat: r.lat, lng: r.lng, open: r.open_h, close: r.close_h, closedDay: r.closed_day, phone: r.phone || "", promo: r.promo || "", slug: r.slug || null, takesOrders: r.takes_orders !== false,
         ...siteDetails(r, photoUrl),
         rating: 0, ratings: 0, verified: r.verified, trust: 0.8, live: true,
         items: (byShop[r.id] || []).map((i) => {

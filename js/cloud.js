@@ -435,7 +435,7 @@
   }
 
   // ---------- shop website visits ----------
-  const SRCS = ["app", "qr", "bill", "share", "gmaps", "link", "search"];
+  const SRCS = ["app", "qr", "bill", "share", "gmaps", "link", "search", "google", "web"];
   function logVisit(shopId, kind, src) {
     if (!/^[0-9a-f-]{36}$/.test(shopId)) return;
     sb.from("shop_visits").insert({ shop_id: shopId, kind, src: SRCS.includes(src) ? src : "link" })
@@ -447,7 +447,19 @@
     return data || [];
   }
   // the shop's public web page (customer app), with where the link was used
-  const shopLink = (shopId, src) => new URL("index.html", location.href).href.split("#")[0] + `#/shop/${shopId}${src ? `?src=${src}` : ""}`;
+  // A shop's link: the clean address Google can read (C.siteUrl + /shop/<slug>) once the site worker is live,
+  // otherwise the app's own #/shop/<id> address. Both open the same screen.
+  const shopLink = (shopId, src) => {
+    const s = A.getShop(shopId), site = (C.siteUrl || "").replace(/\/$/, "");
+    if (site && s && s.slug) return `${site}/shop/${s.slug}${src ? `?src=${src}` : ""}`;
+    return new URL("index.html", location.href).href.split("#")[0] + `#/shop/${shopId}${src ? `?src=${src}` : ""}`;
+  };
+  // one product in one area (locality) and the shops there that have it — the same data as the /p/… page
+  async function areaProduct(area, product) {
+    const { data, error } = await sb.rpc("seo_area_product", { p_area: area, p_product: product });
+    if (error) throw new Error(friendly(error));
+    return data || null;
+  }
 
   // ---------- login numbers (main + backup), PIN, devices ----------
   // A second client that keeps no session, so adding a number never logs this phone out.
@@ -483,7 +495,7 @@
   async function myNumber() { const { data } = await sb.auth.getSession(); const m = (data.session?.user?.email || "").match(/^91(\d{10})@/); return m ? m[1] : ""; }
   async function deleteShop(shopId) { const { error } = await sb.rpc("delete_my_shop", { p_shop: shopId }); if (error) throw new Error(friendly(error)); }
 
-  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, isAdmin, importStatement, searchCatalog, searchOnline, myPlan, claimPayment, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl, newPhotoPath,
+  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, areaProduct, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, isAdmin, importStatement, searchCatalog, searchOnline, myPlan, claimPayment, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl, newPhotoPath,
     pending: () => Q.get().length, failedOps: () => Q.failed() };
 
   // start-up

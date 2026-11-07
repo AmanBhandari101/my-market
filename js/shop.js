@@ -41,7 +41,7 @@
       </div>
 
       ${st.key !== "out" ? `<div class="pad pbuy" style="${U.catVars(s.cat)}">
-        <div class="pbuy-q"><button id="pq-" aria-label="One less">−</button><b id="pqn">1</b><button id="pq+" aria-label="One more">+</button></div>
+        <div class="pbuy-q"><button id="pqm" aria-label="One less">−</button><b id="pqn">1</b><button id="pqp" aria-label="One more">+</button></div>
         <button class="pbuy-add" id="padd">${ic("bag")}Add to cart</button>
         <button class="pbuy-hold" id="phold">${ic("clock")}Hold it for me</button>
         <button class="pbuy-buy" id="pbuy">Buy now</button>
@@ -80,7 +80,7 @@
     // buy box: the same cart as the shop's website
     if ($("#padd")) {
       let pq = 1; const setQ = (n) => { pq = Math.max(1, Math.min(99, n)); $("#pqn").textContent = pq; };
-      $("#pq-").onclick = () => setQ(pq - 1); $("#pq+").onclick = () => setQ(pq + 1);
+      $("#pqm").onclick = () => setQ(pq - 1); $("#pqp").onclick = () => setQ(pq + 1);
       $("#padd").onclick = () => { U.sc.add(s.id, it.id, pq); U.toast(`Added to your cart at ${s.name}`); U.go(`#/shop/${s.id}?item=${it.id}`); };
       $("#phold").onclick = () => { U.sc.add(s.id, it.id, pq); U.go(`#/shop/${s.id}?cart=hold`); };
       $("#pbuy").onclick = () => { U.sc.add(s.id, it.id, pq); U.go(`#/shop/${s.id}?cart=buy`); };
@@ -229,5 +229,48 @@
     $("#back").onclick = () => history.back();
   }
 
-  Object.assign(U.ROUTES, { item: itemView, bag: bagView, checkout: checkoutView, order: orderView, orders: ordersView });
+  // ---------- one product in one area (the /p/<area>/<product> page Google lists) ----------
+  const areaCache = {};
+  function areaView([, area, product]) {
+    const CL = window.MM_CLOUD, key = area + "/" + product, d = areaCache[key];
+    if (d === undefined) {
+      U.app.innerHTML = '<div class="empty"><div class="serif">Finding shops…</div></div>';
+      if (!CL || !CL.areaProduct) { areaCache[key] = null; U.route(); return; }
+      const here = location.hash;
+      CL.areaProduct(area, product).catch(() => null).then((r) => { areaCache[key] = r; if (location.hash === here) U.route(); });
+      return;
+    }
+    const offers = (d && d.offers) || [];
+    if (!d || !d.product || !offers.length) {
+      U.app.innerHTML = '<div class="empty"><div class="serif">No shop here has this right now.</div><p><a class="link" href="#/">Find shops near you</a></p></div>';
+      return;
+    }
+    const p = d.product, loc = U.loc(), place = offers[0].locality || area.replace(/-/g, " ");
+    const img = CL.photoUrl(p.photo_path) || p.photo_url || CL.photoUrl((offers.find((o) => o.photo_path) || {}).photo_path);
+    const cat = C[p.cat] ? p.cat : "hardware";
+    const st = (o) => A.itemStatus({ qty: o.stock === "in" ? 10 : o.stock === "few" ? 1 : o.stock === "out" ? 0 : null, reorderAt: 3,
+      stockAt: o.updated_at ? Date.parse(o.updated_at) : null, lastConfirmed: o.updated_at ? Date.parse(o.updated_at) : null });
+    const far = (o) => (loc && o.lat != null ? A.fmtDist(A.distKm(loc, o)) : "");
+    U.app.innerHTML = `
+      <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button></div>
+      <div class="hero-img" style="${U.catVars(cat)}">${img ? `<img src="${esc(img)}" alt="${esc(p.name)}">` : U.art(cat, 96)}</div>
+      ${p.photo_credit && img === p.photo_url ? `<p class="faint tiny pad" style="margin:4px 0 0">${esc(p.photo_credit)}</p>` : ""}
+      <div class="pad" style="margin-top:20px">
+        ${p.brand ? `<div class="eyebrow" style="color:${C[cat].color}">${esc(p.brand)}</div>` : ""}
+        <h1 class="title" style="margin-top:6px">${esc(p.name)}${p.size && !p.name.toLowerCase().includes(String(p.size).toLowerCase()) ? ` <span class="quiet" style="font-weight:400">· ${esc(p.size)}</span>` : ""}</h1>
+        <p class="quiet" style="margin-top:6px">${offers.length} shop${offers.length === 1 ? "" : "s"} in ${esc(place)} ${offers.length === 1 ? "has" : "have"} it</p>
+      </div>
+      <div class="block"><div class="eyebrow"><span>Where to buy</span></div><div class="entries">
+        ${offers.map((o) => { const s = st(o); return `<a class="entry" href="#/item/${o.shop_id}/${o.item_id}">${U.mono({ name: o.name, cat: C[o.cat] ? o.cat : cat })}
+          <div class="body"><div class="name">${esc(o.name)}</div>
+          <div class="note"><span class="dot ${s.key}"></span>${U.stWord(s)}${o.landmark ? ` · ${esc(o.landmark)}` : ""}</div></div>
+          <div class="aside">${o.price ? `<b>${rupee(o.price)}</b>` : '<span class="faint">Ask</span>'}${far(o) ? `<div class="faint tiny">${far(o)}</div>` : ""}</div></a>`; }).join("")}
+      </div></div>
+      ${p.features && p.features.length ? `<div class="block"><div class="eyebrow"><span>About this item</span></div>
+        <ul class="feat">${p.features.map((f) => `<li>${esc(f)}</li>`).join("")}</ul></div>` : ""}
+      ${p.description ? `<div class="block" style="padding-bottom:40px"><p style="margin:0;line-height:1.6">${esc(p.description)}</p></div>` : ""}`;
+    $("#back").onclick = () => (history.length > 1 ? history.back() : U.go("#/"));
+  }
+
+  Object.assign(U.ROUTES, { p: areaView, item: itemView, bag: bagView, checkout: checkoutView, order: orderView, orders: ordersView });
 })();

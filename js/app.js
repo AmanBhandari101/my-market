@@ -991,7 +991,7 @@
       if (!loc) loc = PILOT_ORIG;
       if (parts[0] !== "biz") { go("#/biz"); return; }
     } else if (parts[0] === "biz") { location.replace("business.html" + location.hash); return; }
-    if (!loc && !["welcome", "shop", "item"].includes(parts[0])) { go("#/welcome"); return; }
+    if (!loc && !["welcome", "shop", "item", "p"].includes(parts[0])) { go("#/welcome"); return; }
     if (loc && parts[0] === "welcome") { go("#/"); return; }
     const fn = ROUTES[parts[0] || ""] || home;
     fn(parts, params);

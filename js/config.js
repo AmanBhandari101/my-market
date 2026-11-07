@@ -10,4 +10,7 @@ window.MM_CONFIG = {
   payName: "My Market",
   // Item and shop photos: the Cloudflare photo service (cloudflare/photos-worker.js). Empty = Supabase storage.
   photosUrl: "https://mymarket-photos.aman101bhandari.workers.dev",
+  // The customer site Google reads (cloudflare/site-worker.js), e.g. "https://mymarket.example.in".
+  // Empty = shop links stay on the app's own #/shop/<id> address.
+  siteUrl: "",
 };
