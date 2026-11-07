@@ -1590,7 +1590,7 @@
 
   // ---------- new item: photo + name + price + quantity ----------
   // The photo is shrunk to 360 px and kept with the item and uploaded to the server.
-  function shrinkPhoto(file, max = 360, q = 0.72) {
+  function shrinkPhoto(file, max = (window.MM_CONFIG || {}).photosUrl ? 640 : 360, q = 0.75) {
     return new Promise((res) => {
       const img = new Image(), url = URL.createObjectURL(file);
       img.onload = () => {

@@ -9,5 +9,5 @@ window.MM_CONFIG = {
   payUpi: "8923060977@ibl",
   payName: "My Market",
   // Item and shop photos: the Cloudflare photo service (cloudflare/photos-worker.js). Empty = Supabase storage.
-  photosUrl: "",
+  photosUrl: "https://mymarket-photos.aman101bhandari.workers.dev",
 };

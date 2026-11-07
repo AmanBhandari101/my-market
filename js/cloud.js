@@ -36,7 +36,7 @@
     let res;
     try {
       res = await fetch(`${C.photosUrl}/p/${path.slice(3)}`, { method: "PUT", body: blob,
-        headers: { Authorization: `Bearer ${data.session.access_token}`, "Content-Type": "image/jpeg", ...(replacePrefix ? { "X-Replace-Prefix": replacePrefix } : {}) } });
+        headers: { Authorization: `Bearer ${data.session.access_token}`, apikey: C.supabaseKey, "Content-Type": "image/jpeg", ...(replacePrefix ? { "X-Replace-Prefix": replacePrefix } : {}) } });
     } catch (e) { throw new Error("network: " + e.message); }        // offline: retried later
     // an expired login or a busy service is retried later; a refused photo (wrong shop, too large) is not
     if (res.status === 401 || res.status >= 500) throw new Error("network: photo service " + res.status);
@@ -77,6 +77,7 @@
       // Cloudflare: a new file name per photo (customers' phones keep photos cached for long); the item's older photo is removed
       const path = C.photosUrl ? `r2/${op.shopId}/${op.itemId}-${Date.now().toString(36)}.jpg` : `${op.shopId}/${op.itemId}.jpg`;
       await putPhoto(path, blob, C.photosUrl ? op.itemId + "-" : "");
+      op.savedPath = path;
       r = await sb.from("items").update({ photo_path: path }).eq("id", op.itemId);
       // our own catalogue product gets the photo too (ignored if it isn't ours)
       if (!r.error && op.productId) await sb.from("catalog_products").update({ photo_path: path }).eq("id", op.productId).is("photo_path", null);

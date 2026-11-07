@@ -14,7 +14,8 @@
 // Settings (Cloudflare dashboard → Worker → Settings):
 //   D1 database binding  DB            → the database, e.g. "mymarket-photos"
 //   Variable             SUPABASE_URL  → https://dhcpzdwzbndntnekuiud.supabase.co
-//   Variable             SUPABASE_KEY  → the publishable key (same as js/config.js)
+//   Variable             SUPABASE_KEY  → optional: the publishable key (js/config.js). If it isn't set,
+//                                        the app's own copy, sent as the "apikey" header, is used.
 //   Variable             ALLOW_ORIGIN  → https://amanbhandari101.github.io  (where the apps run)
 
 const MAX_BYTES = 1_500_000;                       // the apps send ~60–200 KB; D1 rows can hold up to 2 MB
@@ -67,7 +68,7 @@ export default {
     const cors = {
       "Access-Control-Allow-Origin": allowed.includes(origin) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ? origin : allowed[0] || "*",
       "Access-Control-Allow-Methods": "GET, HEAD, PUT, DELETE, OPTIONS",
-      "Access-Control-Allow-Headers": "authorization, content-type, x-replace-prefix",
+      "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-replace-prefix",
       "Access-Control-Max-Age": "86400",
       Vary: "Origin",
     };
@@ -100,9 +101,12 @@ export default {
     // ---------- write: only someone logged in to this shop ----------
     const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
     if (!token) return reply(401, "Log in first");
+    // the project's public (publishable) key — never a secret key; the login token is what proves who it is
+    const apikey = env.SUPABASE_KEY || req.headers.get("apikey") || "";
+    if (!/^sb_publishable_[A-Za-z0-9_-]{10,}$|^eyJ[A-Za-z0-9._-]+$/.test(apikey)) return reply(401, "Missing app key");
     const chk = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/is_my_shop`, {
       method: "POST",
-      headers: { apikey: env.SUPABASE_KEY, Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      headers: { apikey, Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ p_shop: shopId }),
     });
     if (chk.status === 401) return reply(401, "Your login has expired — open the app again");

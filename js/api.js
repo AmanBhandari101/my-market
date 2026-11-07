@@ -41,7 +41,9 @@ window.MM_API = (function () {
     const cloudShops = new Set((store.get("shopsAdded", []) || []).filter((x) => x.cloud).map((x) => x.id));
     const oi = store.get("ownerItems", {});
     for (const [sid, list] of Object.entries(oi)) if (cloudShops.has(sid)) for (const it of list)
-      if (typeof it.photo === "string" && it.photo.startsWith("data:") && !pend.has(it.id)) { it.photo = C.photoUrl(`${sid}/${it.id}.jpg`); changed = true; }
+      // only when the photo's real address is known (Cloudflare photos get a new file name each time)
+      if (typeof it.photo === "string" && it.photo.startsWith("data:") && !pend.has(it.id) && (it.photoPath || !C.newPhotoPath || C.newPhotoPath("x") === "x")) {
+        it.photo = C.photoUrl(it.photoPath || `${sid}/${it.id}.jpg`); changed = true; }
     const sa = store.get("shopsAdded", []);
     for (const sh of sa) if (sh.cloud) {
       for (const k of ["logo", "cover"]) if (typeof sh[k] === "string" && sh[k].startsWith("data:") && sh[k + "Path"] && !pend.has(sh[k + "Path"])) { sh[k] = C.photoUrl(sh[k + "Path"]); changed = true; }
@@ -62,7 +64,9 @@ window.MM_API = (function () {
     const C = window.MM_CLOUD; if (!C) return;
     if (op.op === "photo") {
       const oi = store.get("ownerItems", {}), it = (oi[op.shopId] || []).find((x) => x.id === op.itemId);
-      if (it && it.photo === op.dataUrl) { it.photo = C.photoUrl(`${op.shopId}/${op.itemId}.jpg`) + "?v=" + Date.now().toString(36); store.set("ownerItems", oi); }
+      // op.savedPath: where the upload put it (Cloudflare "r2/…" or Supabase)
+      const path = op.savedPath || `${op.shopId}/${op.itemId}.jpg`;
+      if (it && it.photo === op.dataUrl) { it.photo = C.photoUrl(path) + (path.startsWith("r2/") ? "" : "?v=" + Date.now().toString(36)); it.photoPath = path; store.set("ownerItems", oi); }
     } else if (op.op === "shopphoto") {
       const sa = store.get("shopsAdded", []), sh = sa.find((x) => x.id === op.shopId); if (!sh) return;
       if (op.kind === "gallery") (sh.gallery || []).forEach((g, i) => { if (g === op.dataUrl) sh.gallery[i] = C.photoUrl(op.path); });
@@ -1006,7 +1010,7 @@ window.MM_API = (function () {
     const its = (items || []).filter((i) => !i.removed).map((i) => ({
       id: i.id, name: i.name, brand: i.brand || "Generic", cat: i.cat, price: i.price, mrp: i.mrp, cost: i.cost, reorderAt: i.reorder_at, code: i.code || null,
       qty: i.qty == null ? null : Math.max(0, i.qty), qtyRaw: i.qty ?? undefined, qty0: i.qty, stockAt: ms(i.stock_at), stockAt0: ms(i.stock_at), lastConfirmed: i.qty > 0 ? ms(i.stock_at) : null,
-      photo: photoUrl(i.photo_path), addedAt: ms(i.created_at),
+      photo: photoUrl(i.photo_path), photoPath: i.photo_path || undefined, addedAt: ms(i.created_at),
       ...(prod[i.product_id] ? productDetails(prod[i.product_id], photoUrl, r.id) : {}),
     }));
     const oi = store.get("ownerItems", {}); oi[r.id] = its; store.set("ownerItems", oi);
