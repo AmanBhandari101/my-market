@@ -272,5 +272,5 @@
     $("#back").onclick = () => (history.length > 1 ? history.back() : U.go("#/"));
   }
 
-  Object.assign(U.ROUTES, { p: areaView, item: itemView, bag: bagView, checkout: checkoutView, order: orderView, orders: ordersView });
+  Object.assign(U.ROUTES, { p: areaView, item: itemView, bag: bagView, checkout: checkoutView, order: orderView });
 })();

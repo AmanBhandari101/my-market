@@ -385,16 +385,120 @@
             <h3>${kind === "hold" ? "Your items are on hold" : "Order placed"}</h3>
             <p class="co-code">Order <b>${esc(r.code)}</b> · ${rupee(r.total)}</p>
             <p class="co-why">${kind === "hold" ? `Show code <b>${esc(r.code)}</b> at ${esc(s.name)} within 4 hours.` : mode === "delivery" ? `${esc(s.name)} will confirm and deliver to you.` : `Pick it up at ${esc(s.name)} — show code <b>${esc(r.code)}</b>.`} You'll see when the shop confirms it on this page.</p>
+            <button class="co-go" id="co-track"><span>${ic("receipt")}Track it in My orders</span></button>
             <button class="co-go wa" id="co-wa"><span>${ic("chat")}Tell the shop on WhatsApp</span></button>
-            <button class="co-done" id="co-ok">Done</button></div>`;
+            <button class="co-done" id="co-ok">Keep shopping</button></div>`;
           $("#co-wa", el).onclick = () => waShop(s, orderText(s, kind, mode, sent, { ...f, name }, r.code));
           $("#co-ok", el).onclick = () => { closeSheet(); route(); };
+          $("#co-track", el).onclick = () => { closeSheet(); go(`#/orders?new=${encodeURIComponent(r.code)}`); };
+          refreshOrders().then(() => syncTabs((location.hash.slice(2).split(/[/?]/)[0]) || "")).catch(() => {});
         } catch (x) { busy = false; btn.classList.remove("busy"); btn.querySelector("span").textContent = "Try again"; err(x.message || "Couldn't send — try again"); }
       };
     };
     openSheet("", (el) => { el.classList.add("co-sheet"); draw(el); });
     cleanups.push(() => $("#sheet")?.classList.remove("co-sheet"));
   }
+  // ---------- My orders: every order at every shop, tracked live ----------
+  // The order list lives on this phone (myOrders: token, shop, code, time); each order's
+  // status comes from the server by its private token. Carts not yet ordered are listed too,
+  // so a customer can shop at several shops at once and check out each one from here.
+  const ordCache = () => A.store.get("myOrdersCache", {});
+  const isActive = (st, o) => st && (st.status === "new" || st.status === "ready") && Date.now() - o.at < 3 * 86400000;
+  const activeOrders = () => { const c = ordCache(); return myOrders().filter((o) => isActive(c[o.token], o)).length; };
+  async function refreshOrders() {
+    const CL = window.MM_CLOUD; if (!CL || !CL.orderStatus || !navigator.onLine) return false;
+    const list = myOrders().filter((o) => Date.now() - o.at < 30 * 86400000);
+    const res = await Promise.all(list.map((o) => CL.orderStatus(o.token).catch(() => undefined)));
+    const c = ordCache();
+    list.forEach((o, i) => { if (res[i] !== undefined) c[o.token] = res[i]; });
+    A.store.set("myOrdersCache", c);
+    // shops these orders are from, if they aren't loaded (a shop far from here)
+    const missing = [...new Set(list.map((o) => o.shopId))].filter((id) => !A.getShop(id)).slice(0, 8);
+    if (missing.length && CL.loadShop) await Promise.all(missing.map((id) => CL.loadShop(id).catch(() => 0)));
+    return true;
+  }
+  function openCarts() {
+    const out = [];
+    try { for (const k of Object.keys(localStorage)) {
+      if (!k.startsWith("mm.siteCart:")) continue;
+      const s = A.getShop(k.slice(12)); if (!s) continue;
+      const lines = sc.lines(s); if (!lines.length) continue;
+      out.push({ s, n: lines.reduce((x, l) => x + l.qty, 0), t: lines.reduce((x, l) => x + (l.it.price || 0) * l.qty, 0) });
+    } } catch {}
+    return out;
+  }
+  const STEPS = (st) => st.kind === "hold" ? ["Sent", "Kept aside", "Collected"] : st.mode === "delivery" ? ["Sent", "Accepted", "Delivered"] : ["Sent", "Ready", "Collected"];
+  const stepAt = (st) => ({ new: 0, ready: 1, done: 2 })[st.status] ?? 0;
+  const left = (t) => { const m = Math.round((Date.parse(t) - Date.now()) / 60000); return m <= 0 ? "time is up" : m < 60 ? `${m} min left` : `${Math.floor(m / 60)} h ${m % 60} min left`; };
+  function orderCard(o, st, hl) {
+    const s = A.getShop(o.shopId), ph = s ? String(s.phone || "").replace(/\D/g, "").slice(-10) : "";
+    if (!st) return `<div class="mo-card off"><div class="mo-hd"><b>${esc(s ? s.name : "A shop")}</b><span>Order ${esc(o.code || "")}</span></div>
+      <p class="small quiet" style="margin:6px 0 0">${navigator.onLine ? "This order isn't on the server any more." : "Connect to the internet to see this order."}</p></div>`;
+    const lines = Array.isArray(st.lines) ? st.lines : [], cancelled = st.status === "cancelled", at = stepAt(st), steps = STEPS(st);
+    return `<div class="mo-card ${st.status} ${hl ? "hl" : ""}" id="mo-${esc(o.token.slice(0, 12))}">
+      <div class="mo-hd"><a href="#/shop/${o.shopId}"><b>${esc(s ? s.name : "Shop")}</b></a><span class="mo-code">${esc(st.code)}</span></div>
+      <div class="mo-sub">${st.kind === "hold" ? "Hold for pickup" : st.mode === "delivery" ? "Home delivery" : "Pickup"} · ${new Date(st.created_at || o.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</div>
+      ${cancelled ? '<div class="mo-state x">Cancelled</div>' : `<div class="mo-steps">${steps.map((t, i) => `<span class="${i <= at ? "on" : ""} ${i === at ? "now" : ""}"><i></i>${t}</span>`).join("")}</div>
+        <div class="mo-state">${esc(orderWord(st))}${st.kind === "hold" && st.status !== "done" && st.hold_until ? ` · ${left(st.hold_until)}` : ""}</div>`}
+      <div class="mo-lines">${lines.slice(0, 6).map((l) => `<div><span>${l.qty} × ${esc(l.name)}</span><b>${l.price ? rupee(l.price * l.qty) : "—"}</b></div>`).join("")}
+        ${lines.length > 6 ? `<div class="faint">…and ${lines.length - 6} more</div>` : ""}
+        <div class="mo-tot"><span>Total</span><b>${rupee(st.total || 0)}</b></div></div>
+      <div class="mo-act">
+        ${ph ? `<button data-wa="${o.token}">${ic("chat")}WhatsApp</button><a href="tel:+91${ph}">${ic("phone")}Call</a>` : ""}
+        ${s && s.lat != null ? `<a href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}" target="_blank" rel="noopener">${ic("pin")}Directions</a>` : ""}
+        ${st.status === "new" ? `<button class="x" data-cx="${o.token}">Cancel</button>` : ""}
+        ${(st.status === "done" || cancelled) && s ? `<button data-again="${o.token}">${ic("bag")}Order again</button>` : ""}
+      </div></div>`;
+  }
+  function myOrdersView(params) {
+    const hl = params.get("new") || "";
+    const draw = () => {
+      const c = ordCache(), all = myOrders().filter((o) => Date.now() - o.at < 30 * 86400000);
+      const act = all.filter((o) => isActive(c[o.token], o) || (c[o.token] === undefined && Date.now() - o.at < 86400000));
+      const past = all.filter((o) => !act.includes(o));
+      const carts = openCarts();
+      app.innerHTML = `
+        <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button><span class="faint tiny" id="mo-upd"></span></div>
+        <div class="pad" style="margin-top:18px"><h1 class="display">My orders</h1>
+          <p class="quiet small" style="margin-top:6px">Order from as many shops as you like — each one is tracked here.</p></div>
+        ${carts.length ? `<div class="block"><div class="eyebrow"><span>In your carts</span><span class="faint">not ordered yet</span></div>
+          <div class="entries">${carts.map(({ s, n, t }) => `<a class="entry" href="#/shop/${s.id}?cart=buy">${mono(s)}<div class="body"><div class="name">${esc(s.name)}</div>
+            <div class="note">${n} item${n === 1 ? "" : "s"} · ${rupee(t)}</div></div><div class="aside"><b class="mo-go">Checkout</b></div></a>`).join("")}</div></div>` : ""}
+        <div class="block"><div class="eyebrow"><span>Active</span>${act.length ? `<span class="faint">${act.length}</span>` : ""}</div>
+          ${act.length ? `<div class="mo-list">${act.map((o) => orderCard(o, c[o.token], hl && o.code === hl)).join("")}</div>`
+            : `<p class="quiet small">No active orders. ${all.length ? "" : "Open a shop, add items to the cart and tap Hold or Buy."}</p><a class="btn line" href="#/" style="margin-top:10px">Find shops near you</a>`}</div>
+        ${past.length ? `<div class="block"><div class="eyebrow"><span>Earlier</span></div><div class="mo-list">${past.slice(0, 20).map((o) => orderCard(o, c[o.token], false)).join("")}</div></div>` : ""}
+        <div style="height:90px"></div>`;
+      $("#back").onclick = () => (history.length > 1 ? history.back() : go("#/"));
+      const find = (t) => all.find((o) => o.token === t);
+      $$("[data-wa]").forEach((b) => b.onclick = () => {
+        const o = find(b.dataset.wa), st = c[o.token], s = A.getShop(o.shopId); if (!s) return;
+        waShop(s, `Hi ${s.name}, about my My Market order *${st.code}* (${rupee(st.total || 0)}) — `);
+      });
+      $$("[data-cx]").forEach((b) => b.onclick = async () => {
+        if (!confirm("Cancel this order?")) return;
+        try { await window.MM_CLOUD.cancelMyOrder(b.dataset.cx); toast("Order cancelled"); await refreshOrders(); draw(); }
+        catch { toast("Couldn't cancel — check your internet"); }
+      });
+      $$("[data-again]").forEach((b) => b.onclick = () => {
+        const o = find(b.dataset.again), st = c[o.token], s = A.getShop(o.shopId); if (!s) return;
+        let n = 0; for (const l of st.lines || []) if (s.items.find((i) => i.id === l.item_id)) { sc.add(s.id, l.item_id, l.qty); n++; }
+        if (!n) return toast("These items aren't listed at the shop any more");
+        go(`#/shop/${s.id}?cart=buy`);
+      });
+      if (hl) setTimeout(() => $(".mo-card.hl")?.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
+      syncTabs("orders");
+    };
+    draw();
+    const tick = async () => {
+      const ok = await refreshOrders().catch(() => false);
+      if (!location.hash.startsWith("#/orders")) return;
+      draw(); const u = $("#mo-upd"); if (u) u.textContent = ok ? "Updated " + tm(Date.now()) : "Offline — showing the last update";
+    };
+    tick();
+    const iv = setInterval(tick, 20000); cleanups.push(() => clearInterval(iv));
+  }
+
   // the floating cart bar on a shop's website
   function paintSiteCart(s) {
     const bar = $("#scb"); if (!bar) return;
@@ -633,21 +737,19 @@
     cleanups.push(() => document.body.classList.remove("has-scb"));
     if (params.get("cart") === "hold" || params.get("cart") === "buy") setTimeout(() => sc.lines(s).length && siteCheckout(s, params.get("cart"), src), 120);
 
-    // this customer's orders at this shop, with what the shop has done so far
-    const mine = myOrders().filter((o) => o.shopId === s.id && Date.now() - o.at < 3 * 86400000);
-    if (mine.length && window.MM_CLOUD && window.MM_CLOUD.orderStatus) {
-      Promise.all(mine.map((o) => window.MM_CLOUD.orderStatus(o.token).catch(() => null))).then((list) => {
-        const box = $("#sorders"); if (!box) return;
-        box.innerHTML = list.map((o, i) => o ? `<div class="s-ord ${o.status}">
-          <span class="s-ord-ic">${ic(o.status === "ready" || o.status === "done" ? "check" : o.status === "cancelled" ? "close" : "clock")}</span>
-          <div><b>Order ${esc(o.code)} · ${o.kind === "hold" ? "On hold" : o.mode === "delivery" ? "Delivery" : "Pickup"} · ${rupee(o.total)}</b><p>${esc(orderWord(o))}</p></div>
-          ${o.status === "new" ? `<button data-cx="${esc(mine[i].token)}">Cancel</button>` : ""}</div>` : "").join("");
-        $$("[data-cx]", box).forEach((b) => b.onclick = async () => {
-          if (!confirm("Cancel this order?")) return;
-          try { await window.MM_CLOUD.cancelMyOrder(b.dataset.cx); toast("Order cancelled"); route(); } catch { toast("Couldn't cancel — check your internet"); }
-        });
-      });
-    }
+    // this customer's active orders at this shop: one short line, full tracking on My orders
+    const paintMine = () => {
+      const box = $("#sorders"); if (!box) return;
+      const c = ordCache(), mine = myOrders().filter((o) => o.shopId === s.id && isActive(c[o.token], o));
+      if (!mine.length) { box.innerHTML = ""; return; }
+      const st = c[mine[0].token];
+      box.innerHTML = `<a class="s-ord ${st.status}" href="#/orders">
+        <span class="s-ord-ic">${ic(st.status === "ready" ? "check" : "clock")}</span>
+        <div><b>${mine.length > 1 ? `${mine.length} orders here` : `Order ${esc(st.code)} · ${rupee(st.total || 0)}`}</b><p>${mine.length > 1 ? "Tap to track them" : esc(orderWord(st))}</p></div>
+        <span class="s-ord-go">Track ${ic("arrow")}</span></a>`;
+    };
+    paintMine();
+    if (myOrders().some((o) => o.shopId === s.id)) refreshOrders().then(paintMine).catch(() => {});
 
     // sections fade up as they scroll into view
     const rv = $$(".site .rv");
@@ -915,8 +1017,8 @@
         <span class="body"><span class="serif" style="font-size:19px;display:block">Own a shop? Get My Market Business</span>
         <span class="small quiet">A separate app for billing, stock and khata — 2 months free</span></span>${ic("arrow")}
       </a>
-      <div class="block"><div class="eyebrow"><span>Your orders</span>${A.getOrders().length ? '<a class="link" href="#/orders" style="font-size:10.5px">All</a>' : ""}</div>
-        ${A.getOrders().length ? `<div class="entries">${A.getOrders().slice(0, 3).map(orderEntry).join("")}</div>` : '<p class="quiet small">Orders and reservations you make will show here.</p>'}</div>
+      <a class="entry" href="#/orders" style="margin:20px var(--gut) 0;width:auto">${ic("receipt")}<div class="body"><div class="name">My orders</div>
+        <div class="note">${activeOrders() ? `${activeOrders()} active · ` : ""}${myOrders().length ? `${myOrders().length} in the last 30 days` : "Orders and holds you place show here"}</div></div>${ic("arrow")}</a>
       ${A.store.get("asks", []).length ? `<div class="block"><div class="eyebrow"><span>Your questions to shops</span></div><div class="entries">
         ${A.store.get("asks", []).slice(0, 3).map((a) => { const yes = Object.values(a.replies).filter((r) => r.has).length;
           return `<a class="entry" href="#/ask?id=${a.id}"><div class="body"><div class="name">“${esc(a.q)}”</div><div class="note">${Object.keys(a.replies).length} of ${a.targets.length} replied</div></div><div class="aside">${yes ? `<b style="color:var(--in)">${yes} have it</b>` : ""}</div></a>`; }).join("")}
@@ -949,7 +1051,7 @@
   }
 
   // ---------- bottom tabs (customer screens only) ----------
-  const TAB_ON = { "": "home", item: "home", search: "search", ask: "search", me: "me", orders: "me", order: "me", bag: "bag" };
+  const TAB_ON = { "": "home", item: "home", search: "search", ask: "search", me: "me", orders: "orders", order: "me", bag: "bag" };
   // Shop app: three pages — Bill (home), Stock, Reports.
   const BIZ_ON = { "": "bill", bill: "bill", cart: "bill", inbox: "bill", items: "stock", stockin: "stock", reports: "reports", bills: "reports", insights: "reports", site: "reports", security: "reports", backup: "reports", plan: "reports", analytics: "reports", admin: "reports" };
   function syncTabs(r, parts = []) {
@@ -966,8 +1068,9 @@
     const on = TAB_ON[r];
     nav.classList.toggle("hidden", !on); document.body.classList.toggle("tabs-on", !!on);
     if (!on) return;
-    nav.innerHTML = [["home", "#/", "store", "Home"], ["search", "#/search", "search", "Search"], ["me", "#/me", "user", "You"]]
-      .map(([k, h, i, l]) => `<a href="${h}" class="${on === k ? "on" : ""}">${ic(i)}${l}${k === "bag" ? `<i class="bcount ${A.bagCount() ? "" : "hidden"}">${A.bagCount()}</i>` : ""}</a>`).join("");
+    const nAct = activeOrders();
+    nav.innerHTML = [["home", "#/", "store", "Home"], ["search", "#/search", "search", "Search"], ["orders", "#/orders", "receipt", "Orders"], ["me", "#/me", "user", "You"]]
+      .map(([k, h, i, l]) => `<a href="${h}" class="${on === k ? "on" : ""}">${ic(i)}${l}${k === "orders" && nAct ? `<i class="bcount">${nAct}</i>` : ""}</a>`).join("");
   }
 
   if (BIZ) {
@@ -992,7 +1095,7 @@
       if (!loc) loc = PILOT_ORIG;
       if (parts[0] !== "biz") { go("#/biz"); return; }
     } else if (parts[0] === "biz") { location.replace("business.html" + location.hash); return; }
-    if (!loc && !["welcome", "shop", "item", "p"].includes(parts[0])) { go("#/welcome"); return; }
+    if (!loc && !["welcome", "shop", "item", "p", "orders"].includes(parts[0])) { go("#/welcome"); return; }
     if (loc && parts[0] === "welcome") { go("#/"); return; }
     const fn = ROUTES[parts[0] || ""] || home;
     fn(parts, params);
@@ -1003,7 +1106,7 @@
   const ROUTES = {
     "": home, welcome, me: meView,
     shop: (p, q) => shopView(p[1], q), search: (p, q) => searchView(q.get("q") || ""),
-    ask: (p, q) => askView(q.get("q"), q.get("id")), route: (p) => routeView(p[1]),
+    ask: (p, q) => askView(q.get("q"), q.get("id")), route: (p) => routeView(p[1]), orders: (p, q) => myOrdersView(q),
   };
   // a form field that needs fixing: red outline, scrolled into view, focused, and the message shown
   // under the button and as a toast (browsers' own "required" bubbles don't show in installed apps)
