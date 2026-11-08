@@ -300,16 +300,21 @@ async function sendPush(env, sub, payload) {
   const body = await encryptPush(sub, JSON.stringify(payload));
   const r = await fetch(sub.endpoint, { method: "POST", body, headers: {
     authorization: await vapidAuth(env, sub.endpoint), "content-encoding": "aes128gcm", "content-type": "application/octet-stream",
-    ttl: "3600", urgency: "high", topic: String(payload.tag || "order").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32) } });
+    // no "topic" header: the push service would merge alerts that share one, and every alert must ring
+    ttl: "3600", urgency: "high" } });
   return r.status;
 }
+// Every alert gets its own tag, so it arrives as a NEW notification. Re-using a tag replaces the
+// previous notification, and Android plays the sound only for the first one (later ones were silent).
 function orderAlert(o) {
-  if (o.test) return { title: "🔔 Order alerts are on", body: "This is how a new order will ring on this phone.", tag: "mm-test", url: "business.html#/biz/inbox" };
+  const stamp = Date.now().toString(36);
+  const time = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(11, 16);   // India time, for the owner to tell tests apart
+  if (o.test) return { title: "🔔 Test alert", body: `Order alerts work on this phone (${time}). New orders will ring like this.`, tag: "mm-test-" + stamp, url: "business.html#/biz/inbox" };
   const what = o.kind === "hold" ? "Hold request" : "New order";
   const money = o.total ? ` · ${inr(o.total)}` : "";
   return { title: `🛒 ${what} ${o.code || ""}${money}`.trim(),
     body: `${o.name || "A customer"} · ${o.items || 1} item${o.items === 1 ? "" : "s"} · ${o.mode === "delivery" ? "Delivery" : "Pickup"} — tap to open`,
-    tag: "mm-order-" + (o.code || Date.now()), url: "business.html#/biz/inbox" };
+    tag: "mm-order-" + (o.code || "x") + "-" + stamp, url: "business.html#/biz/inbox" };
 }
 async function pushOrder(request, env) {
   if (!env.VAPID_PRIVATE || !env.VAPID_PUBLIC) return new Response("Push keys not set", { status: 503 });

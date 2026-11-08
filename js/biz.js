@@ -315,7 +315,7 @@
     setInterval(() => { const gap = document.visibilityState === "visible" ? 20000 : 60000; if (Date.now() - last >= gap) { last = Date.now(); pollOrders(); } }, 5000);
     if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", (e) => {
       const m = e.data || {};
-      if (m.type === "mm-order") { if (!(m.alert && m.alert.tag === "mm-test")) ring(); pollOrders(); }
+      if (m.type === "mm-order") { ring(); pollOrders(); }
       if (m.type === "mm-open" && m.url) { const h = m.url.split("#")[1]; if (h) location.hash = "#" + h; }
     });
   }
