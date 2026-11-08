@@ -373,7 +373,8 @@
   async function healAlerts() {
     const s = A.ownerShop();
     if (!s || !s.cloud || !A.store.get("pushOn:" + s.id, false) || !pushSupported() || !vapidKey() || Notification.permission !== "granted" || !navigator.onLine) return;
-    try { await window.MM_CLOUD.savePush(s.id, await pushSub(false), deviceName()); } catch {}
+    try { await window.MM_CLOUD.savePush(s.id, await pushSub(false), deviceName()); }
+    catch (x) { window.MM_CLOUD.logProblem("alerts:heal", x && x.message, s.id); }
   }
   if (window.MM_APP === "business") setTimeout(healAlerts, 6000);
   // test: straight to this phone, showing what the push service answered
@@ -387,35 +388,57 @@
     if (sub) { try { await window.MM_CLOUD.removePush(s.id, sub.endpoint); } catch {} await sub.unsubscribe().catch(() => {}); }
     A.store.set("pushOn:" + s.id, false);
   }
+  // Order alerts screen = a check-up: each link in the chain with ✓ / ✗ and the exact problem.
+  // Problems are also sent to My Market (app_errors) so support can see them without a screenshot.
   async function alertsSheet(s) {
-    const st = await alertState(s);
-    const MSG = {
-      on: ["Order alerts are ON", "New orders ring on this phone, even when the app is closed."],
-      off: ["Order alerts are OFF", "Turn them on so a new order rings on this phone — even when the app is closed or the phone is locked."],
-      blocked: ["Notifications are blocked", "Open the phone's Settings → Apps → Chrome (or My Market) → Notifications → Allow. Then come back and tap Turn on."],
-      "ios-install": ["Add My Market to your Home Screen first", "On iPhone, alerts work only from the Home Screen app: tap Share ⬆ → Add to Home Screen, open My Market from there, then turn alerts on."],
-      unsupported: ["This browser can't show alerts", "Open My Market Business in Chrome on Android (or Safari from the Home Screen on iPhone)."],
-    }[st];
-    U.openSheet(`<div class="eyebrow">Order alerts</div><div class="title">${MSG[0]}</div>
-      <p class="small quiet" style="margin:8px 0 14px">${MSG[1]}</p>
-      ${st === "off" || st === "blocked" ? '<button class="btn" id="al-on">🔔 Turn on order alerts</button>' : ""}
-      ${st === "on" ? '<div class="two"><button class="btn" id="al-test">Send a test alert</button><button class="btn line" id="al-off">Turn off</button></div><p class="small" id="al-res" style="margin:10px 0 0;line-height:1.5"></p>' : ""}
-      <button class="link" id="al-ring" style="margin-top:12px">Play the ringtone</button>
-      <p class="tiny faint" style="margin:12px 0 0">Each phone that should ring turns this on once — add it on your staff's phones too. The alert uses the phone's notification sound; keep the phone off silent.</p>`, (el) => {
-      $("#al-on", el) && ($("#al-on", el).onclick = async () => {
-        try { await turnOnAlerts(s); U.closeSheet(); U.toast("Order alerts are on 🔔"); alertsSheet(s); }
-        catch (x) { U.toast(navigator.onLine ? x.message : "No internet — try again when you're online", 7000); }
-      });
-      $("#al-off", el) && ($("#al-off", el).onclick = async () => { await turnOffAlerts(s); U.closeSheet(); U.toast("Order alerts are off on this phone"); });
-      $("#al-test", el) && ($("#al-test", el).onclick = async () => {
-        const out = $("#al-res", el); out.textContent = "Sending…";
+    const CL = window.MM_CLOUD, V = ((document.querySelector('script[src*="js/biz.js"]') || {}).src || "").replace(/.*v=(\d+).*/, "$1");
+    const row = (id, label) => `<div class="al-row" id="${id}"><span class="al-ic">…</span><div><b>${label}</b><p></p></div></div>`;
+    U.openSheet(`<div class="eyebrow">Order alerts · app v${esc(V)}</div><div class="title">Check-up</div>
+      <p class="small quiet" style="margin:6px 0 10px">A new order should ring on this phone, even when the app is closed. Each step below must be ✓.</p>
+      <div class="al-check">${row("al-1", "Notifications allowed")}${row("al-2", "This phone's alert address")}${row("al-3", "Saved on the My Market server")}${row("al-4", "Test alert to this phone")}</div>
+      <div class="two" style="margin-top:12px"><button class="btn" id="al-fix">🔔 Turn on / fix</button><button class="btn line" id="al-test">Send a test alert</button></div>
+      <div class="two" style="margin-top:8px"><button class="link" id="al-ring">Play the ringtone</button><button class="link accent" id="al-off">Turn off on this phone</button></div>
+      <p class="tiny faint" style="margin:10px 0 0">Turn this on once on every phone that should ring. Alerts use the phone's notification sound — keep it off silent and Do Not Disturb.</p>`, (el) => {
+      const set = (n, ok, text) => { const r = $("#al-" + n, el); if (!r) return; r.className = "al-row " + (ok === true ? "ok" : ok === false ? "bad" : "");
+        r.querySelector(".al-ic").textContent = ok === true ? "✓" : ok === false ? "✗" : "…"; r.querySelector("p").innerHTML = text || ""; };
+      const fail = (n, what, msg) => { set(n, false, esc(msg)); CL.logProblem("alerts:" + what, `${msg} | perm=${window.Notification ? Notification.permission : "-"} on=${A.store.get("pushOn:" + s.id, false)} v=${V}`, s.id); };
+      let sub = null;
+      const check = async () => {
+        [1, 2, 3].forEach((n) => set(n, null, n === 1 ? "checking…" : ""));
+        if (isIOS && !installed()) return fail(1, "ios", "On iPhone: Share ⬆ → Add to Home Screen, then open My Market from the Home Screen.");
+        if (!pushSupported()) return fail(1, "unsupported", "This browser can't show alerts. Use Chrome on Android.");
+        if (!vapidKey()) return fail(1, "nokey", "The app is out of date — close it fully and open it again.");
+        const perm = Notification.permission;
+        if (perm === "denied") return fail(1, "denied", "Blocked. Phone Settings → Apps → Chrome (or My Market) → Notifications → Allow, with sound.");
+        if (perm !== "granted") { set(1, false, "Not allowed yet — tap Turn on / fix and choose Allow."); return; }
+        set(1, true, "Allowed");
+        try { const reg = await navigator.serviceWorker.ready; sub = await reg.pushManager.getSubscription(); }
+        catch (x) { return fail(2, "sw", "Alert service not ready: " + (x.message || x)); }
+        if (!sub) { set(2, false, "None yet — tap Turn on / fix."); set(3, false, ""); return; }
+        set(2, true, new URL(sub.endpoint).host);
+        if (!s.cloud) return fail(3, "local", "This shop isn't logged in on the server — log in with your mobile number and PIN.");
+        try {
+          if (await CL.pushSaved(s.id, sub.endpoint)) set(3, true, "Saved — new orders will be sent here");
+          else { await CL.savePush(s.id, sub, deviceName()); A.store.set("pushOn:" + s.id, true);
+            set(3, (await CL.pushSaved(s.id, sub.endpoint)) || false, "Was missing — saved it again now"); }
+        } catch (x) { fail(3, "save", "Couldn't save: " + (x.message || x)); }
+      };
+      check();
+      $("#al-fix", el).onclick = async () => {
+        try { await turnOnAlerts(s, false); U.toast("Order alerts are on 🔔"); }
+        catch (x) { fail(1, "turnon", navigator.onLine ? x.message : "No internet — try again when you're online"); return; }
+        check();
+      };
+      $("#al-test", el).onclick = async () => {
+        set(4, null, "sending…");
         try {
           const r = await testAlert(s);
-          out.innerHTML = r.ok ? `✓ Google accepted the alert (${r.status}). It should ring in a few seconds.<br><span class="faint">No ring? Check the phone isn't on silent / Do Not Disturb, and that notifications for this app are allowed.</span>`
-            : `✗ The alert service refused it: <b>${r.status}</b> ${esc(r.detail || "")}<br><span class="faint">Send this message to My Market support.</span>`;
-          out.style.color = r.ok ? "#17733f" : "var(--out)";
-        } catch (x) { out.textContent = navigator.onLine ? x.message : "No internet — try again when you're online"; out.style.color = "var(--out)"; }
-      });
+          if (r.ok) set(4, true, `Google accepted it (${r.status}) at ${new Date().toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", second: "2-digit" })}. It should appear in the top bar and ring within seconds.`);
+          else fail(4, "test", `The alert service refused it: ${r.status} ${r.detail || ""}`);
+          check();
+        } catch (x) { fail(4, "test", navigator.onLine ? (x.message || String(x)) : "No internet"); }
+      };
+      $("#al-off", el).onclick = async () => { await turnOffAlerts(s); U.closeSheet(); U.toast("Order alerts are off on this phone"); };
       $("#al-ring", el).onclick = () => ring(2);
     });
   }

@@ -934,3 +934,14 @@ body.has-scb .s-foot { padding-bottom: 110px; }
 .s-ord > div { flex: 1; min-width: 0; }
 .s-ord-go { display: inline-flex; align-items: center; gap: 2px; font-weight: 700; font-size: 13px; color: #007185; flex: none; }
 .s-ord-go .i { width: 16px; height: 16px; }
+
+/* order alerts check-up */
+.al-check { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.al-row { display: flex; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--line); align-items: flex-start; }
+.al-row:first-child { border-top: 0; }
+.al-row b { font-size: 14px; }
+.al-row p { margin: 2px 0 0; font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+.al-ic { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; background: #eef1f3; color: var(--ink-2); }
+.al-row.ok .al-ic { background: #1e8e4e; color: #fff; }
+.al-row.bad .al-ic { background: #d0402b; color: #fff; }
+.al-row.bad p { color: #b3261e; }
