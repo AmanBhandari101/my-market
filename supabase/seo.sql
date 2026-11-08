@@ -137,11 +137,11 @@ end $$;
 create or replace function public.seo_sitemap(p_kind text, p_page integer default 1)
 returns table (path text, lastmod timestamptz) language sql stable security definer set search_path = public as $$
   with shops as (
-    select '/shop/' || s.slug as path, greatest(s.updated_at, (select max(i.stock_at) from public.items i where i.shop_id = s.id)) as lastmod
+    select '/shop/' || s.slug as u, greatest(s.updated_at, (select max(i.stock_at) from public.items i where i.shop_id = s.id)) as m
     from public.shops s
     where p_kind = 'shops' and s.slug is not null and public.seo_shop_ok(s.id)
   ), products as (
-    select '/p/' || public.slugify(s.locality) || '/' || public.product_slug(p.name, p.size, p.id) as path, max(i.updated_at) as lastmod
+    select '/p/' || public.slugify(s.locality) || '/' || public.product_slug(p.name, p.size, p.id) as u, max(i.updated_at) as m
     from public.public_items i
     join public.public_shops s on s.id = i.shop_id
     join public.catalog_products p on p.id = i.product_id
@@ -149,8 +149,8 @@ returns table (path text, lastmod timestamptz) language sql stable security defi
       and coalesce(s.locality, '') <> '' and s.takes_orders
     group by 1
   )
-  select path, lastmod from (select * from shops union all select * from products) x
-  order by path
+  select x.u, x.m from (select * from shops union all select * from products) x
+  order by x.u
   offset greatest(p_page - 1, 0) * 45000 limit 45000;
 $$;
 

@@ -511,6 +511,9 @@
     });
     flush().then(() => {
       const me = A.ownerShop(); if (me && me.cloud) { topUpBillNos(me.id); cleanOldBills(me.id); }
+      // the shop's permanent link name (made by the server) — needed for its clean website link
+      if (me && me.cloud && !me.slug) sb.from("shops").select("slug").eq("id", me.id).maybeSingle()
+        .then(({ data }) => { if (data && data.slug) A.updateShop(me.id, { slug: data.slug }); });
       // a phone that hasn't downloaded for 30 min picks up changes made on the shop's other phones
       const shop = A.ownerShop();
       if (shop && shop.cloud && !Q.get().length && !Q.failed().length && Date.now() - A.store.get("lastPull", 0) > 30 * 60000)

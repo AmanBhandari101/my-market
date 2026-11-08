@@ -12,5 +12,5 @@ window.MM_CONFIG = {
   photosUrl: "https://mymarket-photos.aman101bhandari.workers.dev",
   // The customer site Google reads (cloudflare/site-worker.js), e.g. "https://mymarket.example.in".
   // Empty = shop links stay on the app's own #/shop/<id> address.
-  siteUrl: "",
+  siteUrl: "https://mymarket.aman101bhandari.workers.dev",
 };
