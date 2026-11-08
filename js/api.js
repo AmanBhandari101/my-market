@@ -659,6 +659,19 @@ window.MM_API = (function () {
     if ("about" in patch) row.about = (patch.about || "").slice(0, 600) || null;
     if ("payMethods" in patch) row.pay_methods = patch.payMethods || [];
     if ("delivery" in patch) row.delivery = !!patch.delivery;
+    // shop details (menu → Shop details)
+    if ("name" in patch) row.name = String(patch.name || "").trim().slice(0, 80) || sh.name;
+    if ("owner" in patch) row.owner_name = String(patch.owner || "").trim().slice(0, 60) || null;
+    if ("cat" in patch) { row.cat = patch.cat; row.cats = [patch.cat]; sh.cats = [patch.cat]; }
+    if ("shopNo" in patch) row.shop_no = patch.shopNo || null;
+    if ("floor" in patch) row.floor = patch.floor || null;
+    if ("landmark" in patch) row.landmark = patch.landmark || null;
+    if ("locality" in patch) row.locality = patch.locality || null;
+    if ("pincode" in patch) row.pincode = patch.pincode || null;
+    if ("lat" in patch && "lng" in patch) { row.lat = patch.lat; row.lng = patch.lng; }
+    if ("open" in patch) row.open_h = patch.open;
+    if ("close" in patch) row.close_h = patch.close;
+    if ("closedDay" in patch) row.closed_day = patch.closedDay || "None";
     if (Object.keys(row).length) q(id, { op: "update", table: "shops", id, patch: row });
   }
   const shopRow = (sh, ownerId) => ({

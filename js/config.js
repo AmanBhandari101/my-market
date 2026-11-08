@@ -14,5 +14,5 @@ window.MM_CONFIG = {
   // Empty = shop links stay on the app's own #/shop/<id> address.
   siteUrl: "https://mymarket.aman101bhandari.workers.dev",
   // Order alerts (Web Push): My Market's public VAPID key. The private half lives only in the site worker.
-  vapidPublic: "",
+  vapidPublic: "BLNqmF-Oof4lsDm1lJRCzT9fOjdGAuZqicajNBYcom01ZbXKbgl9lcvdqI4iaMHW0aYlEo8mOjuAuwQ3OVWb64c",
 };

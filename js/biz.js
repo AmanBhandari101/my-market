@@ -15,6 +15,7 @@
     if (sub === "reports") return reportsView(params);
     if (sub === "site") return siteView(params);
     if (sub === "google") return googleView();
+    if (sub === "details") return detailsView();
     if (sub === "security") return securityView();
     if (sub === "inbox") return dashView();
     if (sub === "bill" && parts[2]) return receiptView(parts[2]);
@@ -418,6 +419,7 @@
         <a class="entry" href="#/biz/inbox"><div class="body"><div class="name">Orders and questions</div><div class="note">${waiting(s)} waiting</div></div>${ic("arrow")}</a>
         <button class="entry" id="m-al"><div class="body"><div class="name">🔔 Order alerts</div><div class="note">${A.store.get("pushOn:" + s.id, false) ? "On — new orders ring on this phone" : "Off — turn on so new orders ring on this phone"}</div></div>${ic("arrow")}</button>
         ${s.cloud ? `<button class="entry" id="m-sync"><div class="body"><div class="name">Sync now</div><div class="note">Send this phone's changes and get your other phones' — ${window.MM_CLOUD.pending()} waiting</div></div>${ic("arrow")}</button>` : ""}
+        <a class="entry" href="#/biz/details"><div class="body"><div class="name">Shop details</div><div class="note">Name, phone, category, address, map pin and hours</div></div>${ic("arrow")}</a>
         <a class="entry" href="#/biz/google"><div class="body"><div class="name">Get found on Google</div><div class="note">Your shop on Google Maps and your products on Google Shopping</div></div>${ic("arrow")}</a>
         <a class="entry" href="#/biz/site"><div class="body"><div class="name">My website</div><div class="note">Your shop's page: share it, QR poster, add to Google Maps</div></div>${ic("arrow")}</a>
         ${s.cloud ? `<a class="entry" href="#/biz/security"><div class="body"><div class="name">Login & security</div><div class="note">Backup number, change PIN, log out other phones</div></div>${ic("arrow")}</a>` : ""}
@@ -1249,6 +1251,64 @@
     });
   }
 
+  // ---------- Shop details: name, owner, phone, category, address, map pin, hours ----------
+  function detailsView() {
+    const s = A.ownerShop();
+    let cat = s.cat, pin = s.lat != null ? { lat: s.lat, lng: s.lng } : null;
+    const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    const floors = ["Ground floor", "1st floor", "2nd floor", "Basement"];
+    U.app.innerHTML = `
+      ${bizTop("Shop details")}
+      <p class="small quiet pad" style="margin:12px 0 0">Shown on your website, your bills and your Google listing. Keep the name, address and phone the same as on Google Maps.</p>
+      <form id="df" class="pad form" novalidate>
+        <label>Shop name<input class="field" name="name" required maxlength="80" value="${esc(s.name)}"></label>
+        <label>Owner's name<input class="field" name="owner" maxlength="60" value="${esc(s.owner || "")}"></label>
+        <label>Shop phone / WhatsApp <span class="faint tiny">— customers call and WhatsApp this number (your login number doesn't change)</span><input class="field" name="phone" inputmode="tel" value="${esc(s.phone || "")}"></label>
+        <label>What do you sell?</label>
+        <div class="words" id="dcats">${Object.entries(C).map(([k, c]) => `<button type="button" class="word ${k === cat ? "on" : ""}" data-cat="${k}" style="${U.catVars(k)}">${esc(c.name)}</button>`).join("")}</div>
+        <div class="two"><label>Shop no.<input class="field" name="shopNo" maxlength="20" value="${esc(s.shopNo && s.shopNo !== "—" ? s.shopNo : "")}"></label>
+          <label>Floor<select class="field" name="floor">${[...new Set([s.floor || "Ground floor", ...floors])].map((f) => `<option ${f === s.floor ? "selected" : ""}>${esc(f)}</option>`).join("")}</select></label></div>
+        <label>Landmark<input class="field" name="landmark" maxlength="80" value="${esc(s.landmark || "")}" placeholder="e.g. Next to the Shiv temple, lane 2"></label>
+        <div class="two"><label>Area / locality<input class="field" name="locality" maxlength="60" value="${esc(s.locality || "")}"></label>
+          <label>PIN code<input class="field" name="pincode" inputmode="numeric" maxlength="6" value="${esc(s.pincode || "")}"></label></div>
+        <div class="two"><label>Opens<select class="field" name="open">${HOURS.map((h) => `<option value="${h}" ${h === s.open ? "selected" : ""}>${fmtH(h)}</option>`).join("")}</select></label>
+          <label>Closes<select class="field" name="close">${HOURS.map((h) => `<option value="${h}" ${h === s.close ? "selected" : ""}>${fmtH(h)}</option>`).join("")}</select></label></div>
+        <label>Weekly holiday<select class="field" name="closedDay"><option>None</option>${DAYS.map((d) => `<option ${d === s.closedDay ? "selected" : ""}>${d}</option>`).join("")}</select></label>
+        <label>Shop location on the map</label>
+        <p class="small" id="dpin" style="margin:0">${pin ? `Pin at ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)} · <a class="link" href="https://www.google.com/maps/search/?api=1&query=${pin.lat},${pin.lng}" target="_blank" rel="noopener">check on Google Maps</a>` : "No pin yet"}</p>
+        <button class="btn line" type="button" id="dgps">📍 I'm at my shop — use this spot</button>
+        <p class="small" id="derr" style="color:var(--out);margin:0;min-height:1em"></p>
+        <button class="btn" type="submit">Save details</button>
+        <p class="tiny faint" style="margin:0">Your website link stays the same after a name change, so printed QR posters keep working.</p>
+      </form>
+      <div style="height:30px"></div>`;
+    bindTop();
+    const f = $("#df");
+    $$("#dcats [data-cat]").forEach((b) => b.onclick = () => { cat = b.dataset.cat; $$("#dcats .word").forEach((x) => x.classList.toggle("on", x === b)); });
+    $("#dgps").onclick = () => {
+      if (!navigator.geolocation) return U.toast("This phone can't share its location");
+      U.toast("Finding your location…");
+      navigator.geolocation.getCurrentPosition((p) => {
+        pin = { lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6) };
+        $("#dpin").innerHTML = `New pin at ${pin.lat.toFixed(5)}, ${pin.lng.toFixed(5)} (±${Math.round(p.coords.accuracy)} m) · <a class="link" href="https://www.google.com/maps/search/?api=1&query=${pin.lat},${pin.lng}" target="_blank" rel="noopener">check</a> — tap Save to keep it`;
+      }, () => U.toast("Couldn't get your location — allow location for this app and try again", 6000), { enableHighAccuracy: true, timeout: 15000 });
+    };
+    f.onsubmit = (e) => {
+      e.preventDefault();
+      const v = Object.fromEntries(new FormData(f));
+      const name = v.name.trim(), phone = v.phone.replace(/\D/g, "").slice(-10), pc = v.pincode.trim();
+      if (name.length < 2) return U.badField(f, "name", "Type your shop's name", "#derr");
+      if (v.phone.trim() && phone.length !== 10) return U.badField(f, "phone", "Type a 10-digit mobile number", "#derr");
+      if (pc && !/^\d{6}$/.test(pc)) return U.badField(f, "pincode", "PIN code has 6 digits", "#derr");
+      if (+v.close <= +v.open) return U.badField(f, "close", "Closing time must be after opening time", "#derr");
+      A.updateShop(s.id, { name, owner: v.owner.trim(), phone: phone || "", cat, shopNo: v.shopNo.trim(), floor: v.floor, landmark: v.landmark.trim(),
+        locality: v.locality.trim(), pincode: pc, open: +v.open, close: +v.close, closedDay: v.closedDay,
+        ...(pin && (pin.lat !== s.lat || pin.lng !== s.lng) ? { lat: pin.lat, lng: pin.lng } : {}) });
+      U.toast(s.cloud ? "Saved — your website and bills show the new details" : "Saved");
+      U.go("#/biz");
+    };
+  }
+
   const siteLink = (s, src) => (window.MM_CLOUD ? window.MM_CLOUD.shopLink(s.id, src) : "");
 
   // ---------- Login & security ----------
@@ -1393,7 +1453,7 @@
           <div class="form" style="margin-top:6px">
             <label>Your Gmail <span class="faint tiny">— the Google account you'll use for your shop</span><input class="field" id="ggm" type="email" inputmode="email" placeholder="yourshop@gmail.com" value="${esc(g.gmail || "")}"></label>
             <div class="two"><button class="btn" id="ggms" type="button">Save Gmail</button><a class="btn line" href="#/biz/site">Edit about &amp; photos</a></div>
-            <button class="link" id="gbs" type="button">Change phone or other bill details</button>
+            <a class="link" href="#/biz/details">Edit shop name, phone, address or hours</a>
           </div>`)}
         ${step(1, "Shop photos", done[1] ? "All set" : `${s.logo ? "" : "Logo, "}${Math.max(0, 3 - photos)} more photo${3 - photos === 1 ? "" : "s"}`, `
           <p class="small quiet">Google needs real photos of your shop. Take them in daylight:</p>
@@ -1455,7 +1515,6 @@
         if (!/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/.test(v)) return U.toast("Type your Gmail, like yourshop@gmail.com");
         save({ gmail: v }, "Gmail saved");
       });
-      $("#gbs") && ($("#gbs").onclick = () => billSettings(s));
       $$("[data-gbp]").forEach((b) => b.onclick = () => save({ gbp_status: b.dataset.gbp }, "Saved"));
       $("#gml") && ($("#gml").onclick = () => {
         const mu = $("#gmu").value.trim(), rv = $("#grv").value.trim();
