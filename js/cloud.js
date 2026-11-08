@@ -465,6 +465,18 @@
     const { error } = await sb.from("push_subs").delete().eq("shop_id", shopId).eq("endpoint", endpoint);
     if (error) throw new Error(friendly(error));
   }
+  // test alert straight to this phone through the site worker; returns the push service's answer
+  async function pushTestDirect(shopId, sub) {
+    const { data } = await sb.auth.getSession();
+    const token = data.session && data.session.access_token;
+    if (!token) throw new Error("Log in to your shop again, then try");
+    const site = (C.siteUrl || "").replace(/\/$/, "");
+    const r = await fetch(`${site}/push/test`, { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + token },
+      body: JSON.stringify({ shop_id: shopId, sub: sub.toJSON ? { endpoint: sub.endpoint, ...sub.toJSON().keys } : sub }) });
+    const j = await r.json().catch(() => ({}));
+    if (j.error) throw new Error(j.error);
+    return j;
+  }
   async function testPush(shopId) {
     const { data, error } = await sb.rpc("push_test", { p_shop: shopId });
     if (error) throw new Error(friendly(error));
@@ -522,7 +534,7 @@
   async function myNumber() { const { data } = await sb.auth.getSession(); const m = (data.session?.user?.email || "").match(/^91(\d{10})@/); return m ? m[1] : ""; }
   async function deleteShop(shopId) { const { error } = await sb.rpc("delete_my_shop", { p_shop: shopId }); if (error) throw new Error(friendly(error)); }
 
-  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, areaProduct, googleLink, saveGoogle, savePush, removePush, testPush, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, isAdmin, importStatement, searchCatalog, searchOnline, myPlan, claimPayment, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl, newPhotoPath,
+  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, areaProduct, googleLink, saveGoogle, savePush, removePush, testPush, pushTestDirect, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, isAdmin, importStatement, searchCatalog, searchOnline, myPlan, claimPayment, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl, newPhotoPath,
     pending: () => Q.get().length, failedOps: () => Q.failed() };
 
   // start-up

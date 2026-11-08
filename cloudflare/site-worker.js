@@ -295,14 +295,35 @@ async function vapidAuth(env, endpoint) {
   const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, vapidKey, utf8(`${head}.${claims}`));
   return `vapid t=${head}.${claims}.${b64u.enc(sig)}, k=${env.VAPID_PUBLIC}`;
 }
-async function sendPush(env, sub, payload) {
-  if (!/^https:\/\//.test(sub.endpoint || "")) return 400;
+async function pushRaw(env, sub, payload) {
+  if (!/^https:\/\//.test(sub.endpoint || "")) return new Response("bad endpoint", { status: 400 });
   const body = await encryptPush(sub, JSON.stringify(payload));
-  const r = await fetch(sub.endpoint, { method: "POST", body, headers: {
+  return fetch(sub.endpoint, { method: "POST", body, headers: {
     authorization: await vapidAuth(env, sub.endpoint), "content-encoding": "aes128gcm", "content-type": "application/octet-stream",
     // no "topic" header: the push service would merge alerts that share one, and every alert must ring
     ttl: "3600", urgency: "high" } });
-  return r.status;
+}
+const sendPush = async (env, sub, payload) => (await pushRaw(env, sub, payload)).status;
+
+// "Send a test alert" from the shop app: straight to this phone, and the push service's answer goes back
+// to the app so the owner (and we) can see what happened. Only a logged-in member of the shop may use it.
+async function pushTest(request, env) {
+  const cors = { "access-control-allow-origin": env.ALLOW_ORIGIN, "access-control-allow-headers": "authorization, content-type",
+    "access-control-allow-methods": "POST, OPTIONS", "access-control-max-age": "86400", vary: "origin" };
+  const out = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { ...cors, "content-type": "application/json" } });
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+  if (!env.VAPID_PRIVATE || !env.VAPID_PUBLIC) return out({ error: "Alert keys aren't set on the server" }, 503);
+  let d; try { d = await request.json(); } catch { return out({ error: "Bad request" }, 400); }
+  const sub = d.sub || {};
+  if (!/^[0-9a-f-]{36}$/.test(d.shop_id || "") || !/^https:\/\//.test(sub.endpoint || "") || !sub.p256dh || !sub.auth) return out({ error: "Bad request" }, 400);
+  // is the caller a member of this shop? (their own login token; RLS answers)
+  const chk = await fetch(`${env.SUPABASE_URL}/rest/v1/shops?select=id&id=eq.${d.shop_id}`, {
+    headers: { apikey: env.SUPABASE_KEY, authorization: request.headers.get("authorization") || "" } });
+  const rows = chk.ok ? await chk.json().catch(() => []) : [];
+  if (!Array.isArray(rows) || !rows.length) return out({ error: "Log in to your shop again, then try" }, 403);
+  const r = await pushRaw(env, sub, orderAlert({ test: true }));
+  const text = (await r.text().catch(() => "")).slice(0, 300);
+  return out({ status: r.status, ok: r.status >= 200 && r.status < 300, detail: text, service: new URL(sub.endpoint).host });
 }
 // Every alert gets its own tag, so it arrives as a NEW notification. Re-using a tag replaces the
 // previous notification, and Android plays the sound only for the first one (later ones were silent).
@@ -358,6 +379,7 @@ function notFound(origin, what) {
 async function handle(request, env) {
   const url = new URL(request.url), origin = url.origin, path = url.pathname;
   if (path === "/push/order" && request.method === "POST") return pushOrder(request, env);
+  if (path === "/push/test" && (request.method === "POST" || request.method === "OPTIONS")) return pushTest(request, env);
   if (request.method !== "GET" && request.method !== "HEAD") return proxy(request, env, url);
 
   if (path === "/robots.txt")
@@ -410,6 +432,7 @@ const defaults = (env) => ({
   PHOTOS_URL: "https://mymarket-photos.aman101bhandari.workers.dev",
   SHOP_APP: "https://amanbhandari101.github.io/my-market/business.html",
   PUSH_CONTACT: "https://mymarket.aman101bhandari.workers.dev",
+  ALLOW_ORIGIN: "https://amanbhandari101.github.io",
   ...Object.fromEntries(Object.entries(env || {}).filter(([, v]) => typeof v === "string" && v)),
 });
 

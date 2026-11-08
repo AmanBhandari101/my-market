@@ -351,14 +351,36 @@
     try { const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription();
       return sub && A.store.get("pushOn:" + s.id, false) ? "on" : "off"; } catch { return "off"; }
   }
-  async function turnOnAlerts(s) {
+  const deviceName = () => (navigator.userAgentData && navigator.userAgentData.platform) || navigator.userAgent.replace(/.*\(([^)]*)\).*/, "$1");
+  // this phone's alert address: the current one, or a fresh one (fresh = also after the push service dropped it)
+  async function pushSub(fresh) {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (sub && fresh) { await sub.unsubscribe().catch(() => {}); sub = null; }
+    return sub || reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapidKey() });
+  }
+  async function turnOnAlerts(s, fresh) {
     if (!s.cloud) throw new Error("Log in with your mobile number and PIN first");
     const perm = await Notification.requestPermission();
     if (perm !== "granted") throw new Error(perm === "denied" ? "Notifications are blocked — allow them in the phone's settings for this app" : "Tap Allow to get order alerts");
-    const reg = await navigator.serviceWorker.ready;
-    const sub = (await reg.pushManager.getSubscription()) || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapidKey() }));
-    await window.MM_CLOUD.savePush(s.id, sub, (navigator.userAgentData && navigator.userAgentData.platform) || navigator.userAgent.replace(/.*\(([^)]*)\).*/, "$1"));
+    const sub = await pushSub(fresh);
+    await window.MM_CLOUD.savePush(s.id, sub, deviceName());
     A.store.set("pushOn:" + s.id, true);
+    return sub;
+  }
+  // Every time the shop app opens: if alerts are on, make sure the server still has this phone.
+  // (The worker removes an address the push service says is gone; this puts the phone back.)
+  async function healAlerts() {
+    const s = A.ownerShop();
+    if (!s || !s.cloud || !A.store.get("pushOn:" + s.id, false) || !pushSupported() || !vapidKey() || Notification.permission !== "granted" || !navigator.onLine) return;
+    try { await window.MM_CLOUD.savePush(s.id, await pushSub(false), deviceName()); } catch {}
+  }
+  if (window.MM_APP === "business") setTimeout(healAlerts, 6000);
+  // test: straight to this phone, showing what the push service answered
+  async function testAlert(s) {
+    let sub = await turnOnAlerts(s, false), r = await window.MM_CLOUD.pushTestDirect(s.id, sub);
+    if (r.status === 404 || r.status === 410) { sub = await turnOnAlerts(s, true); r = await window.MM_CLOUD.pushTestDirect(s.id, sub); }   // address expired: get a new one
+    return r;
   }
   async function turnOffAlerts(s) {
     const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager.getSubscription();
@@ -377,7 +399,7 @@
     U.openSheet(`<div class="eyebrow">Order alerts</div><div class="title">${MSG[0]}</div>
       <p class="small quiet" style="margin:8px 0 14px">${MSG[1]}</p>
       ${st === "off" || st === "blocked" ? '<button class="btn" id="al-on">🔔 Turn on order alerts</button>' : ""}
-      ${st === "on" ? '<div class="two"><button class="btn" id="al-test">Send a test alert</button><button class="btn line" id="al-off">Turn off</button></div>' : ""}
+      ${st === "on" ? '<div class="two"><button class="btn" id="al-test">Send a test alert</button><button class="btn line" id="al-off">Turn off</button></div><p class="small" id="al-res" style="margin:10px 0 0;line-height:1.5"></p>' : ""}
       <button class="link" id="al-ring" style="margin-top:12px">Play the ringtone</button>
       <p class="tiny faint" style="margin:12px 0 0">Each phone that should ring turns this on once — add it on your staff's phones too. The alert uses the phone's notification sound; keep the phone off silent.</p>`, (el) => {
       $("#al-on", el) && ($("#al-on", el).onclick = async () => {
@@ -386,8 +408,13 @@
       });
       $("#al-off", el) && ($("#al-off", el).onclick = async () => { await turnOffAlerts(s); U.closeSheet(); U.toast("Order alerts are off on this phone"); });
       $("#al-test", el) && ($("#al-test", el).onclick = async () => {
-        try { const n = await window.MM_CLOUD.testPush(s.id); U.toast(n ? `Test alert sent to ${n} phone${n > 1 ? "s" : ""} — it should ring in a few seconds` : "No phone has alerts on yet", 6000); }
-        catch (x) { U.toast(x.message); }
+        const out = $("#al-res", el); out.textContent = "Sending…";
+        try {
+          const r = await testAlert(s);
+          out.innerHTML = r.ok ? `✓ Google accepted the alert (${r.status}). It should ring in a few seconds.<br><span class="faint">No ring? Check the phone isn't on silent / Do Not Disturb, and that notifications for this app are allowed.</span>`
+            : `✗ The alert service refused it: <b>${r.status}</b> ${esc(r.detail || "")}<br><span class="faint">Send this message to My Market support.</span>`;
+          out.style.color = r.ok ? "#17733f" : "var(--out)";
+        } catch (x) { out.textContent = navigator.onLine ? x.message : "No internet — try again when you're online"; out.style.color = "var(--out)"; }
       });
       $("#al-ring", el).onclick = () => ring(2);
     });
