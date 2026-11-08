@@ -2,6 +2,8 @@
 //
 //   /shop/<slug>              a shop page          (opens the app's #/shop/<id> screen)
 //   /p/<area>/<product>       a product in an area (opens the app's #/p/<area>/<product> screen)
+//   /shop/<slug>/i/<item>     one item at one shop: Google Shopping's product page (opens #/item/<shop>/<item>)
+//   /feeds/<slug>/products.tsv, /feeds/<slug>/local.tsv   the shop's product and stock feeds for Google Merchant Center
 //   /sitemap.xml, /sitemaps/<shops|products>-<n>.xml, /robots.txt
 //   everything else           the customer app itself, fetched from GitHub Pages
 //
@@ -123,9 +125,11 @@ async function shopPage(env, origin, slug) {
     openingHoursSpecification: hoursLd(s),
     paymentAccepted: s.pay_methods && s.pay_methods.length ? s.pay_methods.join(", ") : undefined,
     currenciesAccepted: "INR", makesOffer: offers.length ? offers : undefined,
+    sameAs: s.maps_url ? [s.maps_url] : undefined,
   };
-  const row = (i) => `<li>${i.p ? `<a href="${esc(i.p)}">${esc(i.name)}</a>` : esc(i.name)}${i.brand ? ` · ${esc(i.brand)}` : ""}`
-    + `${i.price ? ` · <b>${inr(i.price)}</b>` : ""}${i.mrp && i.price && i.mrp > i.price ? ` <s>${inr(i.mrp)}</s>` : ""} · ${esc((STOCK[i.stock] || ["Listed"])[0])}</li>`;
+  const row = (i) => `<li><a href="/shop/${esc(s.slug)}/i/${esc(i.id)}">${esc(i.name)}</a>${i.brand ? ` · ${esc(i.brand)}` : ""}`
+    + `${i.price ? ` · <b>${inr(i.price)}</b>` : ""}${i.mrp && i.price && i.mrp > i.price ? ` <s>${inr(i.mrp)}</s>` : ""} · ${esc((STOCK[i.stock] || ["Listed"])[0])}`
+    + `${i.p ? ` · <a href="${esc(i.p)}">other shops nearby</a>` : ""}</li>`;
   const body = wrap(`${crumbs([["My Market", "/"], [place || kind]])}
     <h1 style="margin:0 0 6px">${esc(s.name)}</h1>
     <p style="margin:0">${esc(kind)}${place ? ` in ${esc(place)}` : ""}${s.pincode ? ` – ${esc(s.pincode)}` : ""}</p>
@@ -134,7 +138,8 @@ async function shopPage(env, origin, slug) {
     ${ph ? `<p style="margin:4px 0">Phone: <a href="tel:+91${ph}">+91 ${ph}</a> · <a href="https://wa.me/91${ph}">WhatsApp</a></p>` : ""}
     ${s.lat != null ? `<p style="margin:4px 0"><a href="https://www.google.com/maps/dir/?api=1&amp;destination=${s.lat},${s.lng}">Directions</a></p>` : ""}
     ${s.about ? `<p>${esc(s.about)}</p>` : ""}
-    ${s.delivery ? `<p>Delivery: ${esc(s.delivery)}</p>` : ""}
+    ${s.delivery ? "<p>Home delivery available</p>" : ""}
+    ${s.maps_url ? `<p><a href="${esc(s.maps_url)}">See us on Google Maps</a>${s.review_url ? ` · <a href="${esc(s.review_url)}">Reviews</a>` : ""}</p>` : ""}
     <h2>Products at ${esc(s.name)}</h2>
     <ul>${items.map(row).join("")}</ul>`);
   return { title, desc, canonical: url, index: !!d.index, image, ld, body, hash: `/shop/${s.id}`, ogType: "business.business" };
@@ -181,6 +186,143 @@ async function areaPage(env, origin, area, prod) {
   return { title, desc, canonical: url, index: !!d.index, image, ld, body, hash: `/p/${area}/${p.slug}`, ogType: "product" };
 }
 
+// ---------- one item at one shop (Google Shopping's product page for that shop) ----------
+// Price, stock, the shop and how to get it are on the page itself, so they always match the feeds.
+const fullTitle = (i) => {
+  const name = String(i.name || "").trim(), size = i.size && !name.toLowerCase().includes(String(i.size).toLowerCase()) ? ` ${i.size}` : "";
+  const brand = i.brand && i.brand !== "Generic" && !name.toLowerCase().includes(String(i.brand).toLowerCase()) ? `${i.brand} ` : "";
+  return cut(`${brand}${name}${size}`, 150);
+};
+const itemPhoto = (env, i) => photo(env, i.photo_path) || photo(env, i.product_photo_path, i.product_photo_url);
+async function itemPage(env, origin, slug, itemId) {
+  const d = await rpc(env, "seo_item", { p_slug: slug, p_item: itemId });
+  if (!d || !d.shop || !d.item) return null;
+  const s = d.shop, i = d.item, url = `${origin}/shop/${s.slug}/i/${i.id}`, shopUrl = `${origin}/shop/${s.slug}`;
+  const ph = phone10(s.phone), place = s.locality || "", title0 = fullTitle(i), image = itemPhoto(env, i);
+  const st = STOCK[i.stock] || STOCK.listed, sale = i.mrp && i.price && i.mrp > i.price;
+  const title = cut(`${title0}${i.price ? ` – ${inr(i.price)}` : ""} at ${s.name}${place ? `, ${place}` : ""} | My Market`, 70);
+  const desc = cut(`${title0}${i.price ? ` for ${inr(i.price)}` : ""} at ${s.name}${place ? ` in ${place}` : ""}. ${st[0]}. Pick it up today — see the shop's hours, directions and WhatsApp.`, 158);
+  const store = { "@type": ldType(s.cat), "@id": shopUrl + "#shop", name: s.name, url: shopUrl, address: postal(s), telephone: ph ? `+91${ph}` : undefined };
+  const ld = {
+    "@context": "https://schema.org", "@type": "Product", "@id": url + "#product", name: title0, url,
+    image: image || undefined, brand: i.brand && i.brand !== "Generic" ? { "@type": "Brand", name: i.brand } : undefined,
+    gtin: /^\d{8}$|^\d{12,14}$/.test(i.barcode || "") ? i.barcode : undefined, mpn: i.model || undefined,
+    description: i.description || (i.features && i.features.length ? i.features.join(". ") : undefined),
+    offers: i.price ? { "@type": "Offer", price: i.price, priceCurrency: "INR", url, itemCondition: "https://schema.org/NewCondition",
+      availability: st[1] || undefined, seller: store, availableAtOrFrom: store,
+      availableDeliveryMethod: "https://schema.org/OnSitePickup" } : undefined,
+  };
+  const body = wrap(`${crumbs([["My Market", "/"], [s.name, `/shop/${s.slug}`], [title0]])}
+    <h1 style="margin:0 0 6px">${esc(title0)}</h1>
+    ${image ? `<img src="${esc(image)}" alt="${esc(title0)}" style="max-width:320px;width:100%;height:auto;display:block;margin:8px 0">` : ""}
+    <p style="font-size:22px;margin:6px 0">${i.price ? `<b>${inr(i.price)}</b>${sale ? ` <s style="font-size:16px">${inr(i.mrp)}</s>` : ""}` : "Ask the shop for the price"}</p>
+    <p style="margin:4px 0"><b>${esc(st[0])}</b> at <a href="/shop/${esc(s.slug)}">${esc(s.name)}</a>${place ? `, ${esc(place)}` : ""}</p>
+    <p style="margin:4px 0">${esc(addressLine(s))}${addressLine(s) ? " · " : ""}${esc(hoursText(s))}</p>
+    <p style="margin:4px 0">Pick up at the shop — pay there by cash or UPI.${s.delivery ? " Home delivery available." : ""}</p>
+    ${ph ? `<p style="margin:4px 0"><a href="https://wa.me/91${ph}">Ask on WhatsApp</a> · <a href="tel:+91${ph}">Call</a>${s.lat != null ? ` · <a href="https://www.google.com/maps/dir/?api=1&amp;destination=${s.lat},${s.lng}">Directions</a>` : ""}</p>` : ""}
+    ${i.features && i.features.length ? `<h2>About this item</h2><ul>${i.features.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>` : ""}
+    ${i.description ? `<p>${esc(i.description)}</p>` : ""}`);
+  return { title, desc, canonical: url, index: !!(i.price && image), image, ld, body, hash: `/item/${s.id}/${i.id}`, ogType: "product" };
+}
+
+// ---------- feeds Google Merchant Center fetches (tab-separated, one per shop) ----------
+// products.tsv: what the shop sells.  local.tsv: what is in stock at the shop today, at what price.
+// Only items Google accepts: a price and a photo. Stock not updated for 7 days is left out of local.tsv.
+const tsvCell = (v) => String(v ?? "").replace(/[\t\r\n]+/g, " ").trim();
+const tsv = (head, rows) => new Response([head, ...rows].map((r) => r.map(tsvCell).join("\t")).join("\n") + "\n",
+  { headers: { "content-type": "text/tab-separated-values; charset=utf-8", "cache-control": "public, max-age=1800, s-maxage=1800" } });
+async function feed(env, origin, slug, kind) {
+  const d = await rpc(env, "seo_feed", { p_slug: slug });
+  if (!d || !d.shop) return null;
+  const s = d.shop, ok = (d.items || []).filter((i) => i.price > 0 && itemPhoto(env, i) && String(i.name || "").trim().length >= 3);
+  const money = (n) => `${Number(n).toFixed(2)} INR`;
+  if (kind === "products") {
+    return tsv(["id", "title", "description", "link", "image_link", "availability", "price", "sale_price", "brand", "gtin", "mpn", "identifier_exists", "condition", "product_type"],
+      ok.map((i) => {
+        const brand = i.brand && i.brand !== "Generic" ? i.brand : "", gtin = /^\d{8}$|^\d{12,14}$/.test(i.barcode || "") ? i.barcode : "";
+        const sale = i.mrp && i.mrp > i.price;
+        return [i.id, fullTitle(i),
+          i.description || (i.features && i.features.length ? i.features.join(". ") : `${fullTitle(i)} — available at ${s.name}. Pick it up today.`),
+          `${origin}/shop/${s.slug}/i/${i.id}`, itemPhoto(env, i),
+          i.stock === "out" ? "out_of_stock" : "in_stock",
+          money(sale ? i.mrp : i.price), sale ? money(i.price) : "",
+          brand, gtin, i.model || "", gtin || (brand && i.model) ? "yes" : "no", "new", catName(i.cat).replace(/ shop$/i, "")];
+      }));
+  }
+  const AV = { in: "in_stock", few: "limited_availability", out: "out_of_stock" };
+  return tsv(["store_code", "id", "availability", "price", "sale_price", "pickup_method", "pickup_sla"],
+    ok.filter((i) => AV[i.stock]).map((i) => {
+      const sale = i.mrp && i.mrp > i.price;
+      return [d.store_code, i.id, AV[i.stock], money(sale ? i.mrp : i.price), sale ? money(i.price) : "", "reserve", "same day"];
+    }));
+}
+
+// ---------- order alerts: Web Push to the shopkeeper's phones ----------
+// Supabase calls POST /push/order when an order is placed (supabase/push.sql), with the shop's phones and
+// the order. Each alert is encrypted for that phone (RFC 8291) and signed with My Market's VAPID key (RFC 8292).
+// Settings: VAPID_PUBLIC (base64url, 65-byte P-256 point) and VAPID_PRIVATE (JWK, kept as a secret).
+const b64u = {
+  enc: (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""),
+  dec: (s) => Uint8Array.from(atob(String(s).replace(/-/g, "+").replace(/_/g, "/") + "===".slice((String(s).length + 3) % 4)), (c) => c.charCodeAt(0)),
+};
+const concat = (...a) => { const out = new Uint8Array(a.reduce((n, x) => n + x.length, 0)); let o = 0; for (const x of a) { out.set(x, o); o += x.length; } return out; };
+const utf8 = (s) => new TextEncoder().encode(s);
+async function hkdf(salt, ikm, info, len) {
+  const key = await crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
+  return new Uint8Array(await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt, info }, key, len * 8));
+}
+// aes128gcm body for one phone: salt(16) | record size(4) | key length(1) | our public key(65) | ciphertext
+async function encryptPush(sub, plaintext, local) {
+  const uaPublic = b64u.dec(sub.p256dh), authSecret = b64u.dec(sub.auth);
+  local = local || await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  const asPublic = new Uint8Array(await crypto.subtle.exportKey("raw", local.publicKey));
+  const uaKey = await crypto.subtle.importKey("raw", uaPublic, { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const shared = new Uint8Array(await crypto.subtle.deriveBits({ name: "ECDH", public: uaKey }, local.privateKey, 256));
+  const ikm = await hkdf(authSecret, shared, concat(utf8("WebPush: info\0"), uaPublic, asPublic), 32);
+  const salt = local.salt || crypto.getRandomValues(new Uint8Array(16));
+  const cek = await hkdf(salt, ikm, utf8("Content-Encoding: aes128gcm\0"), 16);
+  const nonce = await hkdf(salt, ikm, utf8("Content-Encoding: nonce\0"), 12);
+  const aes = await crypto.subtle.importKey("raw", cek, "AES-GCM", false, ["encrypt"]);
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, aes, concat(utf8(plaintext), new Uint8Array([2]))));
+  const rs = new Uint8Array([0, 0, 16, 0]);   // 4096
+  return concat(salt, rs, new Uint8Array([asPublic.length]), asPublic, ct);
+}
+let vapidKey = null;
+async function vapidAuth(env, endpoint) {
+  vapidKey = vapidKey || await crypto.subtle.importKey("jwk", JSON.parse(env.VAPID_PRIVATE), { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+  const head = b64u.enc(utf8(JSON.stringify({ typ: "JWT", alg: "ES256" })));
+  const claims = b64u.enc(utf8(JSON.stringify({ aud: new URL(endpoint).origin, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: env.PUSH_CONTACT })));
+  const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, vapidKey, utf8(`${head}.${claims}`));
+  return `vapid t=${head}.${claims}.${b64u.enc(sig)}, k=${env.VAPID_PUBLIC}`;
+}
+async function sendPush(env, sub, payload) {
+  if (!/^https:\/\//.test(sub.endpoint || "")) return 400;
+  const body = await encryptPush(sub, JSON.stringify(payload));
+  const r = await fetch(sub.endpoint, { method: "POST", body, headers: {
+    authorization: await vapidAuth(env, sub.endpoint), "content-encoding": "aes128gcm", "content-type": "application/octet-stream",
+    ttl: "3600", urgency: "high", topic: String(payload.tag || "order").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32) } });
+  return r.status;
+}
+function orderAlert(o) {
+  if (o.test) return { title: "🔔 Order alerts are on", body: "This is how a new order will ring on this phone.", tag: "mm-test", url: "business.html#/biz/inbox" };
+  const what = o.kind === "hold" ? "Hold request" : "New order";
+  const money = o.total ? ` · ${inr(o.total)}` : "";
+  return { title: `🛒 ${what} ${o.code || ""}${money}`.trim(),
+    body: `${o.name || "A customer"} · ${o.items || 1} item${o.items === 1 ? "" : "s"} · ${o.mode === "delivery" ? "Delivery" : "Pickup"} — tap to open`,
+    tag: "mm-order-" + (o.code || Date.now()), url: "business.html#/biz/inbox" };
+}
+async function pushOrder(request, env) {
+  if (!env.VAPID_PRIVATE || !env.VAPID_PUBLIC) return new Response("Push keys not set", { status: 503 });
+  const secret = request.headers.get("x-push-secret") || "";
+  if (secret.length < 32 || !(await rpc(env, "push_secret_ok", { p_secret: secret }))) return new Response("Forbidden", { status: 403 });
+  let d; try { d = await request.json(); } catch { return new Response("Bad body", { status: 400 }); }
+  const subs = Array.isArray(d.subs) ? d.subs.slice(0, 20) : [], alert = orderAlert(d.order || {});
+  const res = await Promise.all(subs.map((s) => sendPush(env, s, alert).catch(() => 0)));
+  const gone = subs.filter((s, i) => res[i] === 404 || res[i] === 410).map((s) => s.endpoint);
+  if (gone.length) await rpc(env, "push_gone", { p_secret: secret, p_endpoints: gone }).catch(() => 0);
+  return new Response(JSON.stringify({ sent: res.filter((x) => x >= 200 && x < 300).length, results: res }), { headers: { "content-type": "application/json" } });
+}
+
 // ---------- sitemaps ----------
 const xml = (s) => new Response(s, { headers: { "content-type": "application/xml; charset=utf-8", "cache-control": `public, max-age=3600, s-maxage=${MAP_TTL}` } });
 async function sitemapIndex(env, origin) {
@@ -210,6 +352,7 @@ function notFound(origin, what) {
 
 async function handle(request, env) {
   const url = new URL(request.url), origin = url.origin, path = url.pathname;
+  if (path === "/push/order" && request.method === "POST") return pushOrder(request, env);
   if (request.method !== "GET" && request.method !== "HEAD") return proxy(request, env, url);
 
   if (path === "/robots.txt")
@@ -227,6 +370,15 @@ async function handle(request, env) {
     const [p, html] = await Promise.all([shopPage(env, origin, m[1]), shell(env)]);
     if (!p) return notFound(origin, "This shop isn't on My Market (any more).");
     return htmlRes(inject(html, p), 200, p.index, PAGE_TTL);
+  }
+  if ((m = path.match(/^\/shop\/([a-z0-9-]{1,80})\/i\/([0-9a-f-]{36})\/?$/))) {
+    const [p, html] = await Promise.all([itemPage(env, origin, m[1], m[2]), shell(env)]);
+    if (!p) return notFound(origin, "This item isn't listed any more.");
+    return htmlRes(inject(html, p), 200, p.index, PAGE_TTL);
+  }
+  if ((m = path.match(/^\/feeds\/([a-z0-9-]{1,80})\/(products|local)\.tsv$/))) {
+    const r = await feed(env, origin, m[1], m[2]);
+    return r || new Response("Not found", { status: 404 });
   }
   if ((m = path.match(/^\/p\/([a-z0-9-]{1,80})\/([a-z0-9-]{8,90})\/?$/))) {
     const [p, html] = await Promise.all([areaPage(env, origin, m[1], m[2]), shell(env)]);
@@ -252,6 +404,7 @@ const defaults = (env) => ({
   APP_ORIGIN: "https://amanbhandari101.github.io/my-market",
   PHOTOS_URL: "https://mymarket-photos.aman101bhandari.workers.dev",
   SHOP_APP: "https://amanbhandari101.github.io/my-market/business.html",
+  PUSH_CONTACT: "https://mymarket.aman101bhandari.workers.dev",
   ...Object.fromEntries(Object.entries(env || {}).filter(([, v]) => typeof v === "string" && v)),
 });
 
@@ -259,7 +412,7 @@ export default {
   async fetch(request, env, ctx) {
     env = defaults(env);
     const url = new URL(request.url);
-    const cacheable = request.method === "GET" && /^\/(shop|p|sitemaps)\/|^\/sitemap\.xml$/.test(url.pathname);
+    const cacheable = request.method === "GET" && /^\/(shop|p|sitemaps|feeds)\/|^\/sitemap\.xml$/.test(url.pathname);
     const cache = cacheable && typeof caches !== "undefined" && caches.default;
     const key = cache && new Request(url.origin + url.pathname);   // ?src=qr etc. only matter inside the app
     if (cache) { const hit = await cache.match(key); if (hit) return hit; }
@@ -273,4 +426,4 @@ export default {
     return res;
   },
 };
-export { handle, defaults, inject };
+export { handle, defaults, inject, encryptPush, b64u, hkdf };

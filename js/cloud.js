@@ -454,6 +454,33 @@
     if (site && s && s.slug) return `${site}/shop/${s.slug}${src ? `?src=${src}` : ""}`;
     return new URL("index.html", location.href).href.split("#")[0] + `#/shop/${shopId}${src ? `?src=${src}` : ""}`;
   };
+  // order alerts: this phone's Web Push address for the shop (table push_subs)
+  async function savePush(shopId, sub, device) {
+    const j = sub.toJSON ? sub.toJSON() : sub;
+    const { error } = await sb.from("push_subs").upsert({ shop_id: shopId, endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth,
+      device: String(device || "").slice(0, 120) || null }, { onConflict: "shop_id,endpoint" });
+    if (error) throw new Error(friendly(error));
+  }
+  async function removePush(shopId, endpoint) {
+    const { error } = await sb.from("push_subs").delete().eq("shop_id", shopId).eq("endpoint", endpoint);
+    if (error) throw new Error(friendly(error));
+  }
+  async function testPush(shopId) {
+    const { data, error } = await sb.rpc("push_test", { p_shop: shopId });
+    if (error) throw new Error(friendly(error));
+    return data || 0;
+  }
+  // "Get found on Google": where the shop stands on Google Maps and Google Shopping (table google_link)
+  async function googleLink(shopId) {
+    const { data, error } = await sb.from("google_link").select("*").eq("shop_id", shopId).maybeSingle();
+    if (error) throw new Error(friendly(error));
+    return data || null;
+  }
+  async function saveGoogle(shopId, patch) {
+    const { data, error } = await sb.from("google_link").upsert({ shop_id: shopId, ...patch }, { onConflict: "shop_id" }).select().single();
+    if (error) throw new Error(friendly(error));
+    return data;
+  }
   // one product in one area (locality) and the shops there that have it — the same data as the /p/… page
   async function areaProduct(area, product) {
     const { data, error } = await sb.rpc("seo_area_product", { p_area: area, p_product: product });
@@ -495,7 +522,7 @@
   async function myNumber() { const { data } = await sb.auth.getSession(); const m = (data.session?.user?.email || "").match(/^91(\d{10})@/); return m ? m[1] : ""; }
   async function deleteShop(shopId) { const { error } = await sb.rpc("delete_my_shop", { p_shop: shopId }); if (error) throw new Error(friendly(error)); }
 
-  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, areaProduct, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, isAdmin, importStatement, searchCatalog, searchOnline, myPlan, claimPayment, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl, newPhotoPath,
+  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, areaProduct, googleLink, saveGoogle, savePush, removePush, testPush, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, isAdmin, importStatement, searchCatalog, searchOnline, myPlan, claimPayment, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl, newPhotoPath,
     pending: () => Q.get().length, failedOps: () => Q.failed() };
 
   // start-up

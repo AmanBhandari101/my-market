@@ -45,7 +45,7 @@
   }
 
   // ---------- frame ----------
-  const NAV = [["", "Overview"], ["shops", "Shops"], ["payments", "Payments"], ["demand", "Customers & demand"], ["activity", "Activity log"]];
+  const NAV = [["", "Overview"], ["shops", "Shops"], ["payments", "Payments"], ["google", "On Google"], ["demand", "Customers & demand"], ["activity", "Activity log"]];
   function frame(active, inner) {
     root.innerHTML = `<div class="ad"><nav class="ad-side"><b>My Market Admin</b>
       ${NAV.map(([k, l]) => `<a href="#/${k}" class="${active === k ? "on" : ""}">${l}${k === "payments" ? '<span class="pill hidden" id="unm"></span>' : ""}</a>`).join("")}
@@ -65,6 +65,7 @@
       if (parts[0] === "shop" && parts[1]) return await shopView(parts[1]);
       if (parts[0] === "payments") return await paymentsView();
       if (parts[0] === "demand") return await demandView();
+      if (parts[0] === "google") return await googleView();
       if (parts[0] === "activity") return await activityView();
       location.hash = "#/";
     } catch (e) { if (!$("#main")) frame("", ""); fail(e); }
@@ -277,6 +278,38 @@
   }
 
   // ---------- activity log ----------
+  // ---------- shops on Google: Maps profile and Shopping, who needs help ----------
+  const GBP = { none: "Not started", started: "Submitted", verifying: "Verifying", live: "Live on Maps" };
+  const MC = { none: "Not started", started: "Started", feeds: "Links added", review: "In review", live: "Products live" };
+  async function googleView() {
+    loading("google", "On Google");
+    const list = await rpc("admin_google");
+    let f = "all";
+    const F = { all: "All", help: "Asked for help", nomaps: "Not on Maps", maps: "On Maps, no Shopping", shopping: "Products live" };
+    const draw = () => {
+      const rows = list.filter((s) => f === "all" || (f === "help" && s.help_at) || (f === "nomaps" && s.gbp_status !== "live")
+        || (f === "maps" && s.gbp_status === "live" && s.mc_status !== "live") || (f === "shopping" && s.mc_status === "live"));
+      const n = (k, v) => list.filter((s) => s[k] === v).length;
+      $("#main").innerHTML = `<h1>On Google</h1><p class="sub">Each shop's Google Maps profile and Google Shopping set-up. Shops do it in the app (menu → Get found on Google); help the stuck ones.</p>
+        <div class="kpis">
+          <div class="kpi"><span>Live on Google Maps</span><b>${n("gbp_status", "live")}</b><em>of ${list.length} shops</em></div>
+          <div class="kpi"><span>Products on Google Shopping</span><b>${n("mc_status", "live")}</b><em>${n("mc_status", "review")} in review</em></div>
+          <div class="kpi"><span>Asked for help</span><b>${list.filter((s) => s.help_at).length}</b></div></div>
+        <div class="row" style="gap:6px;flex-wrap:wrap;margin:10px 0">${Object.entries(F).map(([k, l]) => `<button class="chip ${f === k ? "on" : ""}" data-f="${k}">${l}</button>`).join("")}</div>
+        ${rows.length ? `<table class="tbl"><thead><tr><th>Shop</th><th>Owner / phone</th><th>Google Maps</th><th>Google Shopping</th><th class="num">Items ready</th><th>Help</th><th></th></tr></thead><tbody>
+          ${rows.map((s) => { const ph = String(s.phone || "").replace(/\D/g, "").slice(-10); return `<tr><td><a href="#/shop/${s.id}"><b>${esc(s.name)}</b></a><small>${esc(s.locality || "")}</small></td>
+            <td>${esc(s.owner_name || "—")}<small>${esc(s.phone || "")}${s.gmail ? " · " + esc(s.gmail) : ""}</small></td>
+            <td>${GBP[s.gbp_status] || s.gbp_status}${s.maps_url ? `<small><a href="${esc(s.maps_url)}" target="_blank" rel="noopener">Maps</a>${s.review_url ? ` · <a href="${esc(s.review_url)}" target="_blank" rel="noopener">reviews</a>` : ""}</small>` : ""}</td>
+            <td>${MC[s.mc_status] || s.mc_status}<small>${s.merchant_id ? "MC " + esc(s.merchant_id) : ""} · ${esc(s.store_code || "")}</small></td>
+            <td class="num">${s.ready_items} / ${s.items}</td>
+            <td>${s.help_at ? `<b>${day(s.help_at)}</b><small>${esc(s.help_note || "")}</small>` : ""}</td>
+            <td>${ph ? `<a href="https://wa.me/91${ph}?text=${encodeURIComponent(`Namaste ${s.owner_name || ""}! This is My Market. Let's get ${s.name} on Google — open the My Market Business app → menu → Get found on Google. Reply here if you're stuck and we'll help.`)}" target="_blank" rel="noopener">WhatsApp</a>` : ""}</td></tr>`; }).join("")}</tbody></table>`
+          : '<p class="empty">No shops match.</p>'}`;
+      $$("[data-f]").forEach((b) => b.onclick = () => { f = b.dataset.f; draw(); });
+    };
+    draw();
+  }
+
   async function activityView() {
     loading("activity", "Activity log");
     const log = await rpc("admin_activity");

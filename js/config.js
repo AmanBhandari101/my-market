@@ -13,4 +13,6 @@ window.MM_CONFIG = {
   // The customer site Google reads (cloudflare/site-worker.js), e.g. "https://mymarket.example.in".
   // Empty = shop links stay on the app's own #/shop/<id> address.
   siteUrl: "https://mymarket.aman101bhandari.workers.dev",
+  // Order alerts (Web Push): My Market's public VAPID key. The private half lives only in the site worker.
+  vapidPublic: "",
 };

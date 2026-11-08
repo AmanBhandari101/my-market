@@ -14,6 +14,7 @@
     if (sub === "stockin") return stockInView();
     if (sub === "reports") return reportsView(params);
     if (sub === "site") return siteView(params);
+    if (sub === "google") return googleView();
     if (sub === "security") return securityView();
     if (sub === "inbox") return dashView();
     if (sub === "bill" && parts[2]) return receiptView(parts[2]);
@@ -298,14 +299,98 @@
       $$("[data-bell]").forEach((el) => { const t = waiting(s); el.textContent = t; el.classList.toggle("hidden", !t); });
       if (lastNew != null && n > lastNew) {
         const o = list.find((x) => x.status === "new");
-        U.toast(`New ${o && o.kind === "hold" ? "hold" : "order"} from ${o ? o.name : "a customer"} — open the bell`, 6000);
-        try { navigator.vibrate && navigator.vibrate([120, 80, 120]); } catch {}
+        U.toast(`New ${o && o.kind === "hold" ? "hold" : "order"} from ${o ? o.name : "a customer"} — open the bell`, 8000);
+        ring();
       }
       lastNew = n;
       return list;
     } catch { return null; }
   }
-  if (window.MM_APP === "business") { setTimeout(pollOrders, 3000); setInterval(pollOrders, 60000); }
+  // While the app is open: check every 20 s (every 60 s in the background), and ring at once
+  // when a phone alert arrives (the service worker passes it on).
+  if (window.MM_APP === "business") {
+    setTimeout(pollOrders, 3000);
+    let last = 0;
+    setInterval(() => { const gap = document.visibilityState === "visible" ? 20000 : 60000; if (Date.now() - last >= gap) { last = Date.now(); pollOrders(); } }, 5000);
+    if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", (e) => {
+      const m = e.data || {};
+      if (m.type === "mm-order") { if (!(m.alert && m.alert.tag === "mm-test")) ring(); pollOrders(); }
+      if (m.type === "mm-open" && m.url) { const h = m.url.split("#")[1]; if (h) location.hash = "#" + h; }
+    });
+  }
+
+  // ---------- the order ringtone (made by the phone, no sound file) ----------
+  // Two-tone shop bell, three times. Browsers allow sound only after the owner has tapped the app once.
+  let ringCtx = null;
+  function ring(times = 3) {
+    try { navigator.vibrate && navigator.vibrate([400, 200, 400, 200, 800]); } catch {}
+    try {
+      ringCtx = ringCtx || new (window.AudioContext || window.webkitAudioContext)();
+      if (ringCtx.state === "suspended") ringCtx.resume();
+      const t0 = ringCtx.currentTime + 0.05;
+      for (let k = 0; k < times; k++) for (const [f, dt] of [[880, 0], [660, 0.22]]) {
+        const o = ringCtx.createOscillator(), g = ringCtx.createGain(), t = t0 + k * 0.9 + dt;
+        o.type = "triangle"; o.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.6, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+        o.connect(g).connect(ringCtx.destination); o.start(t); o.stop(t + 0.22);
+      }
+    } catch {}
+  }
+
+  // ---------- order alerts on this phone (Web Push) ----------
+  const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const installed = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  const vapidKey = () => { const s = (window.MM_CONFIG || {}).vapidPublic || ""; if (!s) return null;
+    const b = atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)); return Uint8Array.from(b, (c) => c.charCodeAt(0)); };
+  async function alertState(s) {
+    if (isIOS && !installed()) return "ios-install";
+    if (!pushSupported() || !vapidKey()) return "unsupported";
+    if (Notification.permission === "denied") return "blocked";
+    try { const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription();
+      return sub && A.store.get("pushOn:" + s.id, false) ? "on" : "off"; } catch { return "off"; }
+  }
+  async function turnOnAlerts(s) {
+    if (!s.cloud) throw new Error("Log in with your mobile number and PIN first");
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") throw new Error(perm === "denied" ? "Notifications are blocked — allow them in the phone's settings for this app" : "Tap Allow to get order alerts");
+    const reg = await navigator.serviceWorker.ready;
+    const sub = (await reg.pushManager.getSubscription()) || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapidKey() }));
+    await window.MM_CLOUD.savePush(s.id, sub, (navigator.userAgentData && navigator.userAgentData.platform) || navigator.userAgent.replace(/.*\(([^)]*)\).*/, "$1"));
+    A.store.set("pushOn:" + s.id, true);
+  }
+  async function turnOffAlerts(s) {
+    const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager.getSubscription();
+    if (sub) { try { await window.MM_CLOUD.removePush(s.id, sub.endpoint); } catch {} await sub.unsubscribe().catch(() => {}); }
+    A.store.set("pushOn:" + s.id, false);
+  }
+  async function alertsSheet(s) {
+    const st = await alertState(s);
+    const MSG = {
+      on: ["Order alerts are ON", "New orders ring on this phone, even when the app is closed."],
+      off: ["Order alerts are OFF", "Turn them on so a new order rings on this phone — even when the app is closed or the phone is locked."],
+      blocked: ["Notifications are blocked", "Open the phone's Settings → Apps → Chrome (or My Market) → Notifications → Allow. Then come back and tap Turn on."],
+      "ios-install": ["Add My Market to your Home Screen first", "On iPhone, alerts work only from the Home Screen app: tap Share ⬆ → Add to Home Screen, open My Market from there, then turn alerts on."],
+      unsupported: ["This browser can't show alerts", "Open My Market Business in Chrome on Android (or Safari from the Home Screen on iPhone)."],
+    }[st];
+    U.openSheet(`<div class="eyebrow">Order alerts</div><div class="title">${MSG[0]}</div>
+      <p class="small quiet" style="margin:8px 0 14px">${MSG[1]}</p>
+      ${st === "off" || st === "blocked" ? '<button class="btn" id="al-on">🔔 Turn on order alerts</button>' : ""}
+      ${st === "on" ? '<div class="two"><button class="btn" id="al-test">Send a test alert</button><button class="btn line" id="al-off">Turn off</button></div>' : ""}
+      <button class="link" id="al-ring" style="margin-top:12px">Play the ringtone</button>
+      <p class="tiny faint" style="margin:12px 0 0">Each phone that should ring turns this on once — add it on your staff's phones too. The alert uses the phone's notification sound; keep the phone off silent.</p>`, (el) => {
+      $("#al-on", el) && ($("#al-on", el).onclick = async () => {
+        try { await turnOnAlerts(s); U.closeSheet(); U.toast("Order alerts are on 🔔"); alertsSheet(s); }
+        catch (x) { U.toast(navigator.onLine ? x.message : "No internet — try again when you're online", 7000); }
+      });
+      $("#al-off", el) && ($("#al-off", el).onclick = async () => { await turnOffAlerts(s); U.closeSheet(); U.toast("Order alerts are off on this phone"); });
+      $("#al-test", el) && ($("#al-test", el).onclick = async () => {
+        try { const n = await window.MM_CLOUD.testPush(s.id); U.toast(n ? `Test alert sent to ${n} phone${n > 1 ? "s" : ""} — it should ring in a few seconds` : "No phone has alerts on yet", 6000); }
+        catch (x) { U.toast(x.message); }
+      });
+      $("#al-ring", el).onclick = () => ring(2);
+    });
+  }
   function bizTop(title) {
     const s = A.ownerShop(), n = waiting(s);
     return `<div class="topline"><span class="brand"><img src="icon-business.svg" alt=""><span class="bt">${esc(title || s.name)}${s.cloud ? `<em class="syncst" data-sync>${syncWord()}</em>` : ""}</span></span>
@@ -331,7 +416,9 @@
       <p class="small quiet">${esc(s.phone || "")}${s.pincode ? ` · ${esc(s.locality || "")} ${esc(s.pincode)}` : ""}</p>
       <div class="entries" style="margin-top:12px">
         <a class="entry" href="#/biz/inbox"><div class="body"><div class="name">Orders and questions</div><div class="note">${waiting(s)} waiting</div></div>${ic("arrow")}</a>
+        <button class="entry" id="m-al"><div class="body"><div class="name">🔔 Order alerts</div><div class="note">${A.store.get("pushOn:" + s.id, false) ? "On — new orders ring on this phone" : "Off — turn on so new orders ring on this phone"}</div></div>${ic("arrow")}</button>
         ${s.cloud ? `<button class="entry" id="m-sync"><div class="body"><div class="name">Sync now</div><div class="note">Send this phone's changes and get your other phones' — ${window.MM_CLOUD.pending()} waiting</div></div>${ic("arrow")}</button>` : ""}
+        <a class="entry" href="#/biz/google"><div class="body"><div class="name">Get found on Google</div><div class="note">Your shop on Google Maps and your products on Google Shopping</div></div>${ic("arrow")}</a>
         <a class="entry" href="#/biz/site"><div class="body"><div class="name">My website</div><div class="note">Your shop's page: share it, QR poster, add to Google Maps</div></div>${ic("arrow")}</a>
         ${s.cloud ? `<a class="entry" href="#/biz/security"><div class="body"><div class="name">Login & security</div><div class="note">Backup number, change PIN, log out other phones</div></div>${ic("arrow")}</a>` : ""}
         <button class="entry" id="m-bs"><div class="body"><div class="name">Bill settings</div><div class="note">Advert, phone and GSTIN on your bills</div></div>${ic("arrow")}</button>
@@ -343,6 +430,7 @@
       </div>
       <div class="opts"><button class="link accent" id="m-out">Log out</button></div>`, (el) => {
       $("#m-bs", el).onclick = () => billSettings(s);
+      $("#m-al", el).onclick = () => { U.closeSheet(); alertsSheet(s); };
       $("#m-sync", el) && ($("#m-sync", el).onclick = async () => {
         U.closeSheet(); U.toast("Syncing…");
         window.MM_CLOUD.retryFailed();
@@ -374,6 +462,8 @@
       U.app.dataset.sig = sig;
       U.app.innerHTML = `
         <div id="dash">${bizTop("Orders and questions")}</div>
+        ${s.cloud && !A.store.get("pushOn:" + s.id, false) ? `<button class="banner" id="al-ban" style="margin:12px var(--gut) 0;text-align:left;width:calc(100% - 2 * var(--gut))">
+          <div class="serif">🔔 Never miss an order</div><p>Turn on order alerts — a new order rings on this phone even when the app is closed.</p></button>` : ""}
         <div class="block" id="q"><div class="eyebrow"><span>Customer questions</span></div>
           ${asks.length ? asks.map((a) => `<div class="qcard">
             <div class="serif" style="font-size:21px">“Do you have ${esc(a.q)}?”</div>
@@ -387,6 +477,7 @@
 
         <div style="height:30px"></div>`;
       bindTop();
+      $("#al-ban") && ($("#al-ban").onclick = () => alertsSheet(s));
       $$("[data-yes]").forEach((b) => b.onclick = () => {
         const p = +$(`[data-price="${b.dataset.yes}"]`).value || null;
         A.replyAsk(b.dataset.yes, s.id, { has: true, price: p }); U.toast("Sent — the customer can see you have it"); U.app.dataset.sig = ""; draw();
@@ -580,6 +671,8 @@
       $("#allp") && ($("#allp").onclick = () => addItemsSheet(s, "", draw));
     };
     draw();
+    // opened from another screen to fix one item (e.g. "Get found on Google")
+    const open = params.get("open"); if (open) setTimeout(() => itemSheet(s.items.find((x) => x.id === open)), 60);
   }
 
   // ---------- scanned a code this shop doesn't know yet ----------
@@ -1239,6 +1332,152 @@
     });
   }
 
+  // ---------- Get found on Google: Maps (Business Profile) + Shopping (Merchant Center) ----------
+  // Everything the owner needs is on this one screen. Google only lets the owner create and verify
+  // their Business Profile and Merchant Center account, so those steps open Google with every answer
+  // ready to copy, and one thing (a link or a number) comes back here.
+  const gReady = (it) => {   // what Google needs before it shows an item; [] = ready
+    const miss = [];
+    if (!(it.price > 0)) miss.push("price");
+    if (!(it.photo || it.productPhoto)) miss.push("photo");
+    const st = A.itemStatus(it);
+    if (st.key === "listed") miss.push("stock count");
+    return miss;
+  };
+  const MAPS_RX = /^https:\/\/([a-z0-9-]+\.)*(google\.[a-z.]+|goo\.gl|g\.page)\/\S+$/i;
+  function googleView() {
+    const s = A.ownerShop(), CL = window.MM_CLOUD, CF = window.MM_CONFIG || {};
+    const key = "glink:" + s.id;
+    let g = A.store.get(key, null) || {};
+    const site = (CF.siteUrl || "").replace(/\/$/, "");
+    const feedUrl = (k) => (site && s.slug ? `${site}/feeds/${s.slug}/${k}.tsv` : "");
+    const copy = async (text, msg) => { try { await navigator.clipboard.writeText(text); U.toast(msg); } catch { prompt("Copy this", text); } };
+    const save = async (patch, msg) => {
+      if (!s.cloud || !CL || !CL.saveGoogle) return U.toast("Log in with your mobile number and PIN first");
+      try { g = await CL.saveGoogle(s.id, patch); A.store.set(key, g); if (msg) U.toast(msg); draw(); }
+      catch (x) { U.toast(navigator.onLine ? x.message : "No internet — try again when you're online"); }
+    };
+    let open = null;
+    const draw = () => {
+      const items = s.items.filter((i) => !i.removed);
+      const ready = items.filter((i) => !gReady(i).length), notReady = items.filter((i) => gReady(i).length);
+      const photos = (s.cover ? 1 : 0) + (s.gallery || []).length;
+      const checks = [
+        ["Shop name", !!s.name], ["Phone number", String(s.phone || "").replace(/\D/g, "").length >= 10],
+        ["Area and PIN code", !!(s.locality && s.pincode)], ["Map pin", s.lat != null],
+        ["About your shop (a few lines)", String(s.about || "").trim().length >= 40], ["Your Gmail address", !!g.gmail],
+      ];
+      const done = [
+        checks.every((c) => c[1]),
+        !!s.logo && photos >= 3,
+        g.gbp_status === "live" && !!g.maps_url,
+        ready.length >= 5,
+        g.mc_status === "live",
+      ];
+      const cur = open ?? Math.max(0, done.indexOf(false));
+      const step = (n, title, sub, body) => `<div class="gstep ${done[n] ? "done" : ""} ${cur === n ? "open" : ""}">
+        <button class="gsh" data-step="${n}"><span class="gn">${done[n] ? "✓" : n + 1}</span><span><b>${title}</b><em>${sub}</em></span>${ic("arrow")}</button>
+        ${cur === n ? `<div class="gsb">${body}</div>` : ""}</div>`;
+      const field = (k, v, i) => `<div class="gc"><span><em>${k}</em>${esc(v)}</span><button class="link" data-cp="${i}">Copy</button></div>`;
+      const gf = [...gfields(s), ["Store code (Advanced information)", g.store_code || "MM-" + s.id.slice(0, 8).toUpperCase()], ["Description", s.about || ""]];
+      U.app.innerHTML = `
+        ${bizTop("Get found on Google")}
+        <div class="rsec ghero"><b>Show your products on Google, next to the big online stores</b>
+          <p class="small quiet" style="margin:6px 0 0">When someone nearby searches for something you sell, Google can show <b>your shop, your price and "in stock · 0.4 km"</b>. It's free. Finish these 5 steps once — after that your stock goes to Google by itself.</p>
+          <div class="gprog"><i style="width:${done.filter(Boolean).length * 20}%"></i></div>
+          <p class="tiny faint" style="margin:6px 0 0">${done.filter(Boolean).length} of 5 done</p></div>
+        <div class="gsteps2">
+        ${step(0, "Shop details", checks.every((c) => c[1]) ? "All set" : `${checks.filter((c) => !c[1]).length} to fill in`, `
+          <ul class="gcheck">${checks.map(([k, ok]) => `<li class="${ok ? "ok" : ""}">${ok ? "✓" : "○"} ${k}</li>`).join("")}</ul>
+          <p class="small quiet">Google shows these exactly as you write them here. Name, address and phone must be the same everywhere.</p>
+          <div class="form" style="margin-top:6px">
+            <label>Your Gmail <span class="faint tiny">— the Google account you'll use for your shop</span><input class="field" id="ggm" type="email" inputmode="email" placeholder="yourshop@gmail.com" value="${esc(g.gmail || "")}"></label>
+            <div class="two"><button class="btn" id="ggms" type="button">Save Gmail</button><a class="btn line" href="#/biz/site">Edit about &amp; photos</a></div>
+            <button class="link" id="gbs" type="button">Change phone or other bill details</button>
+          </div>`)}
+        ${step(1, "Shop photos", done[1] ? "All set" : `${s.logo ? "" : "Logo, "}${Math.max(0, 3 - photos)} more photo${3 - photos === 1 ? "" : "s"}`, `
+          <p class="small quiet">Google needs real photos of your shop. Take them in daylight:</p>
+          <ol class="gsteps"><li><b>Shop front</b> with your board/sign clearly readable (cover photo)</li><li><b>Inside</b>, showing shelves and stock</li><li><b>Counter</b> or best-selling products</li><li>Your <b>logo</b> (or the sign up close)</li></ol>
+          <a class="btn" href="#/biz/site">Add photos (${photos + (s.logo ? 1 : 0)} added)</a>`)}
+        ${step(2, "Google Maps profile", g.gbp_status === "live" ? "Live on Maps" : g.gbp_status === "verifying" ? "Waiting for Google to verify" : g.gbp_status === "started" ? "Started" : "About 10 minutes", `
+          <p class="small quiet" style="margin-top:0">Google lets only the owner add a shop to Maps. Do it on this phone — every answer is below, ready to copy.</p>
+          <ol class="gsteps">
+            <li><a class="link" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.name + " " + (s.locality || ""))}" target="_blank" rel="noopener">Search for your shop on Google Maps</a>. If it's there, open it and tap <b>Claim this business</b> / <b>Own this business?</b></li>
+            <li>Not there? <a class="link" href="https://business.google.com/create" target="_blank" rel="noopener">Add your shop on Google</a>. Sign in with <b>${esc(g.gmail || "your Gmail")}</b>.</li>
+            <li>Fill in Google's questions with these (tap Copy, then paste):</li></ol>
+          <div class="gcopy">${gf.map(([k, v], i) => field(k, v, i)).join("")}</div>
+          <p class="small" style="margin:12px 0 4px"><b>Verification.</b> Google checks the shop is yours. If it asks for a <b>video</b>, record one continuous clip (30–60 s):</p>
+          <ol class="gsteps"><li>Start outside: the street and a nearby landmark</li><li>Your shop board with the name</li><li>Walk in: shelves, stock and the counter</li><li>Something only the owner has: shop keys, bill book, GST or trade licence</li></ol>
+          <p class="tiny faint">If Google offers a phone call or SMS instead, choose that — it's faster. Verification takes from a few minutes to about 5 days.</p>
+          <div class="words" style="margin:10px 0">${[["started", "I've submitted it"], ["verifying", "Google is verifying"]].map(([k, l]) => `<button class="word ${g.gbp_status === k ? "on" : ""}" data-gbp="${k}">${l}</button>`).join("")}</div>
+          <div class="form">
+            <label>Your Google Maps link <span class="faint tiny">— on your profile tap Share → Copy link</span><input class="field" id="gmu" inputmode="url" placeholder="https://maps.app.goo.gl/…" value="${esc(g.maps_url || "")}"></label>
+            <label>Your review link <span class="faint tiny">— profile → Ask for reviews → copy</span><input class="field" id="grv" inputmode="url" placeholder="https://g.page/r/…/review" value="${esc(g.review_url || "")}"></label>
+            <button class="btn" id="gml" type="button">My shop is live on Maps — save links</button>
+          </div>`)}
+        ${step(3, "Products ready for Google", `${ready.length} of ${items.length} ready`, `
+          <p class="small quiet" style="margin-top:0">Google shows an item only when it has <b>a price, a real photo</b> and <b>stock you've counted in the last 7 days</b>. Plain background, no watermark, no photos from other websites. Tap an item to fix it — the photo is under <b>Product details</b>.</p>
+          ${notReady.length ? `<div class="entries">${notReady.slice(0, 40).map((it) => `<a class="entry" href="#/biz/items?open=${it.id}"><div class="body"><div class="name">${esc(it.name)}</div>
+            <div class="note" style="color:var(--out)">Needs: ${gReady(it).join(", ")}</div></div>${ic("arrow")}</a>`).join("")}</div>
+            ${notReady.length > 40 ? `<p class="tiny faint">…and ${notReady.length - 40} more in Stock</p>` : ""}` : '<p class="small">All your items are ready. 🎉</p>'}
+          <p class="tiny faint" style="margin-top:8px">Tip: scan the barcode on branded goods — Google trusts items with a barcode more.</p>`)}
+        ${step(4, "Show products on Google Shopping", g.mc_status === "live" ? "Live" : g.mc_status === "review" ? "Google is reviewing" : !done[2] ? "After your Maps profile is live" : "About 15 minutes", `
+          ${!feedUrl("products") ? '<p class="small" style="color:var(--out)">Connect to the internet and tap Sync now in the menu once, then come back.</p>' : ""}
+          <p class="small quiet" style="margin-top:0">Google Merchant Center is where Google keeps shop products. My Market fills it for you every day — you set it up once.</p>
+          <ol class="gsteps">
+            <li><a class="link" href="https://merchants.google.com/" target="_blank" rel="noopener">Open Google Merchant Center</a> and sign in with <b>${esc(g.gmail || "the same Gmail")}</b>. Choose that you sell <b>in a physical shop</b>. Country: India. Website: your shop link (copy below).</li>
+            <li>When it asks, <b>link your Google Business Profile</b> (your Maps profile from step 3).</li>
+            <li>Turn on <b>Free local listings</b> and choose <b>"use your own product pages"</b>.</li>
+            <li>Add products → <b>from a file → "add file from a link"</b> → paste <b>Products link</b>. Set it to fetch <b>every day</b>.</li>
+            <li>Add your <b>local inventory / stock</b> data the same way → paste <b>Stock link</b>, every day.</li>
+            <li>Type your Merchant Center number (top right, e.g. 123456789) below.</li></ol>
+          <div class="gcopy">
+            <div class="gc"><span><em>Your shop link (website)</em>${esc(siteLink(s, "gmaps"))}</span><button class="link" id="cpsite">Copy</button></div>
+            <div class="gc"><span><em>Products link</em>${esc(feedUrl("products") || "—")}</span><button class="link" id="cpfp">Copy</button></div>
+            <div class="gc"><span><em>Stock link</em>${esc(feedUrl("local") || "—")}</span><button class="link" id="cpfl">Copy</button></div>
+            <div class="gc"><span><em>Store code</em>${esc(gf[6][1])}</span><button class="link" id="cpsc">Copy</button></div></div>
+          <div class="form" style="margin-top:10px">
+            <label>Merchant Center number<input class="field" id="gmid" inputmode="numeric" placeholder="123456789" value="${esc(g.merchant_id || "")}"></label>
+            <div class="words">${[["feeds", "Links added"], ["review", "Google is reviewing"], ["live", "Products are live"]].map(([k, l]) => `<button class="word ${g.mc_status === k ? "on" : ""}" data-mc="${k}">${l}</button>`).join("")}</div>
+          </div>
+          <p class="tiny faint" style="margin-top:8px">Google reviews new shops in about 3–7 days and may call or visit to check your stock. Keep stock correct: every bill lowers it by itself — when new stock arrives, add it in Stock.</p>`)}
+        </div>
+        <div class="rsec"><div class="rhd"><b>Stuck? We'll help</b></div>
+          ${g.help_at ? `<p class="small" style="margin:0 0 8px">✓ We got your request (${new Date(g.help_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}). My Market will call you.</p>` : ""}
+          <div class="form"><textarea class="field" id="ghn" rows="2" maxlength="300" placeholder="What's the problem? e.g. Google asked for a video, I'm not sure how">${esc(g.help_note || "")}</textarea>
+          <button class="btn line" id="ghelp" type="button">Ask My Market to help</button></div></div>
+        <div style="height:30px"></div>`;
+      bindTop();
+      $$("[data-step]").forEach((b) => b.onclick = () => { open = cur === +b.dataset.step ? -1 : +b.dataset.step; draw(); });
+      $$("[data-cp]").forEach((b) => b.onclick = () => { const [k, v] = gf[+b.dataset.cp]; copy(v, `${k.replace(/ \(.*\)/, "")} copied — paste it in Google`); });
+      $("#ggms") && ($("#ggms").onclick = () => {
+        const v = $("#ggm").value.trim().toLowerCase();
+        if (!/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/.test(v)) return U.toast("Type your Gmail, like yourshop@gmail.com");
+        save({ gmail: v }, "Gmail saved");
+      });
+      $("#gbs") && ($("#gbs").onclick = () => billSettings(s));
+      $$("[data-gbp]").forEach((b) => b.onclick = () => save({ gbp_status: b.dataset.gbp }, "Saved"));
+      $("#gml") && ($("#gml").onclick = () => {
+        const mu = $("#gmu").value.trim(), rv = $("#grv").value.trim();
+        if (!MAPS_RX.test(mu)) return U.toast("Paste the link from Google Maps (Share → Copy link)");
+        if (rv && !MAPS_RX.test(rv)) return U.toast("That review link doesn't look like a Google link");
+        save({ maps_url: mu, review_url: rv || null, gbp_status: "live" }, "Saved — your website now shows your Google Maps profile");
+      });
+      $("#cpsite") && ($("#cpsite").onclick = () => copy(siteLink(s, "gmaps"), "Shop link copied"));
+      $("#cpfp") && ($("#cpfp").onclick = () => feedUrl("products") ? copy(feedUrl("products"), "Products link copied — paste it in Merchant Center") : U.toast("Sync first"));
+      $("#cpfl") && ($("#cpfl").onclick = () => feedUrl("local") ? copy(feedUrl("local"), "Stock link copied — paste it in Merchant Center") : U.toast("Sync first"));
+      $("#cpsc") && ($("#cpsc").onclick = () => copy(gf[6][1], "Store code copied"));
+      $$("[data-mc]").forEach((b) => b.onclick = () => {
+        const id = ($("#gmid").value || "").replace(/\D/g, "");
+        if (id && !/^\d{6,13}$/.test(id)) return U.toast("The Merchant Center number has 6 to 13 digits");
+        save({ mc_status: b.dataset.mc, ...(id ? { merchant_id: id } : {}) }, "Saved");
+      });
+      $("#ghelp").onclick = () => save({ help_at: new Date().toISOString(), help_note: $("#ghn").value.trim() || null }, "Thanks — My Market will call you soon");
+    };
+    draw();
+    if (s.cloud && CL && CL.googleLink) CL.googleLink(s.id).then((r) => { if (r) { g = r; A.store.set(key, r); if (location.hash.startsWith("#/biz/google")) draw(); } }).catch(() => {});
+  }
+
   // ---------- My website: the shop's page, sharing, QR poster, Google Maps ----------
   const GCAT = { mobile: "Mobile phone shop", electronics: "Electronics store", electrical: "Electrical supply store", hardware: "Hardware store",
     plumbing: "Plumbing supply store", clothes: "Clothing store", footwear: "Shoe store", kitchen: "Kitchen supply store", grocery: "Grocery store",
@@ -1324,18 +1563,8 @@
         <div id="qrbox" class="qrbox"><p class="quiet small">Making the QR code…</p></div>
         <div class="two" style="margin-top:10px"><button class="btn" id="post">Download poster (PDF)</button><button class="btn line" id="postp">Print</button></div>
       </div>
-      <div class="rsec"><div class="rhd"><b>Put your shop on Google Maps</b></div>
-        <p class="small quiet" style="margin:0 0 8px">Google lets only the shop's owner add or claim a shop — no app can do it for you. It takes about 5 minutes, and everything you need is here to copy.</p>
-        <ol class="gsteps">
-          <li><a class="link" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.name + " " + (s.locality || A.getMarket(s.marketId)?.name || ""))}" target="_blank" rel="noopener">Search your shop on Google Maps</a>.
-            Found it? Tap it → <b>Own this business?</b> / <b>Claim this business</b>.</li>
-          <li>Not there? <a class="link" href="https://business.google.com/create" target="_blank" rel="noopener">Add your business on Google</a> and fill in the details below.</li>
-          <li>Google checks it's yours by a phone call, SMS or short video. Then your shop shows on Maps.</li>
-        </ol>
-        <div class="gcopy">${gfields(s).map(([k, v], i) => `<div class="gc"><span><em>${k}</em>${esc(v)}</span><button class="link" data-gc="${i}">Copy</button></div>`).join("")}</div>
-        <p class="faint tiny" style="margin:6px 0 0">Put the <b>Website</b> link in your Google profile: everyone who finds you on Maps can then see your stock and prices, and your Reports show those visits.
-          <a class="link" href="https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lng}" target="_blank" rel="noopener">Check your pin on the map</a></p>
-      </div>
+      <a class="rsec glink" href="#/biz/google"><div class="rhd"><b>Get found on Google</b>${ic("arrow")}</div>
+        <p class="small quiet" style="margin:0">Put your shop on Google Maps and your products on Google Shopping — with your price and "in stock nearby". Step by step, everything ready to copy.</p></a>
       <div class="rsec"><div class="rhd"><b>Visits</b><div class="words">${[7, 30].map((k) => `<a class="word ${(+params.get("d") || 7) === k ? "on" : ""}" href="#/biz/site?d=${k}">${k}d</a>`).join("")}</div></div>
         <div id="visits"><p class="quiet small">Loading…</p></div>
       </div>
@@ -1360,7 +1589,6 @@
     };
     const copy = async (text, msg) => { try { await navigator.clipboard.writeText(text); U.toast(msg); } catch { prompt("Copy this link", text); } };
     $("#copy").onclick = () => copy(link, "Link copied");
-    $$("[data-gc]").forEach((x) => x.onclick = () => { const [k, v] = gfields(s)[+x.dataset.gc]; copy(v, `${k} copied — paste it in Google`); });
     $("#wash").onclick = () => U.openWhatsApp("", `${s.name} — see our stock and prices: ${siteLink(s, "share")}`);
     $("#nsh").onclick = async () => { try { await navigator.share({ title: s.name, text: `${s.name} — see our stock and prices`, url: siteLink(s, "share") }); } catch (x) { if (x.name !== "AbortError") copy(siteLink(s, "share"), "Link copied"); } };
     makeQR(siteLink(s, "qr")).then((qr) => { $("#qrbox") && ($("#qrbox").innerHTML = qrSvg(qr, 200) + `<b>${esc(s.name)}</b>`); })
@@ -1375,7 +1603,7 @@
     // visits
     const box = $("#visits");
     if (!(window.MM_CLOUD && s.cloud)) { box.innerHTML = '<p class="quiet small">Visits show once your shop is online.</p>'; return; }
-    const SRC = { gmaps: "Google Maps", qr: "QR poster", bill: "Bills", share: "Shared links", link: "Your link", app: "My Market app", search: "Search" };
+    const SRC = { gmaps: "Google Maps", google: "Google Search & Shopping", web: "Web", qr: "QR poster", bill: "Bills", share: "Shared links", link: "Your link", app: "My Market app", search: "Search" };
     window.MM_CLOUD.visitsSummary(s.id, +params.get("d") || 7).then((rows) => {
       const views = rows.filter((r) => r.kind === "view"), tot = views.reduce((a, r) => a + +r.n, 0);
       const act = (k) => rows.filter((r) => r.kind === k).reduce((a, r) => a + +r.n, 0);
@@ -1952,7 +2180,9 @@
       b.discount ? `Discount: −₹${b.discount.toLocaleString("en-IN")}` : null, `*Total: ₹${b.total.toLocaleString("en-IN")}*`,
       A.billSaved(b) ? `You saved ₹${A.billSaved(b).toLocaleString("en-IN")}` : null, `Paid by: ${PAYS[b.pay]}`,
       link ? "" : null, link ? `Full bill & PDF: ${link}` : null,
-      s.cloud ? `Our stock & prices: ${siteLink(s, "bill")}` : null, "", "Thank you! Visit again 🙏"].filter((x) => x !== null).join("\n");
+      s.cloud ? `Our stock & prices: ${siteLink(s, "bill")}` : null,
+      (A.store.get("glink:" + s.id, null) || {}).review_url ? `Happy with us? Rate us on Google ⭐ ${A.store.get("glink:" + s.id, null).review_url}` : null,
+      "", "Thank you! Visit again 🙏"].filter((x) => x !== null).join("\n");
   }
   function receiptView(id) {
     const b = A.getBill(id), s = A.ownerShop();

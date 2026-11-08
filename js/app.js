@@ -543,6 +543,7 @@
               <div class="s-row"><span>Opening hours</span>
                 <table class="s-hours">${DAYS.map((d) => `<tr class="${d === today ? "now" : ""}"><td>${d}</td><td>${d === s.closedDay ? "Closed" : hours}</td></tr>`).join("")}</table></div>
               <a class="s-btn dark" href="${gmaps}" target="_blank" rel="noopener">${ic("pin")}Get directions</a>
+              ${s.mapsUrl ? `<p style="margin:10px 0 0"><a class="link" href="${esc(s.mapsUrl)}" target="_blank" rel="noopener">See us on Google Maps</a>${s.reviewUrl ? ` · <a class="link" href="${esc(s.reviewUrl)}" target="_blank" rel="noopener">Rate us on Google ⭐</a>` : ""}</p>` : ""}
             </div>
           </div>
         </section>
