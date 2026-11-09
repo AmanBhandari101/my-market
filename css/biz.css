@@ -1,0 +1,196 @@
+/* My Market for Business — "calm counter" (see DESIGN.md).
+   Loaded last in business.html, so it settles the three older layers (app, commerce, store)
+   into one look for the shop app only. One page colour, white cards, one green for action,
+   amber for "look soon", red for problems. */
+.biz-app {
+  --b-page: #f2f5f3;
+  --b-card: #ffffff;
+  --b-line: #e3e8e5;
+  --b-ink: #14201a;
+  --b-ink-2: #5b6a62;
+  --b-ink-3: #95a39b;
+  --b-go: #1a8a4c;
+  --b-go-dark: #146e3c;
+  --b-go-soft: #e6f4ec;
+  --b-warn: #b86e00;
+  --b-warn-soft: #fff3dc;
+  --b-bad: #b3261e;
+  --b-bad-soft: #fde8e6;
+  --b-r: 14px;
+  /* the older layers read these */
+  --ink: var(--b-ink); --ink-2: var(--b-ink-2); --ink-3: var(--b-ink-3);
+  --line: var(--b-line); --cream: var(--b-page); --sand: #eef2ef; --sand-2: #e3e9e5;
+  --teal: var(--b-go-dark); --teal-dark: var(--b-go-dark); --teal-soft: var(--b-go-soft);
+  --in: var(--b-go); --out: var(--b-bad);
+  --gut: 16px; --r: var(--b-r);
+  background: #e7ece9;
+  color: var(--b-ink);
+  font-size: 15px;
+}
+.biz-app #app { background: var(--b-page); }
+.biz-app :focus-visible { outline: 2px solid var(--b-go); outline-offset: 2px; }
+
+/* ---------- top bar: light, sticky, the page's name ---------- */
+.btop { position: sticky; top: 0; z-index: 600; display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 6px var(--gut);
+  background: rgba(255,255,255,.94); -webkit-backdrop-filter: saturate(1.4) blur(10px); backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--b-line); }
+.btop .blogo { width: 30px; height: 30px; border-radius: 8px; flex: none; }
+.btop .bback { width: 40px; height: 40px; margin-left: -8px; display: grid; place-items: center; border-radius: 50%; color: var(--b-ink); flex: none; transition: background .15s; }
+.btop .bback:active { background: var(--b-go-soft); }
+.btop .bback .i { width: 22px; height: 22px; stroke-width: 1.9; }
+.btop .btt { min-width: 0; flex: 1; display: flex; flex-direction: column; line-height: 1.15; }
+.btop .btt b { font-size: 18px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btop .syncst { font-style: normal; font-size: 11.5px; font-weight: 500; color: var(--b-ink-3); margin-top: 1px; }
+.btop .syncst .warn { color: var(--b-warn); }
+.btop .syncst .bad { color: var(--b-bad); }
+.btop > .link { flex: none; font-size: 14px; color: var(--b-go-dark); font-weight: 600; }
+.btop + .planbar, .btop + [data-planbar] + * { margin-top: 12px; }
+
+/* login / register pages keep their simple bar, now light too */
+.biz-app .topline { background: var(--b-card); color: var(--b-ink); border-bottom: 1px solid var(--b-line); padding: 8px var(--gut); }
+.biz-app .topline .iconbtn { color: var(--b-ink); }
+.biz-app .topline .brand { color: var(--b-ink); }
+.biz-app .topline .brand small { color: var(--b-go) !important; }
+.biz-app .topline .link, .biz-app .topline .eyebrow { color: var(--b-ink-2) !important; }
+.biz-app .band { background: linear-gradient(180deg, #e3f2e9 0%, var(--b-page) 100%); }
+.biz-app .display em { color: var(--b-go); font-style: normal; }
+
+/* ---------- type ---------- */
+.biz-app .title { font-family: var(--sans); font-weight: 700; font-size: 22px; letter-spacing: -.01em; }
+.biz-app #sheet .title { font-size: 20px; margin: 6px 0 4px; }
+.biz-app .serif { font-family: var(--sans); font-weight: 700; }
+.biz-app .eyebrow { color: var(--b-ink-3); letter-spacing: .08em; font-size: 11px; font-weight: 700; }
+.biz-app .block > .eyebrow { font-size: 17px; font-weight: 700; letter-spacing: -.01em; text-transform: none; color: var(--b-ink); }
+.biz-app .block { padding: 20px var(--gut) 0; }
+.biz-app .quiet { color: var(--b-ink-2); }
+.biz-app .faint { color: var(--b-ink-3); }
+.biz-app .link { color: var(--b-go-dark); font-weight: 600; }
+.biz-app .link.accent { color: var(--b-bad); }
+.biz-app b, .biz-app .rupee { font-variant-numeric: tabular-nums; }
+
+/* ---------- buttons: one green for the main job, quiet outline for the rest ---------- */
+.biz-app .btn { height: 48px; border-radius: 12px; background: var(--b-go); border: 1px solid var(--b-go); color: #fff; font-size: 15px; font-weight: 600;
+  box-shadow: none; gap: 8px; transition: background .15s, transform .1s; }
+.biz-app .btn:active { background: var(--b-go-dark); transform: scale(.985); }
+.biz-app .btn:disabled { opacity: .55; }
+.biz-app .btn .i { width: 18px; height: 18px; stroke-width: 2; }
+.biz-app .btn.line { background: var(--b-card); color: var(--b-ink); border: 1px solid #d3dbd6; box-shadow: none; }
+.biz-app .btn.line:active { background: var(--b-page); }
+.biz-app .btn.warm { background: var(--b-warn-soft); color: #7a4a00; border-color: #f1d49a; box-shadow: none; }
+.biz-app .billbar .btn, .biz-app .scanrow .btn { height: 46px; }
+
+/* chips */
+.biz-app .word { border-radius: 100px; background: var(--b-card); border: 1px solid #d3dbd6; color: var(--b-ink); padding: 7px 14px; font-size: 13.5px; font-weight: 500; transition: background .15s, border-color .15s; }
+.biz-app .word.on, .biz-app .ranges button.on { background: var(--b-go-soft); border-color: var(--b-go); color: var(--b-go-dark); font-weight: 600; }
+
+/* fields */
+.biz-app .field, .biz-app .inshop { border-radius: 12px; border: 1px solid #cfd8d3; background: var(--b-card); }
+.biz-app .field { font-size: 16px; padding: 12px 14px; }
+.biz-app .field:focus, .biz-app .inshop:focus-within { border-color: var(--b-go); box-shadow: 0 0 0 3px rgba(26,138,76,.15); outline: 0; }
+.biz-app .inshop { padding: 0 14px; min-height: 46px; margin-bottom: 0; }
+.biz-app .inshop input { font-size: 15px; height: 44px; }
+.biz-app .inshop .i { color: var(--b-ink-3); }
+.biz-app .form label { color: var(--b-ink-2); font-weight: 600; font-size: 13px; letter-spacing: 0; text-transform: none; }
+
+/* ---------- cards: white, one radius, one hairline ---------- */
+.biz-app .rsec, .biz-app .qcard, .biz-app .ocard, .biz-app .stats > *, .biz-app .cartlist, .biz-app .perks > div, .biz-app .receipt {
+  background: var(--b-card); border: 1px solid var(--b-line); border-radius: var(--b-r); box-shadow: 0 1px 2px rgba(20,32,26,.04); }
+.biz-app .rsec { margin: 12px var(--gut) 0; padding: 16px; }
+.biz-app .rhd > b { font-size: 16px; }
+.biz-app .stats { padding: 0 var(--gut); gap: 10px; margin-top: 12px; }
+.biz-app .stats > * { padding: 12px 14px; }
+.biz-app .stats b { font-size: 22px; font-weight: 700; }
+.biz-app .stats span { color: var(--b-ink-2); }
+.biz-app .stats .hot { background: var(--b-warn-soft); border-color: #f1d49a; }
+.biz-app .stats .hot b { color: var(--b-warn); }
+.biz-app a.sitecard { background: var(--b-card); border-color: var(--b-line); padding: 14px 16px; }
+.biz-app a.sitecard > span { width: 40px; height: 40px; border-radius: 12px; background: var(--b-go-soft); display: grid; place-items: center; flex: none; }
+.biz-app a.sitecard > span .i { width: 22px; height: 22px; color: var(--b-go-dark); }
+.biz-app a.sitecard > .i { color: var(--b-ink-3); }
+.biz-app .sitecard.due { background: var(--b-warn-soft); border-color: #f1d49a; }
+.biz-app .sitecard.due > span { background: #fff; }
+.biz-app .banner { background: var(--b-warn-soft); border: 1px solid #f1d49a; border-radius: var(--b-r); }
+.biz-app .planbar { border-radius: 12px; }
+.biz-app .receipt { border-style: solid; }
+.biz-app .specs th { background: none; padding-left: 0; font-weight: 500; }
+.biz-app .specs td { padding-left: 0; }
+.biz-app .specs .total th, .biz-app .specs .total td { font-size: 17px; }
+
+/* stock + billing */
+.biz-app .addstock { padding-top: 16px; }
+.biz-app .as-main { background: var(--b-card); border: 1px solid var(--b-line); box-shadow: 0 1px 2px rgba(20,32,26,.04); }
+.biz-app .as-main .i { color: var(--b-go); background: var(--b-go-soft); border-radius: 10px; width: 36px; height: 36px; padding: 7px; }
+.biz-app .oitem { padding: 12px 0; }
+.biz-app .oitem .name { font-family: var(--sans); font-size: 15.5px; font-weight: 600; line-height: 1.25; }
+.biz-app .billhead { margin: 16px 0 10px; }
+.biz-app .billhead b { font-size: 20px; font-weight: 700; }
+.biz-app .bgrid { gap: 10px; padding-top: 12px; }
+.biz-app .btile { border: 1px solid var(--b-line); border-radius: var(--b-r); padding: 6px 6px 10px; box-shadow: 0 1px 2px rgba(20,32,26,.04); transition: border-color .15s, transform .1s; }
+.biz-app .btile:active { transform: scale(.97); }
+.biz-app .btile.on { border-color: var(--b-go); background: #f5fbf7; box-shadow: 0 0 0 2px var(--b-go-soft); }
+.biz-app .btile .bimg { border-radius: 10px; background: #f3f6f4; }
+.biz-app .btile .bname { padding: 0 2px; font-weight: 500; }
+.biz-app .btile .bprice, .biz-app .btile .bst { padding: 0 2px; }
+.biz-app .btile .bstep { background: var(--b-go); }
+.biz-app .billbar { background: rgba(255,255,255,.96); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border-top: 1px solid var(--b-line); }
+.biz-app .ocard.new { border-color: #f1d49a; box-shadow: 0 0 0 3px var(--b-warn-soft); }
+.biz-app .dbars i, .biz-app .bar .bt i { background: var(--b-go); }
+
+/* empty states */
+.bempty { display: grid; justify-items: center; gap: 6px; text-align: center; padding: 26px 18px; background: var(--b-card); border: 1px dashed #cfd8d3; border-radius: var(--b-r); color: var(--b-ink-2); }
+.bempty .i { width: 44px; height: 44px; padding: 10px; border-radius: 50%; background: var(--b-go-soft); color: var(--b-go-dark); }
+.bempty b { font-size: 16px; color: var(--b-ink); margin-top: 4px; }
+.bempty p { margin: 0; font-size: 13.5px; line-height: 1.5; max-width: 300px; }
+.biz-app .cart-empty .i { color: var(--b-go); }
+
+/* ---------- bottom bar: five tabs, a soft pill behind the current one ---------- */
+.biz-app #tabs { background: rgba(255,255,255,.97); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border-top: 1px solid var(--b-line); box-shadow: none; }
+#tabs.five { grid-template-columns: repeat(5, 1fr); }
+.biz-app #tabs a { gap: 3px; padding: 7px 0 8px; font-size: 11.5px; font-weight: 500; color: var(--b-ink-2); }
+.biz-app #tabs a::before { display: none; }
+.biz-app #tabs .ti { position: relative; display: grid; place-items: center; width: 56px; height: 30px; border-radius: 100px; transition: background .2s; }
+.biz-app #tabs a.on { color: var(--b-go-dark); font-weight: 700; }
+.biz-app #tabs a.on .ti { background: var(--b-go-soft); }
+.biz-app #tabs .bcount { position: absolute; top: -3px; right: 6px; background: var(--b-go); color: #fff; border: 2px solid #fff; height: 19px; min-width: 19px; line-height: 15px; font-size: 10.5px; }
+.biz-app #tabs .bcount.hot { background: var(--b-bad); }
+.biz-app #tabs .ti.bump { animation: bump .35s ease; }
+@keyframes bump { 40% { transform: scale(1.18); } }
+body.biz-app.tabs-on .billbar { bottom: calc(60px + env(safe-area-inset-bottom)); box-shadow: none; }
+
+/* ---------- More page ---------- */
+.mshop { display: flex; align-items: center; gap: 12px; margin: 16px var(--gut) 0; padding: 14px 16px; background: var(--b-card); border: 1px solid var(--b-line); border-radius: var(--b-r); }
+.mshop .mav { width: 46px; height: 46px; flex: none; border-radius: 14px; display: grid; place-items: center; background: var(--b-go); color: #fff; font-size: 20px; font-weight: 700; }
+.mshop > div { flex: 1; min-width: 0; display: grid; }
+.mshop b { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mshop em { font-style: normal; font-size: 13px; color: var(--b-ink-2); }
+.mgh { margin: 22px calc(var(--gut) + 4px) 8px; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--b-ink-3); }
+.mlist { margin: 0 var(--gut); background: var(--b-card); border: 1px solid var(--b-line); border-radius: var(--b-r); overflow: hidden; }
+.mrow { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; text-align: left; color: var(--b-ink); border-top: 1px solid var(--b-line); transition: background .15s; }
+.mrow:first-child { border-top: 0; }
+.mrow:active { background: var(--b-page); }
+.mrow .mic { width: 36px; height: 36px; flex: none; border-radius: 10px; display: grid; place-items: center; background: var(--b-go-soft); color: var(--b-go-dark); }
+.mrow .mic .i { width: 20px; height: 20px; stroke-width: 1.8; }
+.mrow.warn .mic { background: var(--b-warn-soft); color: var(--b-warn); }
+.mrow.warn em { color: var(--b-warn); }
+.mrow .mtx { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.mrow .mtx b { font-size: 15px; font-weight: 600; }
+.mrow .mtx em { font-style: normal; font-size: 12.5px; color: var(--b-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mrow > .i { width: 16px; height: 16px; color: var(--b-ink-3); }
+.mout { display: flex; align-items: center; justify-content: center; gap: 8px; width: calc(100% - 2 * var(--gut)); margin: 22px var(--gut) 0; height: 48px;
+  background: var(--b-card); border: 1px solid var(--b-line); border-radius: var(--b-r); color: var(--b-bad); font-weight: 600; }
+.mout .i { width: 18px; height: 18px; }
+.mver { text-align: center; font-size: 12px; color: var(--b-ink-3); margin: 14px 0 28px; }
+
+/* ---------- sheets and messages ---------- */
+.biz-app #sheet { background: var(--b-card); border-radius: 22px 22px 0 0; padding-top: 26px; }
+.biz-app #sheet::before { content: ""; position: absolute; top: 9px; left: 50%; width: 38px; height: 4px; margin-left: -19px; border-radius: 4px; background: #d3dbd6; }
+.biz-app #sheet-backdrop { background: rgba(20,32,26,.38); }
+.biz-app #toast { background: #1d2a23; border-radius: 12px; box-shadow: 0 8px 24px -8px rgba(0,0,0,.35); }
+
+@media (prefers-reduced-motion: reduce) {
+  .biz-app * { transition: none !important; animation: none !important; }
+}
+
+/* small fixes found in the page review */
+.biz-app .stats [data-f="out"].hot { background: var(--b-bad-soft); border-color: #f4c3bd; }
+.biz-app .stats [data-f="out"].hot b { color: var(--b-bad); }
+.biz-app .ph-cover { align-content: center; padding-bottom: 34px; border-color: #c4cfc9; background: #eef2ef; }

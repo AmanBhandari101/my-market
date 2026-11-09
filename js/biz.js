@@ -22,7 +22,7 @@
     if (sub === "cart") return cartView();
     if (sub === "backup") return backupView(params);
     if (sub === "plan") return planView();
-    if (sub === "admin") return adminView();
+    if (sub === "more") return moreView();
     if (sub === "bills") return billsView();
     if (sub === "insights") return insightsView();
     if (sub === "analytics") return analyticsView(params);
@@ -75,8 +75,8 @@
     $$("#lf input").forEach((i) => i.addEventListener("input", () => { $("#lerr").textContent = ""; i.classList.remove("bad"); }));
     $("#lhelp").onclick = () => U.openSheet(`<div class="eyebrow">Can't get in?</div><div class="title">Getting back into your shop</div>
       <div class="help">
-        <div><b>Lost your phone or SIM?</b><p>Your shop is safe on the server. On any phone, log in with your <b>main number</b> or your <b>backup number</b> and your PIN. Then open ☰ → <b>Login & security</b> → <b>Log out all other devices</b>, so the lost phone can't open your shop.</p></div>
-        <div><b>Forgot your PIN?</b><p>Log in with your <b>backup number</b> (it has the same PIN unless you changed it). Then ☰ → <b>Login & security</b> → change your PIN.</p></div>
+        <div><b>Lost your phone or SIM?</b><p>Your shop is safe on the server. On any phone, log in with your <b>main number</b> or your <b>backup number</b> and your PIN. Then open <b>More</b> → <b>Login & security</b> → <b>Log out all other devices</b>, so the lost phone can't open your shop.</p></div>
+        <div><b>Forgot your PIN?</b><p>Log in with your <b>backup number</b> (it has the same PIN unless you changed it). Then <b>More</b> → <b>Login & security</b> → change your PIN.</p></div>
         <div><b>Neither works?</b><p>Contact My Market support with your shop name and GSTIN or shop documents — we'll check it's your shop and help you back in. (A reset code by WhatsApp/SMS is coming.)</p></div>
       </div>`);
   }
@@ -162,7 +162,7 @@
       try {
         shop = await A.registerShop({ ...f, name: f.name.trim(), owner: f.owner.trim(), promo: f.promo.trim(), gst: f.gst.trim().toUpperCase(), cat }, { lat: p.lat, lng: p.lng }, addr, { phone: f.phone, pin: f.pin, backup: f.backup.trim(), step });
       } catch (x) { return err(x.message); }
-      U.toast(shop.backupError ? `Shop registered — but the backup number wasn't added: ${shop.backupError}. Add it in ☰ → Login & security.`
+      U.toast(shop.backupError ? `Shop registered — but the backup number wasn't added: ${shop.backupError}. Add it in More → Login & security.`
         : shop.slowSync ? "Shop registered — the internet is slow, so it finishes uploading in the background" : shop.backupAdded ? "Shop registered — backup number added" : "Shop registered — you're logged in", 6000);
       U.go("#/biz/items?setup=1");
     };
@@ -202,7 +202,6 @@
   }
   if (window.MM_APP === "business") {
     setTimeout(() => refreshPlan(true), 2500); setInterval(() => refreshPlan(), 3600000);
-    setTimeout(() => { const s0 = A.ownerShop(); if (s0 && s0.cloud && window.MM_CLOUD?.isAdmin) window.MM_CLOUD.isAdmin().then((y) => A.store.set("isAdmin", y)).catch(() => {}); }, 4000);
   }
   function planBar(s) {
     const st = planStage(s), fmt = (t) => new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
@@ -284,7 +283,7 @@
     A.store.set("billDraft:" + s.id, c);
     const n = cartUnits(c);
     $$("[data-cartn]").forEach((el) => { el.textContent = n; el.classList.toggle("hidden", !n); });
-    if (bump) { const ic2 = $("#carticon"); if (ic2) { ic2.classList.remove("bump"); void ic2.offsetWidth; ic2.classList.add("bump"); } }
+    if (bump) { const ic2 = $('#tabs a[href="#/biz"] .ti'); if (ic2) { ic2.classList.remove("bump"); void ic2.offsetWidth; ic2.classList.add("bump"); } }
   }
 
   // ---------- shop-app top bar ----------
@@ -401,7 +400,7 @@
       <p class="tiny faint" style="margin:10px 0 0">Turn this on once on every phone that should ring. Alerts use the phone's notification sound — keep it off silent and Do Not Disturb.</p>`, (el) => {
       const set = (n, ok, text) => { const r = $("#al-" + n, el); if (!r) return; r.className = "al-row " + (ok === true ? "ok" : ok === false ? "bad" : "");
         r.querySelector(".al-ic").textContent = ok === true ? "✓" : ok === false ? "✗" : "…"; r.querySelector("p").innerHTML = text || ""; };
-      const fail = (n, what, msg) => { set(n, false, esc(msg)); CL.logProblem("alerts:" + what, `${msg} | perm=${window.Notification ? Notification.permission : "-"} on=${A.store.get("pushOn:" + s.id, false)} v=${V}`, s.id); };
+      const fail = (n, what, msg) => { set(n, false, esc(msg)); CL && CL.logProblem("alerts:" + what, `${msg} | perm=${window.Notification ? Notification.permission : "-"} on=${A.store.get("pushOn:" + s.id, false)} v=${V}`, s.id); };
       let sub = null;
       const check = async () => {
         [1, 2, 3].forEach((n) => set(n, null, n === 1 ? "checking…" : ""));
@@ -442,14 +441,15 @@
       $("#al-ring", el).onclick = () => ring(2);
     });
   }
+  // Top bar. Main pages (the five tabs) show their name; every other page gets a back arrow to its tab.
+  const PARENT = { cart: "#/biz", stockin: "#/biz/items", analytics: "#/biz/reports", insights: "#/biz/reports", bills: "#/biz/reports",
+    site: "#/biz/more", google: "#/biz/more", details: "#/biz/more", security: "#/biz/more", plan: "#/biz/more", backup: "#/biz/more" };
   function bizTop(title) {
-    const s = A.ownerShop(), n = waiting(s);
-    return `<div class="topline"><span class="brand"><img src="icon-business.svg" alt=""><span class="bt">${esc(title || s.name)}${s.cloud ? `<em class="syncst" data-sync>${syncWord()}</em>` : ""}</span></span>
-      <div class="btn-row" style="gap:2px"><a class="iconbtn bagbtn" id="carticon" href="#/biz/cart" aria-label="Cart">${ic("bag")}<i class="bcount ${cartUnits(cartGet(s)) ? "" : "hidden"}" data-cartn>${cartUnits(cartGet(s))}</i></a>
-      <a class="iconbtn bagbtn" href="#/biz/inbox" aria-label="Orders and questions">${ic("bell")}<i class="bcount ${n ? "" : "hidden"}" data-bell>${n}</i></a>
-      <button class="iconbtn" data-menu aria-label="Menu">${ic("menu")}</button></div></div>${planBar(s)}`;
+    const s = A.ownerShop(), up = PARENT[(location.hash.split("?")[0].split("/")[2]) || ""];
+    return `<header class="btop">${up ? `<a class="bback" href="${up}" aria-label="Back">${ic("back")}</a>` : `<img class="blogo" src="icon-business.svg" alt="">`}
+      <div class="btt"><b>${esc(title || s.name)}</b>${s.cloud ? `<em class="syncst" data-sync>${syncWord()}</em>` : ""}</div></header>${planBar(s)}`;
   }
-  function bindTop() { $$("[data-menu]").forEach((b) => b.onclick = menuSheet); }
+  function bindTop() {}
   // "Saved" / "Saving 3…" / "Offline · 3 waiting" / "2 not saved"
   function syncWord(d) {
     const c = window.MM_CLOUD; if (!c) return "";
@@ -461,42 +461,56 @@
     return "✓ Saved";
   }
   window.addEventListener("mm-sync", (e) => $$("[data-sync]").forEach((el) => { el.innerHTML = syncWord(e.detail); }));
-  function menuSheet() {
-    const s = A.ownerShop();
-    U.openSheet(`<div class="eyebrow">${esc(C[s.cat].name)}</div><div class="title">${esc(s.name)}</div>
-      <p class="small quiet">${esc(s.phone || "")}${s.pincode ? ` · ${esc(s.locality || "")} ${esc(s.pincode)}` : ""}</p>
-      <div class="entries" style="margin-top:12px">
-        <a class="entry" href="#/biz/inbox"><div class="body"><div class="name">Orders and questions</div><div class="note">${waiting(s)} waiting</div></div>${ic("arrow")}</a>
-        <button class="entry" id="m-al"><div class="body"><div class="name">🔔 Order alerts</div><div class="note">${A.store.get("pushOn:" + s.id, false) ? "On — new orders ring on this phone" : "Off — turn on so new orders ring on this phone"}</div></div>${ic("arrow")}</button>
-        ${s.cloud ? `<button class="entry" id="m-sync"><div class="body"><div class="name">Sync now</div><div class="note">Send this phone's changes and get your other phones' — ${window.MM_CLOUD.pending()} waiting</div></div>${ic("arrow")}</button>` : ""}
-        <a class="entry" href="#/biz/details"><div class="body"><div class="name">Shop details</div><div class="note">Name, phone, category, address, map pin and hours</div></div>${ic("arrow")}</a>
-        <a class="entry" href="#/biz/google"><div class="body"><div class="name">Get found on Google</div><div class="note">Your shop on Google Maps and your products on Google Shopping</div></div>${ic("arrow")}</a>
-        <a class="entry" href="#/biz/site"><div class="body"><div class="name">My website</div><div class="note">Your shop's page: share it, QR poster, add to Google Maps</div></div>${ic("arrow")}</a>
-        ${s.cloud ? `<a class="entry" href="#/biz/security"><div class="body"><div class="name">Login & security</div><div class="note">Backup number, change PIN, log out other phones</div></div>${ic("arrow")}</a>` : ""}
-        <button class="entry" id="m-bs"><div class="body"><div class="name">Bill settings</div><div class="note">Advert, phone and GSTIN on your bills</div></div>${ic("arrow")}</button>
-        <a class="entry" href="index.html#/shop/${s.id}" target="_blank" rel="noopener"><div class="body"><div class="name">See my shop as customers do</div><div class="note">Opens the My Market customer app</div></div>${ic("arrow")}</a>
-        ${A.store.get("isAdmin", false) ? `<a class="entry" href="admin.html" target="_blank" rel="noopener"><div class="body"><div class="name">My Market Admin</div><div class="note">Shops, payments, bank statement — staff only</div></div>${ic("arrow")}</a>` : ""}
-        <a class="entry" href="#/biz/plan"><div class="body"><div class="name">My plan</div><div class="note">${(() => { const st = planStage(s); return st.state === "trial" ? `Free plan · ${st.daysLeft} days left` : st.state === "active" ? "Active" : st.state === "unknown" ? "2 months free, then ₹150/month" : "Payment due"; })()}</div></div>${ic("arrow")}</a>
-        <a class="entry" href="#/biz/backup"><div class="body"><div class="name">Back up bills</div><div class="note">Save a copy to Google Drive</div></div>${ic("arrow")}</a>
-        <a class="entry" href="#/biz/insights"><div class="body"><div class="name">What people searched for</div><div class="note">Items nobody near you had</div></div>${ic("arrow")}</a>
+
+  // ---------- More: everything that isn't done every day ----------
+  function moreView() {
+    const s = A.ownerShop(), st = planStage(s), alertsOn = A.store.get("pushOn:" + s.id, false);
+    const row = (tag, attrs, icon, name, note, tone = "") => `<${tag} class="mrow ${tone}" ${attrs}><span class="mic">${ic(icon)}</span>
+      <span class="mtx"><b>${name}</b><em>${note}</em></span>${ic("arrow")}</${tag}>`;
+    const planNote = st.state === "trial" ? `Free plan · ${st.daysLeft} day${st.daysLeft === 1 ? "" : "s"} left` : st.state === "active" ? "Active" : st.state === "unknown" ? "2 months free, then ₹150/month" : "Payment due";
+    const ver = ((document.querySelector('script[src*="js/biz.js"]') || {}).src || "").replace(/.*v=(\d+).*/, "$1");
+    U.app.innerHTML = `
+      ${bizTop("More")}
+      <div class="mshop"><span class="mav">${esc((s.name || "?").trim().charAt(0).toUpperCase())}</span>
+        <div><b>${esc(s.name)}</b><em>${esc(C[s.cat] ? C[s.cat].name : "")}${s.phone ? " · " + esc(s.phone) : ""}</em></div>
+        <a class="link" href="#/biz/details">Edit</a></div>
+      <h3 class="mgh">Your shop</h3>
+      <div class="mlist">
+        ${row("a", 'href="#/biz/details"', "pen", "Shop details", "Name, phone, category, address, map pin, hours")}
+        ${row("a", 'href="#/biz/site"', "globe", "My website", "Share it, QR poster, photos, see visits")}
+        ${row("a", 'href="#/biz/google"', "search", "Get found on Google", "Google Maps and Google Shopping, step by step")}
+        ${row("a", `href="index.html#/shop/${esc(s.id)}" target="_blank" rel="noopener"`, "eye", "See my shop as customers do", "Opens the My Market customer app")}
       </div>
-      <div class="opts"><button class="link accent" id="m-out">Log out</button></div>`, (el) => {
-      $("#m-bs", el).onclick = () => billSettings(s);
-      $("#m-al", el).onclick = () => { U.closeSheet(); alertsSheet(s); };
-      $("#m-sync", el) && ($("#m-sync", el).onclick = async () => {
-        U.closeSheet(); U.toast("Syncing…");
-        window.MM_CLOUD.retryFailed();
-        const st = await window.MM_CLOUD.flush();
-        if (st.pending) return U.toast("No internet — your changes are kept and will send later");
-        if (st.failed) return U.toast(`${st.failed} change${st.failed > 1 ? "s" : ""} could not be saved: ${st.lastError || "server refused"}`, 8000);
-        try { await window.MM_CLOUD.pullShop(); location.reload(); } catch (x) { U.toast(x.message); }
-      });
-      $("#m-out", el).onclick = () => {
-        const c = window.MM_CLOUD, n = s.cloud && c ? c.pending() + c.failedOps().length : 0;
-        if (n && !confirm(`${n} change${n > 1 ? "s" : ""} (bills, stock…) ${n > 1 ? "haven't" : "hasn't"} reached the server yet.\nIf you log out now they will be LOST.\n\nConnect to the internet and tap Sync now first. Log out anyway?`)) return;
-        A.releaseShop(); U.closeSheet(); U.toast("Logged out"); U.go("#/biz"); };
-      $$("a.entry", el).forEach((a) => a.addEventListener("click", () => U.closeSheet()));
+      <h3 class="mgh">This phone</h3>
+      <div class="mlist">
+        ${row("button", 'id="m-al"', "bell", "Order alerts", alertsOn ? "On · new orders ring on this phone" : "Off · turn on so new orders ring here", alertsOn ? "" : "warn")}
+        ${s.cloud ? row("button", 'id="m-sync"', "sync", "Sync now", `Send this phone's changes, get your other phones' · ${window.MM_CLOUD.pending()} waiting`) : ""}
+      </div>
+      <h3 class="mgh">Bills and account</h3>
+      <div class="mlist">
+        ${row("button", 'id="m-bs"', "receipt", "Bill settings", "Advert, phone and GSTIN on your bills")}
+        ${row("a", 'href="#/biz/plan"', "wallet", "My plan", esc(planNote), ["due", "orders_off", "read_only"].includes(st.state) ? "warn" : "")}
+        ${row("a", 'href="#/biz/backup"', "cloud", "Back up bills", "Save a copy to Google Drive")}
+        ${s.cloud ? row("a", 'href="#/biz/security"', "shield", "Login & security", "Backup number, change PIN, log out other phones") : ""}
+      </div>
+      <button class="mout" id="m-out">${ic("out")} Log out</button>
+      <p class="mver">My Market for Business${ver ? " · v" + esc(ver) : ""}</p>`;
+    $("#m-bs").onclick = () => billSettings(s);
+    $("#m-al").onclick = () => alertsSheet(s);
+    $("#m-sync") && ($("#m-sync").onclick = async () => {
+      U.toast("Syncing…");
+      window.MM_CLOUD.retryFailed();
+      const r = await window.MM_CLOUD.flush();
+      if (r.pending) return U.toast("No internet — your changes are kept and will send later");
+      if (r.failed) return U.toast(`${r.failed} change${r.failed > 1 ? "s" : ""} could not be saved: ${r.lastError || "server refused"}`, 8000);
+      try { await window.MM_CLOUD.pullShop(); location.reload(); } catch (x) { U.toast(x.message); }
     });
+    $("#m-out").onclick = () => {
+      const c = window.MM_CLOUD, n = s.cloud && c ? c.pending() + c.failedOps().length : 0;
+      if (n && !confirm(`${n} change${n > 1 ? "s" : ""} (bills, stock…) ${n > 1 ? "haven't" : "hasn't"} reached the server yet.\nIf you log out now they will be LOST.\n\nConnect to the internet and tap Sync now first. Log out anyway?`)) return;
+      if (!n && !confirm("Log out of your shop on this phone?")) return;
+      A.releaseShop(); U.toast("Logged out"); U.go("#/biz");
+    };
   }
 
   // ---------- orders & customer questions (the bell) ----------
@@ -513,9 +527,11 @@
       if (U.app.dataset.sig === sig && $("#dash")) return;
       U.app.dataset.sig = sig;
       U.app.innerHTML = `
-        <div id="dash">${bizTop("Orders and questions")}</div>
+        <div id="dash">${bizTop("Orders")}</div>
         ${s.cloud && !A.store.get("pushOn:" + s.id, false) ? `<button class="banner" id="al-ban" style="margin:12px var(--gut) 0;text-align:left;width:calc(100% - 2 * var(--gut))">
           <div class="serif">🔔 Never miss an order</div><p>Turn on order alerts — a new order rings on this phone even when the app is closed.</p></button>` : ""}
+        <div class="block" id="o"><div class="eyebrow"><span>Website orders</span></div><div id="olist"><p class="quiet small">Loading…</p></div></div>
+
         <div class="block" id="q"><div class="eyebrow"><span>Customer questions</span></div>
           ${asks.length ? asks.map((a) => `<div class="qcard">
             <div class="serif" style="font-size:21px">“Do you have ${esc(a.q)}?”</div>
@@ -524,8 +540,6 @@
               <button class="btn auto" data-yes="${a.id}">Yes</button><button class="btn auto line" data-no="${a.id}">No</button></div>
           </div>`).join("") : '<p class="quiet small">No questions right now. When someone nearby asks for something you sell, it shows up here — and on your WhatsApp.</p>'}
         </div>
-
-        <div class="block" id="o"><div class="eyebrow"><span>Orders from your website</span></div><div id="olist"><p class="quiet small">Loading…</p></div></div>
 
         <div style="height:30px"></div>`;
       bindTop();
@@ -561,7 +575,7 @@
             : o.status === "ready" ? `<div class="oacts"><button class="btn auto" data-obill="${o.id}">Collected · make bill</button><button class="btn auto line" data-ost="${o.id}" data-to="done">Collected</button><button class="link" data-ost="${o.id}" data-to="cancelled">Cancel</button></div>` : ""}
         </div>`;
       };
-      box.innerHTML = (open.length ? open.map(card).join("") : '<p class="quiet small">No open orders. Customers can tap <b>Add</b> on your website, then <b>Hold</b> or <b>Buy</b> — the order shows up here and rings the bell.</p>')
+      box.innerHTML = (open.length ? open.map(card).join("") : `<div class="bempty">${ic("bag")}<b>No open orders</b><p>When a customer taps <b>Hold</b> or <b>Buy</b> on your website, the order shows up here and your phone rings.</p></div>`)
         + (old.length ? `<button class="link" id="oold" style="margin-top:10px">${showOld ? "Hide" : "Show"} earlier orders (${old.length})</button>${showOld ? old.map(card).join("") : ""}` : "");
       $("#oold") && ($("#oold").onclick = () => { showOld = !showOld; drawOrders(); });
       const find = (id) => orders.find((x) => x.id === id);
@@ -597,7 +611,7 @@
         U.toast(`Order ${o.code} is in the cart — check prices, then Generate bill`); U.go("#/biz/cart");
       });
     }
-    async function loadOrders() { const list = await pollOrders(); if (list) { orders = list; drawOrders(); } else if (!orders) { const box = $("#olist"); box && (box.innerHTML = '<p class="quiet small">Couldn\'t load orders — check your internet.</p>'); } }
+    async function loadOrders() { if (!A.ownerShop().cloud) return; const list = await pollOrders(); if (list) { orders = list; drawOrders(); } else if (!orders) { const box = $("#olist"); box && (box.innerHTML = '<p class="quiet small">Couldn\'t load orders — check your internet.</p>'); } }
     U.app.dataset.sig = "";
     draw(); loadOrders();
     const iv = setInterval(draw, 2000), iv2 = setInterval(loadOrders, 30000);
@@ -749,8 +763,6 @@
     U.openSheet("", draw);
   }
 
-  // staff tools live in the separate admin app (admin.html)
-  function adminView() { location.href = "admin.html#/payments"; }
 
   // ---------- shop analytics ----------
   // Standard retail measures, worked out on the phone from the shop's own bills,
@@ -2211,7 +2223,6 @@
       ${bizTop("Reports")}
       ${backupDue(s) ? `<a class="rsec sitecard due" href="#/biz/backup"><span>${ic("bag")}</span><div><b>Back up your bills</b><em>${backupDue(s)}</em></div>${ic("arrow")}</a>` : ""}
       <a class="rsec sitecard an-card" href="#/biz/analytics"><span>${ic("chart")}</span><div><b>Shop analytics</b><em>Best times, top sellers, profit, what to reorder, your best customers</em></div>${ic("arrow")}</a>
-      <a class="rsec sitecard" href="#/biz/site"><span>${ic("store")}</span><div><b>Your shop's website</b><em>Share it, print the QR poster, add it to Google Maps · see visits</em></div>${ic("arrow")}</a>
 
       <div class="rsec"><div class="rhd"><b>Sales</b><a class="link" href="#/biz/bills">All bills</a></div>
         <div class="salesrows">${rows.map(([label, a, b, word]) => `<div class="srow">
@@ -2299,7 +2310,7 @@
     const m = A.getMarket(s.marketId);
     const d = new Date(b.at).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
     U.app.innerHTML = `
-      <div class="topline noprint"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button><b style="font-weight:600">Bill #${b.no}</b><a class="link" href="#/biz/bills">Bills</a></div>
+      <header class="btop noprint"><a class="bback" href="#/biz" aria-label="Back">${ic("back")}</a><div class="btt"><b>Bill #${b.no}</b></div><a class="link" href="#/biz/bills">All bills</a></header>
       ${b.cancelled ? '<div class="banner noprint" style="margin:12px var(--gut) 0"><div class="serif">This bill was cancelled</div><p>Its items went back into stock.</p></div>' : ""}
       <div class="receipt">
         <div class="rhead"><b>${esc(s.name)}</b><span>${esc(m?.name || "")}${s.shopNo && s.shopNo !== "—" ? ` · Shop ${esc(s.shopNo)}` : ""}${s.pincode ? ` · ${esc(s.locality || "")} ${esc(s.pincode)}` : ""}</span>${s.phone ? `<span>${esc(s.phone)}</span>` : ""}</div>
@@ -2318,10 +2329,9 @@
         <button class="btn" id="wa">${b.phone ? `Send bill on WhatsApp to ${esc(b.phone)}` : "Share bill PDF"}</button>
         ${b.phone ? `<button class="btn line" id="wafile">Send as PDF file (WhatsApp, etc.)</button>` : ""}
         <div class="two"><button class="btn line" id="pdf">Download PDF</button><button class="btn line" id="pr">Print</button></div>
-        <a class="btn warm" href="#/biz/bill">New bill</a>
+        <a class="btn line" href="#/biz/bill">${ic("plus")} New bill</a>
       </div>
       ${b.cancelled ? "" : '<div class="pad noprint" style="text-align:center;margin-bottom:40px"><button class="link accent" id="cx">Cancel this bill (puts items back in stock)</button></div>'}`;
-    $("#back").onclick = () => U.go("#/biz");
     $("#wa").onclick = () => sendBill(b, s);
     $("#wafile") && ($("#wafile").onclick = () => shareBillFile(b, s));
     $("#pdf").onclick = () => { if (!window.jspdf) return U.toast("PDF needs the internet once"); makeBillPdf(b, s).save(billName(b, s)); };
@@ -2335,7 +2345,7 @@
     const bills = A.billsFor(s.id);
     const time = (x) => new Date(x).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
     U.app.innerHTML = `
-      <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button><b style="font-weight:600">Bills</b><a class="link" href="#/biz/bill">New bill</a></div>
+      ${bizTop("All bills")}
       <div class="pad" style="margin-top:16px"><div class="eyebrow">Today</div><h1 class="title" style="margin-top:4px">${rupee(t.total)} <span class="quiet small">from ${t.bills} bill${t.bills === 1 ? "" : "s"}</span></h1></div>
       <div class="stats" style="margin-top:12px">
         <div><b>${rupee(t.by.cash)}</b><span>cash</span></div><div><b>${rupee(t.by.upi + t.by.card)}</b><span>UPI and card</span></div>
@@ -2345,7 +2355,6 @@
       <div class="block"><div class="entries">${bills.map((b) => `<a class="entry" href="#/biz/bill/${b.id}"><div class="body"><div class="name">#${b.no} · ${rupee(b.total)}${b.cancelled ? ' <span class="pill closed">Cancelled</span>' : ""}</div>
         <div class="note">${b.units} item${b.units > 1 ? "s" : ""} · ${PAYS[b.pay]} · ${time(b.at)}</div></div><div class="aside">${ic("arrow")}</div></a>`).join("") || '<p class="quiet small" style="margin-top:12px">No bills yet. Tap “New bill” to make the first one.</p>'}</div></div>
       <div style="height:40px"></div>`;
-    $("#back").onclick = () => U.go("#/biz/reports");
   }
 
   // ---------- insights ----------
@@ -2357,8 +2366,8 @@
     const topList = Object.entries(top).sort((a, b) => b[1] - a[1]).slice(0, 6);
     const max = Math.max(...missed.map((m) => m.n), 1);
     U.app.innerHTML = `
-      <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button></div>
-      <div class="pad" style="margin-top:22px"><div class="eyebrow">Insights · last 7 days</div><h1 class="title" style="margin-top:8px">What to stock next</h1>
+      ${bizTop("What to stock next")}
+      <div class="pad" style="margin-top:18px"><div class="eyebrow">Last 7 days</div>
         <p class="quiet small" style="line-height:1.5">People near your shop searched for these and found <b>no shop</b> that had them in stock.</p></div>
       <div class="block"><div class="bars">${missed.map((m) => `<div class="bar">
         <div class="bl"><b>${esc(m.q)}</b><span>${m.n} search${m.n > 1 ? "es" : ""}</span></div>
@@ -2368,7 +2377,6 @@
       ${topList.length ? `<div class="block"><div class="eyebrow"><span>Searched in your category</span></div><div class="words">${topList.map(([q, n]) => `<span class="word">${esc(q)} · ${n}</span>`).join("")}</div></div>` : ""}
       ${missed.length ? "" : '<p class="pad quiet small">No data yet — this fills in as customers search near you.</p>'}
       <div style="height:40px"></div>`;
-    $("#back").onclick = () => U.go("#/biz/reports");
     $$("[data-add]").forEach((b) => b.onclick = () => {
       const t = A.D.CATALOG[s.cat].find(([n]) => n === b.dataset.add);
       A.addItem(s.id, t, s.cat); U.toast("Added to your items — in stock"); insightsView();

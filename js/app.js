@@ -38,6 +38,15 @@
     receipt: '<path d="M6 3h12v18l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5L6 21z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
     truck: '<path d="M3 7h11v9H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17.5" cy="17.5" r="1.8"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
+    grid: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/>',
+    globe: '<circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.2 2.3 3.2 5 3.2 8s-1 5.7-3.2 8c-2.2-2.3-3.2-5-3.2-8s1-5.7 3.2-8z"/>',
+    shield: '<path d="M12 3.5l7 2.5v5.5c0 4.3-3 7.7-7 9-4-1.3-7-4.7-7-9V6z"/><path d="M9 12l2.2 2.2L15.5 10"/>',
+    wallet: '<path d="M4 7.5A1.5 1.5 0 0 1 5.5 6H18v3"/><path d="M4 7.5V18a1.5 1.5 0 0 0 1.5 1.5H20V9H5.5A1.5 1.5 0 0 1 4 7.5z"/><circle cx="16" cy="14.2" r="1.1"/>',
+    cloud: '<path d="M7.5 18.5a4 4 0 0 1-.6-8A5.5 5.5 0 0 1 17.6 9 4.8 4.8 0 0 1 17 18.5z"/><path d="M12 11v5M9.8 13.2L12 11l2.2 2.2"/>',
+    sync: '<path d="M19 8.5A7.5 7.5 0 0 0 5.2 9.6M5 15.5a7.5 7.5 0 0 0 13.8-1.1"/><path d="M19 4v4.5h-4.5M5 20v-4.5h4.5"/>',
+    eye: '<path d="M2.8 12S6 5.8 12 5.8 21.2 12 21.2 12 18 18.2 12 18.2 2.8 12 2.8 12z"/><circle cx="12" cy="12" r="2.8"/>',
+    out: '<path d="M10 4.5H5.5v15H10M15 8l4 4-4 4M9.5 12H19"/>',
+    pen: '<path d="M4.5 19.5l1-4L16 5l3 3L8.5 18.5z"/><path d="M14 7l3 3"/>',
   };
   const ic = (n, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24">${P[n]}</svg>`;
 
@@ -1052,17 +1061,20 @@
 
   // ---------- bottom tabs (customer screens only) ----------
   const TAB_ON = { "": "home", item: "home", search: "search", ask: "search", me: "me", orders: "orders", order: "me", bag: "bag" };
-  // Shop app: three pages — Bill (home), Stock, Reports.
-  const BIZ_ON = { "": "bill", bill: "bill", cart: "bill", inbox: "bill", items: "stock", stockin: "stock", reports: "reports", bills: "reports", insights: "reports", site: "reports", security: "reports", backup: "reports", plan: "reports", analytics: "reports", admin: "reports" };
+  // Shop app: five main pages — Bill (home), Orders, Stock, Reports, More. See DESIGN.md.
+  const BIZ_ON = { "": "bill", bill: "bill", cart: "bill", inbox: "orders", items: "stock", stockin: "stock", reports: "reports", bills: "reports", insights: "reports", analytics: "reports",
+    more: "more", site: "more", google: "more", details: "more", security: "more", backup: "more", plan: "more" };
   function syncTabs(r, parts = []) {
     const nav = $("#tabs"); if (!nav) return;
     if (BIZ) {
       const on = A.ownerShop() && r === "biz" ? BIZ_ON[parts[1] || ""] : null;
-      nav.classList.toggle("hidden", !on); nav.classList.add("three"); document.body.classList.toggle("tabs-on", !!on);
-      if (on) nav.innerHTML = [["bill", "#/biz", "receipt", "Bill"], ["stock", "#/biz/items", "box", "Stock"], ["reports", "#/biz/reports", "chart", "Reports"]]
-        .map(([k, h, i, l]) => `<a href="${h}" class="${on === k ? "on" : ""}">${ic(i)}${l}${k === "bill" ? (() => {
-          const c = A.store.get("billDraft:" + A.ownerShopId(), null), n = c ? (c.lines || []).reduce((a, x) => a + x.qty, 0) : 0;
-          return `<i class="bcount ${n ? "" : "hidden"}" data-cartn>${n}</i>`; })() : ""}</a>`).join("");
+      nav.classList.toggle("hidden", !on); nav.classList.add("five"); document.body.classList.toggle("tabs-on", !!on);
+      if (!on) return;
+      const id = A.ownerShopId(), c = A.store.get("billDraft:" + id, null), nCart = c ? (c.lines || []).reduce((a, x) => a + x.qty, 0) : 0;
+      const nWait = A.pendingAsks(id).length + (A.store.get("newOrders:" + id, 0) || 0);
+      const badge = (k) => k === "bill" ? `<i class="bcount ${nCart ? "" : "hidden"}" data-cartn>${nCart}</i>` : k === "orders" ? `<i class="bcount hot ${nWait ? "" : "hidden"}" data-bell>${nWait}</i>` : "";
+      nav.innerHTML = [["bill", "#/biz", "receipt", "Bill"], ["orders", "#/biz/inbox", "bell", "Orders"], ["stock", "#/biz/items", "box", "Stock"], ["reports", "#/biz/reports", "chart", "Reports"], ["more", "#/biz/more", "grid", "More"]]
+        .map(([k, h, i, l]) => `<a href="${h}" class="${on === k ? "on" : ""}"><span class="ti">${ic(i)}${badge(k)}</span>${l}</a>`).join("");
       return;
     }
     const on = TAB_ON[r];

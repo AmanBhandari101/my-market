@@ -1,7 +1,7 @@
 // Network-first for app files so updates show immediately; cache is only the
 // offline fallback. Map tiles and routing are not cached in v1.
-const CACHE = "mymarket-v2.2";
-const SHELL = ["./", "index.html", "css/app.css", "css/commerce.css", "css/store.css","js/config.js", "js/cloud.js", "js/data.js", "js/api.js", "js/app.js", "js/shop.js", "js/biz.js", "icon.svg", "manifest.webmanifest", "business.html", "icon-business.svg", "manifest-business.webmanifest", "icons/icon-192.png", "icons/icon-business-192.png"];
+const CACHE = "mymarket-v2.3";
+const SHELL = ["./", "index.html", "css/app.css", "css/commerce.css", "css/store.css", "css/biz.css","js/config.js", "js/cloud.js", "js/data.js", "js/api.js", "js/app.js", "js/shop.js", "js/biz.js", "icon.svg", "manifest.webmanifest", "business.html", "icon-business.svg", "manifest-business.webmanifest", "icons/icon-192.png", "icons/icon-business-192.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

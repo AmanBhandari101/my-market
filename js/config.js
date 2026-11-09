@@ -16,3 +16,5 @@ window.MM_CONFIG = {
   // Order alerts (Web Push): My Market's public VAPID key. The private half lives only in the site worker.
   vapidPublic: "BLNqmF-Oof4lsDm1lJRCzT9fOjdGAuZqicajNBYcom01ZbXKbgl9lcvdqI4iaMHW0aYlEo8mOjuAuwQ3OVWb64c",
 };
+// Local design checks: http://127.0.0.1:8897/business.html?demo runs without the server (data stays in this browser).
+if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && /[?&]demo\b/.test(location.search)) window.MM_CONFIG.supabaseUrl = "";
