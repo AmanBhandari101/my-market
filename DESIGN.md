@@ -81,3 +81,60 @@ count is on the Orders tab, and the menu became the More page.
 | `--b-r` | 14px | cards; buttons 12px; chips round |
 
 Spacing steps: 4, 8, 12, 16, 24, 32. Side margin 16.
+
+---
+
+# My Market (customer app): design
+
+How index.html should look and behave. It is the same family as the shop app (same page
+colour, white cards, light top bar, one font, same spacing) with its own colour, so a shopper
+and a shopkeeper each know which app they're in.
+
+## Who it is for
+
+Someone who needs one thing today (a charger, a 1-inch elbow, a mattress) and wants to know
+which shop near them has it, at what price and how far away, before leaving home. They
+search, decide and go. Often on mobile data, often in a hurry.
+
+## Philosophy: walk in knowing
+
+1. **The answer first.** Every result leads with the three things that decide a trip: **in
+   stock?**, **price**, **how far**. Photos and details come after.
+2. **Search is the front door.** The search box is the first thing on Home and stays one tap
+   away (Search tab). Nothing sits above it except the app name and where you are.
+3. **Local, warm, honest.** Real shops near you, not a marketplace clone: no fake ratings, no
+   invented MRP, no "deals" banners without real discounts. Say plainly when nothing is near.
+4. **One main button per screen, in teal.** Teal = your action (Add to cart, Use my location,
+   Directions). WhatsApp keeps WhatsApp green and appears only as WhatsApp. Marigold marks a
+   find or a real deal. Red only for out of stock and cancel.
+5. **Stock is a colour you can read at a glance.** Green dot = in stock, amber = few left or
+   "ask to confirm", red = out. Same dot everywhere: search, shop page, product page.
+6. **Tabs never go back.** Home, Search, Orders and You are tabs: no back arrow, their name in
+   the top bar. Every other page has a back arrow in the same place.
+7. **The shop's page is the shop's.** A shop's website keeps the shop's own colour and logo;
+   My Market stays in the footer.
+8. **Quiet surfaces, plain words.** Same rules as the shop app: one page colour, white cards,
+   one radius, no heavy shadows, short sentences, Hinglish search welcome.
+
+## Page-by-page review
+
+| Page | Keep | Change | Later |
+|---|---|---|---|
+| Welcome | One clear promise, use my location | Light page; three lines on what the app does | — |
+| Home | Search, range, in stock near you, categories, map | One light header (name + location), search right under it; the category strip, profile icon and repeated "1 shop within…" banner removed | Saved shops row |
+| Search | Best answer card, also at, may have it, map/list, Hinglish | No back arrow (it's a tab); light header | Filters by price / open now |
+| Product | Price, stock, sold by, compare, details, "found it here" | One main Add to cart; Hold / Buy as a pair; WhatsApp and Directions as small buttons | Photo gallery |
+| Shop website | Its own colours, cart, Hold / Buy, map, hours | Kept as it is | — |
+| My orders | Carts per shop, live tracking, cancel, order again | Tab: title in the top bar, no back arrow | — |
+| You | Location, orders, saved shops, recent searches | Grouped lists like the shop app's More page; no back arrow | — |
+| Bag / demo checkout / demo order / "ask nearby shops (simulated)" | — | **Removed** (old demo pages; real orders go through each shop's cart) | — |
+
+## Tokens (css/customer.css)
+
+Same as the shop app except the action colour:
+
+| Token | Value | Use |
+|---|---|---|
+| `--c-go` / `--c-go-dark` / `--c-go-soft` | #0f766e / #0b5e57 / #e3f3f1 | main buttons, selected, links |
+| `--c-find` / `--c-find-soft` | #c77700 / #fff4e0 | a find, a real deal |
+| `--c-wa` | #1fa855 | WhatsApp only |

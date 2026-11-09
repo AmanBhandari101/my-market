@@ -219,13 +219,17 @@
     app.innerHTML = `<div class="welcome">
       <img class="mark" src="icon.svg" alt="">
       <h1 class="display">My Market</h1>
-      <p class="sub">Know which shop has it,<br>before you walk the market.</p>
+      <p class="sub">See which shop near you has it — the price, the stock and how far — before you leave home.</p>
+      <ul class="wl-pts">
+        <li>${ic("search")}<span><b>Search once</b>every shop near you, live stock</span></li>
+        <li>${ic("clock")}<span><b>Hold it for 4 hours</b>pay at the shop, nothing online</span></li>
+        <li>${ic("pin")}<span><b>Walk straight there</b>directions to the shop's door</span></li>
+      </ul>
       <div class="spacer"></div>
       <div class="actions">
-        <button class="btn" id="w-gps">Use my location</button>
-        <button class="link" id="w-manual">Choose an area</button>
+        <button class="btn" id="w-gps">${ic("locate")}Use my location</button>
+        <button class="link" id="w-manual">Choose an area instead</button>
       </div>
-
     </div>`;
     $("#w-gps").onclick = () => useGPS(() => go("#/"));
     $("#w-manual").onclick = openLocationSheet;
@@ -245,17 +249,14 @@
     const deals = nearItems.filter((x) => x.item.price && off(x.item) >= 15).sort((a, b) => off(b.item) - off(a.item)).slice(0, 12);
     const catImg = (k) => { const it = D.shops.flatMap((x) => x.items).find((i) => i.cat === k && i.img); return it ? `<img src="${it.img}" alt="">` : art(k, 40); };
     app.innerHTML = `
-      <div class="navwrap">
-        <div class="nav1"><a class="brand" href="#/"><img src="icon.svg" alt="">My Market<small>.local</small></a>
-          <div class="btn-row" style="gap:4px"><a class="iconbtn" href="#/me" aria-label="Profile">${ic("user")}</a>${bagBtn()}</div></div>
-        <div class="pad"><a class="seek" href="#/search">${ic("search")}<span class="ph">Search an item, brand or shop</span><span class="seekbtn">${ic("search")}</span></a></div>
-        ${rangeChips("hrange")}
-      </div>
-      <button class="locbar" id="locbtn">${ic("pin")}<span>Shopping near <b>${esc(loc.label)}${loc.sub ? ", " + esc(loc.sub) : ""}</b></span>${ic("down")}</button>
-      <div class="catstrip"><button data-cat="" class="${!homeCat ? "on" : ""}">All</button>${Object.entries(C).map(([k, c]) => `<button class="${homeCat === k ? "on" : ""}" data-cat="${k}">${esc(c.name)}</button>`).join("")}</div>
+      <header class="chead">
+        <a class="brand" href="#/"><img src="icon.svg" alt="">My Market</a>
+        <button class="cloc" id="locbtn" aria-label="Change location">${ic("pin")}<span>${esc(loc.label)}</span>${ic("down")}</button>
+      </header>
+      <div class="csearch"><a class="seek" href="#/search">${ic("search")}<span class="ph">Search an item, brand or shop</span></a>${rangeChips("hrange")}</div>
       <div class="home-body">
-      ${!markets.length && area.shops.length ? `<div class="banner" style="margin:0 var(--gut) 10px"><div class="serif">${area.shops.length} shop${area.shops.length > 1 ? "s" : ""} ${areaNote(area.km)}.</div><p>No market listed here yet — a market appears once a few shops in one spot join.</p></div>` : ""}
-      ${!markets.length && !area.shops.length ? `<div class="banner" style="margin:0 var(--gut) 10px"><div class="serif">No shops on My Market near you yet.</div>
+      ${!area.shops.length && window.MM_CLOUD && !window.MM_CLOUD.publicDone ? `<p class="pad quiet small" style="margin:6px 0 14px">Finding shops near you…</p>` : ""}
+      ${!markets.length && !area.shops.length && !(window.MM_CLOUD && !window.MM_CLOUD.publicDone) ? `<div class="banner" style="margin:0 var(--gut) 10px"><div class="serif">No shops on My Market near you yet.</div>
         <p>Shops join with the My Market Business app (2 months free). Know a shop nearby? Tell them about it — or try a wider range above.</p>
         <div class="btn-row"><a class="link accent" href="business.html" target="_blank" rel="noopener">My Market Business</a></div></div>` : ""}
       ${!homeCat && !homeMarket && area.shops.length ? `<div class="hero"><b>Find it in your market today</b><span>Live stock and prices from ${area.shops.length} shop${area.shops.length > 1 ? "s" : ""} ${areaNote(area.km)}</span></div>` : ""}
@@ -467,9 +468,8 @@
       const past = all.filter((o) => !act.includes(o));
       const carts = openCarts();
       app.innerHTML = `
-        <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button><span class="faint tiny" id="mo-upd"></span></div>
-        <div class="pad" style="margin-top:18px"><h1 class="display">My orders</h1>
-          <p class="quiet small" style="margin-top:6px">Order from as many shops as you like — each one is tracked here.</p></div>
+        <header class="chead"><b class="ctitle">My orders</b><span class="faint tiny" id="mo-upd"></span></header>
+        <p class="pad quiet small" style="margin-top:14px">Order from as many shops as you like — each one is tracked here.</p>
         ${carts.length ? `<div class="block"><div class="eyebrow"><span>In your carts</span><span class="faint">not ordered yet</span></div>
           <div class="entries">${carts.map(({ s, n, t }) => `<a class="entry" href="#/shop/${s.id}?cart=buy">${mono(s)}<div class="body"><div class="name">${esc(s.name)}</div>
             <div class="note">${n} item${n === 1 ? "" : "s"} · ${rupee(t)}</div></div><div class="aside"><b class="mo-go">Checkout</b></div></a>`).join("")}</div></div>` : ""}
@@ -478,7 +478,6 @@
             : `<p class="quiet small">No active orders. ${all.length ? "" : "Open a shop, add items to the cart and tap Hold or Buy."}</p><a class="btn line" href="#/" style="margin-top:10px">Find shops near you</a>`}</div>
         ${past.length ? `<div class="block"><div class="eyebrow"><span>Earlier</span></div><div class="mo-list">${past.slice(0, 20).map((o) => orderCard(o, c[o.token], false)).join("")}</div></div>` : ""}
         <div style="height:90px"></div>`;
-      $("#back").onclick = () => (history.length > 1 ? history.back() : go("#/"));
       const find = (t) => all.find((o) => o.token === t);
       $$("[data-wa]").forEach((b) => b.onclick = () => {
         const o = find(b.dataset.wa), st = c[o.token], s = A.getShop(o.shopId); if (!s) return;
@@ -820,18 +819,14 @@
   function searchView(q0) {
     let mode = "list", showMore = false;
     app.innerHTML = `
-      <div class="navwrap">
-      <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button><div class="toggle hidden" id="tog"><button data-mode="list" class="on">List</button><button data-mode="map">Map</button></div></div>
-      <div class="pad"><label class="seek">
+      <header class="chead"><b class="ctitle">Search</b><div class="toggle hidden" id="tog"><button data-mode="list" class="on">List</button><button data-mode="map">Map</button></div></header>
+      <div class="csearch"><label class="seek">${ic("search")}
         <input id="q" placeholder="Search an item, brand or shop" value="${esc(q0)}" autocomplete="off" enterkeyhint="search">
-        <button id="clr" class="${q0 ? "" : "hidden"}" aria-label="Clear">${ic("close")}</button><span class="seekbtn">${ic("search")}</span>
-      </label></div>
-      ${rangeChips("srange")}
-      </div>
+        <button id="clr" class="${q0 ? "" : "hidden"}" aria-label="Clear">${ic("close")}</button>
+      </label>${rangeChips("srange")}</div>
       <div id="results"></div>`;
     const input = $("#q");
     $$("#srange [data-range]").forEach((b) => b.onclick = () => { A.setRange(b.dataset.range); $$("#srange button").forEach((x) => x.classList.toggle("on", x === b)); render(input.value); });
-    $("#back").onclick = () => go("#/");
     if (!q0) setTimeout(() => input.focus(), 50);
     $$("[data-mode]").forEach((b) => b.onclick = () => { mode = b.dataset.mode; $$("[data-mode]").forEach((x) => x.classList.toggle("on", x === b)); render(input.value); });
 
@@ -1015,31 +1010,27 @@
   }
 
   function meView() {
-    const sv = saved.map(A.getShop).filter(Boolean);
+    const sv = saved.map(A.getShop).filter(Boolean), nAct = activeOrders(), nAll = myOrders().length;
+    const row = (tag, attrs, icon, name, note) => `<${tag} class="mrow" ${attrs}><span class="mic">${ic(icon)}</span>
+      <span class="mtx"><b>${name}</b><em>${note}</em></span>${ic("arrow")}</${tag}>`;
     app.innerHTML = `
-      <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button></div>
-      <div class="pad" style="margin-top:22px"><h1 class="display">Yours</h1></div>
-      <div class="block"><div class="eyebrow"><span>Location</span><button class="link" id="chg" style="font-size:10.5px">Change</button></div>
-        <div class="serif" style="font-size:24px">${esc(loc.label)}${loc.sub ? `<span class="quiet">, ${esc(loc.sub)}</span>` : ""}</div></div>
-      <a class="bizcard" href="business.html" target="_blank" rel="noopener" style="margin:26px var(--gut) 0">
+      <header class="chead"><b class="ctitle">You</b></header>
+      <h3 class="mgh">Shopping</h3>
+      <div class="mlist">
+        ${row("button", 'id="chg"', "pin", "Shopping near", esc(loc.label + (loc.sub ? ", " + loc.sub : "")) + " · change")}
+        ${row("a", 'href="#/orders"', "receipt", "My orders", nAct ? `${nAct} active · ${nAll} in the last 30 days` : nAll ? `${nAll} in the last 30 days` : "Orders and holds you place show here")}
+      </div>
+      <h3 class="mgh">Saved shops</h3>
+      ${sv.length ? `<div class="mlist">${sv.map((s) => `<a class="mrow" href="#/shop/${s.id}">${mono(s)}<span class="mtx"><b>${esc(s.name)}</b><em>${esc(openWord(s))} · ${A.fmtDist(s.dist ?? A.distKm(loc, s))}</em></span>${ic("arrow")}</a>`).join("")}</div>`
+        : '<p class="mnone">Tap the ♡ on a shop\'s page to keep it here.</p>'}
+      <h3 class="mgh"><span>Recent searches</span>${recent.length ? '<button class="link" id="clrrec">Clear</button>' : ""}</h3>
+      ${recent.length ? `<div class="words pad">${recent.map((r) => `<a class="word" href="#/search?q=${encodeURIComponent(r)}">${esc(r)}</a>`).join("")}</div>` : '<p class="mnone">None yet.</p>'}
+      <a class="bizcard" href="business.html" target="_blank" rel="noopener">
         <span class="bz-ic">${ic("store")}</span>
-        <span class="body"><span class="serif" style="font-size:19px;display:block">Own a shop? Get My Market Business</span>
-        <span class="small quiet">A separate app for billing, stock and khata — 2 months free</span></span>${ic("arrow")}
+        <span class="body"><b>Own a shop? Get My Market Business</b><span>Billing, stock and your own website — 2 months free</span></span>${ic("arrow")}
       </a>
-      <a class="entry" href="#/orders" style="margin:20px var(--gut) 0;width:auto">${ic("receipt")}<div class="body"><div class="name">My orders</div>
-        <div class="note">${activeOrders() ? `${activeOrders()} active · ` : ""}${myOrders().length ? `${myOrders().length} in the last 30 days` : "Orders and holds you place show here"}</div></div>${ic("arrow")}</a>
-      ${A.store.get("asks", []).length ? `<div class="block"><div class="eyebrow"><span>Your questions to shops</span></div><div class="entries">
-        ${A.store.get("asks", []).slice(0, 3).map((a) => { const yes = Object.values(a.replies).filter((r) => r.has).length;
-          return `<a class="entry" href="#/ask?id=${a.id}"><div class="body"><div class="name">“${esc(a.q)}”</div><div class="note">${Object.keys(a.replies).length} of ${a.targets.length} replied</div></div><div class="aside">${yes ? `<b style="color:var(--in)">${yes} have it</b>` : ""}</div></a>`; }).join("")}
-      </div></div>` : ""}
-      <div class="block"><div class="eyebrow"><span>Saved shops</span></div>
-        ${sv.length ? `<div class="entries">${sv.map((s) => shopEntry(s)).join("")}</div>` : '<p class="quiet small">Tap the heart on a shop to keep it here.</p>'}</div>
-      <div class="block"><div class="eyebrow"><span>Recent searches</span>${recent.length ? '<button class="link" id="clrrec" style="font-size:10.5px">Clear</button>' : ""}</div>
-        ${recent.length ? `<div class="words">${recent.map((r) => `<a class="word" href="#/search?q=${encodeURIComponent(r)}">${esc(r)}</a>`).join("")}</div>` : '<p class="quiet small">None yet.</p>'}</div>
-      <div class="rule"></div>
-      <div class="block"><button class="link" id="demo-reset" style="color:var(--out)">Clear my history on this phone</button></div>
-      <p class="pad faint tiny" style="margin:34px 0 40px;line-height:1.6">My Market · shops and prices come from registered shops. Map © OpenStreetMap contributors.</p>`;
-    $("#back").onclick = () => go("#/");
+      <button class="mout" id="demo-reset">Clear my history on this phone</button>
+      <p class="mver">Shops and prices come from registered shops. Map © OpenStreetMap contributors.</p>`;
     $("#chg").onclick = openLocationSheet;
     $("#clrrec") && ($("#clrrec").onclick = () => { recent = []; A.store.set("recent", []); meView(); });
     $("#demo-reset").onclick = () => {
@@ -1118,7 +1109,7 @@
   const ROUTES = {
     "": home, welcome, me: meView,
     shop: (p, q) => shopView(p[1], q), search: (p, q) => searchView(q.get("q") || ""),
-    ask: (p, q) => askView(q.get("q"), q.get("id")), route: (p) => routeView(p[1]), orders: (p, q) => myOrdersView(q),
+    ask: () => go("#/search"), route: (p) => routeView(p[1]), orders: (p, q) => myOrdersView(q),   // "ask" was the simulated "ask nearby shops" demo
   };
   // a form field that needs fixing: red outline, scrolled into view, focused, and the message shown
   // under the button and as a toast (browsers' own "required" bubbles don't show in installed apps)

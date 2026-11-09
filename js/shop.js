@@ -1,5 +1,4 @@
-// My Market — customer shopping: product page, bag, checkout, order tracking.
-// Payments are simulated: nothing is charged and no payment details are asked for.
+// My Market — customer side: product page, and the product-in-an-area page Google lists.
 (function () {
   const U = window.MM_UI, A = U.A, C = U.C, { $, $$, esc, ic, rupee } = U;
 
@@ -27,7 +26,7 @@
     let qty = 1;
     const o = U.off(it);
     U.app.innerHTML = `
-      <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button>${U.bagBtn()}</div>
+      <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button><b class="ctitle">${esc(s.name)}</b></div>
       <div class="hero-img" style="${U.catVars(it.cat)}">${U.pimg(it)}</div>
       ${!it.photo && it.productPhoto && it.photoCredit && it.img === it.productPhoto ? `<p class="faint tiny pad" style="margin:4px 0 0">${esc(it.photoCredit)}</p>` : ""}
       <div class="pad" style="margin-top:20px">
@@ -43,9 +42,8 @@
       ${st.key !== "out" ? `<div class="pad pbuy" style="${U.catVars(s.cat)}">
         <div class="pbuy-q"><button id="pqm" aria-label="One less">−</button><b id="pqn">1</b><button id="pqp" aria-label="One more">+</button></div>
         <button class="pbuy-add" id="padd">${ic("bag")}Add to cart</button>
-        <button class="pbuy-hold" id="phold">${ic("clock")}Hold it for me</button>
-        <button class="pbuy-buy" id="pbuy">Buy now</button>
-      </div>` : ""}
+        <div class="pbuy-two"><button class="pbuy-hold" id="phold">${ic("clock")}Hold it for me</button><button class="pbuy-buy" id="pbuy">Buy now</button></div>
+      </div>` : `<p class="pad pout">Out of stock right now — ask the shop when it's back.</p>`}
       <div class="sold-by">
         <div class="eyebrow">Sold by</div>
         <a class="entry" href="#/shop/${s.id}" style="border:0;padding:8px 0 4px">${U.mono(s)}
@@ -54,9 +52,9 @@
 
       </div>
 
-      <div class="pad" style="margin-top:20px;display:grid;gap:10px">
-        <button class="btn" id="wa">Ask the shop on WhatsApp</button>
-        <a class="btn line" href="${loc ? `#/route/${s.id}` : `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}`}" ${loc ? "" : 'target="_blank" rel="noopener"'}>Directions</a>
+      <div class="pad pmore">
+        <button class="pm wa" id="wa">${ic("chat")}Ask on WhatsApp</button>
+        <a class="pm" href="${loc ? `#/route/${s.id}` : `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}`}" ${loc ? "" : 'target="_blank" rel="noopener"'}>${ic("pin")}Directions</a>
       </div>
 
       ${other.length ? `<div class="block"><div class="eyebrow"><span>Also at</span><span class="faint">compare</span></div><div class="entries">
@@ -92,141 +90,6 @@
       if (d.length !== 10) return U.toast("This shop hasn't added a WhatsApp number");
       U.openWhatsApp(d, `Hi ${s.name}, I saw ${it.name}${it.price ? ` (${rupee(it.price)})` : ""} on My Market. Is it available?`);
     };
-  }
-
-  // ---------- bag ----------
-  function bagView() {
-    const lines = A.bagLines();
-    const byShop = {};
-    for (const l of lines) (byShop[l.shop.id] = byShop[l.shop.id] || []).push(l);
-    U.app.innerHTML = `
-      <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button></div>
-      <div class="pad" style="margin-top:22px"><h1 class="display">Your bag</h1>
-        <p class="quiet small" style="margin-top:8px">${lines.length ? "Each shop is a separate order — pick up or get it delivered." : ""}</p></div>
-      ${!lines.length ? `<div class="empty"><div class="serif">Nothing here yet.</div><p>Find something nearby and tap “Add”.</p><a class="btn" href="#/search" style="margin-top:10px">Search the market</a></div>` : ""}
-      ${Object.values(byShop).map((ls) => {
-        const s = ls[0].shop;
-        const sub = ls.reduce((a, l) => a + l.qty * (l.item.price || 0), 0);
-        const unpriced = ls.some((l) => !l.item.price);
-        return `<div class="bag-shop">
-          <div class="eyebrow" style="display:flex;justify-content:space-between"><span>${esc(s.name)}</span><span class="faint">${U.dist(s)}</span></div>
-          ${ls.map((l) => `<div class="bag-line">
-            <a class="thumb" href="#/item/${s.id}/${l.item.id}" style="${U.catVars(l.item.cat)}">${U.pimg(l.item)}</a>
-            <div class="body"><div class="name">${esc(l.item.name)}</div><div class="note">${esc(l.item.brand)}</div>
-              <div class="stepper sm"><button data-q="${l.item.id}|-1">−</button><span>${l.qty}</span><button data-q="${l.item.id}|1">+</button></div></div>
-            <div class="aside">${l.item.price ? `<b>${rupee(l.item.price * l.qty)}</b>` : '<span class="faint">Price at shop</span>'}</div>
-          </div>`).join("")}
-          <div class="bag-foot"><span>Subtotal <b>${rupee(sub)}</b>${unpriced ? ' <span class="faint tiny">+ items priced at shop</span>' : ""}</span>
-            <a class="btn auto" href="#/checkout/${s.id}">Checkout</a></div>
-        </div>`;
-      }).join("")}
-      <div style="height:40px"></div>`;
-    $("#back").onclick = () => history.back();
-    $$("[data-q]").forEach((b) => b.onclick = () => {
-      const [id, d] = b.dataset.q.split("|");
-      const l = lines.find((x) => x.item.id === id);
-      A.setQty(id, l.qty + +d); bagView();
-    });
-  }
-
-  // ---------- checkout (one shop at a time) ----------
-  function checkoutView([, shopId]) {
-    const s = A.getShop(shopId);
-    const lines = A.bagLines().filter((l) => l.shop.id === shopId);
-    if (!s || !lines.length) return U.go("#/bag");
-    let mode = "pickup", pay = "shop";
-    const sub = lines.reduce((a, l) => a + l.qty * (l.item.price || 0), 0);
-    const draw = () => {
-      const fee = mode === "delivery" ? (sub >= 999 ? 0 : 39) : 0;
-      const payOpts = mode === "delivery" ? [["upi", "UPI", "Pay now (demo)"], ["cod", "Cash on delivery", "Pay when it arrives"]] : [["shop", "Pay at the shop", "Cash or UPI at the counter"], ["upi", "UPI", "Pay now (demo)"]];
-      if (!payOpts.find((p) => p[0] === pay)) pay = payOpts[0][0];
-      U.app.innerHTML = `
-        <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button><span class="eyebrow faint">Demo checkout</span></div>
-        <div class="pad" style="margin-top:22px"><div class="eyebrow">${esc(s.name)}</div><h1 class="display" style="font-size:36px;margin-top:8px">Checkout</h1></div>
-        <div class="block"><div class="eyebrow"><span>How do you want it?</span></div>
-          <div class="choices">
-            ${[["pickup", "Pick up at the shop", "Free · ready in about 30 min · " + U.dist(s)], ["delivery", "Home delivery", (sub >= 999 ? "Free" : rupee(39)) + " · about 2 hours"]].map(([k, t, d]) =>
-              `<button class="choice ${mode === k ? "on" : ""}" data-mode="${k}"><b>${t}</b><span>${d}</span></button>`).join("")}
-          </div>
-          ${mode === "delivery" ? `<textarea class="field" id="addr" rows="2" placeholder="Delivery address" style="margin-top:12px;font-size:17px">${esc(A.store.get("addr", ""))}</textarea>` : ""}
-        </div>
-        <div class="block"><div class="eyebrow"><span>Payment</span></div>
-          <div class="choices">${payOpts.map(([k, t, d]) => `<button class="choice ${pay === k ? "on" : ""}" data-pay="${k}"><b>${t}</b><span>${d}</span></button>`).join("")}</div>
-        </div>
-        <div class="block"><div class="eyebrow"><span>Summary</span></div>
-          <table class="specs bill">
-            ${lines.map((l) => `<tr><th>${esc(l.item.name)} × ${l.qty}</th><td>${l.item.price ? rupee(l.item.price * l.qty) : "At shop"}</td></tr>`).join("")}
-            <tr><th>${mode === "delivery" ? "Delivery" : "Pickup"}</th><td>${fee ? rupee(fee) : "Free"}</td></tr>
-            <tr class="total"><th>Total</th><td>${rupee(sub + fee)}</td></tr>
-          </table>
-        </div>
-        <div class="pad" style="margin:26px 0 40px"><button class="btn warm" id="place">${pay === "upi" ? `Pay ${rupee(sub + fee)} · place order` : "Place order"}</button>
-          <p class="faint tiny" style="text-align:center;margin-top:10px">Demo — no money is charged.</p></div>`;
-      $("#back").onclick = () => history.back();
-      $$("[data-mode]").forEach((b) => b.onclick = () => { mode = b.dataset.mode; draw(); });
-      $$("[data-pay]").forEach((b) => b.onclick = () => { pay = b.dataset.pay; draw(); });
-      $("#place").onclick = () => {
-        let address = "";
-        if (mode === "delivery") {
-          address = $("#addr").value.trim();
-          if (address.length < 8) { U.toast("Add a delivery address"); $("#addr").focus(); return; }
-          A.store.set("addr", address);
-        }
-        const o = A.placeOrder({ shopId, lines, mode, pay, address });
-        U.refreshBag();
-        U.go(`#/order/${o.id}`);
-      };
-    };
-    draw();
-  }
-
-  // ---------- order tracking ----------
-  function orderView([, id]) {
-    const paint = () => {
-      const o = A.getOrder(id);
-      if (!o) { U.app.innerHTML = '<div class="empty"><div class="serif">Order not found.</div></div>'; return; }
-      const s = A.getShop(o.shopId);
-      const steps = A.STEPS[o.mode];
-      const done = o.step === steps.length - 1;
-      U.app.innerHTML = `
-        <div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button><span class="eyebrow faint">${o.id}</span></div>
-        <div class="pad" style="margin-top:22px">
-          <div class="eyebrow">${o.mode === "reserve" ? "Reservation" : o.mode === "delivery" ? "Home delivery" : "Pickup order"}</div>
-          <h1 class="display" style="font-size:38px;margin-top:8px">${o.cancelled ? "Cancelled" : esc(steps[o.step])}</h1>
-          ${A.isOwnerShop(o.shopId) && !o.cancelled && !done ? '<p class="small" style="color:var(--terracotta)">This is your own shop — accept it from your shop dashboard.</p>' : ""}
-        </div>
-        ${o.mode !== "delivery" && !o.cancelled ? `<div class="code-card"><span class="eyebrow">Show this code at the shop</span><b>${o.code}</b>
-          <span class="small quiet">${o.mode === "reserve" ? "Kept until " + new Date(o.at + 2 * 3600000).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : o.paid ? "Already paid — just show the code" : "Pay at the counter when you collect"}</span></div>` : ""}
-        <div class="block"><ol class="timeline">
-          ${steps.map((t, i) => { const h = o.history.find((x) => x.step === i);
-            return `<li class="${i <= o.step && !o.cancelled ? "on" : ""}"><b>${esc(t)}</b>${h ? `<span>${new Date(h.at).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}</span>` : ""}</li>`; }).join("")}
-        </ol></div>
-        <div class="block"><div class="eyebrow"><span>${esc(s ? s.name : "")}</span></div>
-          ${o.items.map((l) => `<div class="bag-line"><span class="thumb" style="${U.catVars(l.cat)}">${l.img ? `<img src="${l.img}" alt="">` : U.art(l.cat, 40)}</span>
-            <div class="body"><div class="name">${esc(l.name)}</div><div class="note">${esc(l.brand)} · × ${l.qty}</div></div>
-            <div class="aside"><b>${l.price ? rupee(l.price * l.qty) : "At shop"}</b></div></div>`).join("")}
-          <table class="specs bill"><tr><th>${o.mode === "delivery" ? "Delivery" : "Pickup"}</th><td>${o.fee ? rupee(o.fee) : "Free"}</td></tr>
-            <tr class="total"><th>Total · ${o.paid ? "paid" : o.pay === "cod" ? "cash on delivery" : "pay at shop"}</th><td>${o.total ? rupee(o.total) : "Price at counter"}</td></tr></table>
-          ${o.address ? `<p class="small quiet" style="margin-top:10px">Deliver to: ${esc(o.address)}</p>` : ""}
-        </div>
-        <div class="pad" style="margin:24px 0 40px;display:grid;gap:14px;justify-items:center">
-          ${s ? `<a class="btn" href="#/route/${s.id}">Directions to the shop</a>` : ""}
-          ${!o.cancelled && o.step === 0 ? '<button class="link accent" id="cancel">Cancel</button>' : ""}
-        </div>`;
-      $("#back").onclick = () => U.go("#/me");
-      $("#cancel") && ($("#cancel").onclick = () => { A.cancelOrder(o.id); paint(); });
-    };
-    paint();
-    const iv = setInterval(() => { const o = A.getOrder(id); if (o && JSON.stringify(o.history) !== U.app.dataset.h) { U.app.dataset.h = JSON.stringify(o.history); paint(); } }, 2000);
-    U.addCleanup(() => clearInterval(iv));
-  }
-
-  function ordersView() {
-    const os = A.getOrders();
-    U.app.innerHTML = `<div class="topline"><button class="iconbtn" id="back" aria-label="Back">${ic("back")}</button></div>
-      <div class="pad" style="margin-top:22px"><h1 class="display">Orders</h1></div>
-      <div class="block">${os.length ? `<div class="entries">${os.map(U.orderEntry).join("")}</div>` : '<p class="quiet">No orders yet.</p>'}</div>`;
-    $("#back").onclick = () => history.back();
   }
 
   // ---------- one product in one area (the /p/<area>/<product> page Google lists) ----------
@@ -272,5 +135,6 @@
     $("#back").onclick = () => (history.length > 1 ? history.back() : U.go("#/"));
   }
 
-  Object.assign(U.ROUTES, { p: areaView, item: itemView, bag: bagView, checkout: checkoutView, order: orderView });
+  const toOrders = () => U.go("#/orders");   // old demo bag / checkout / order pages
+  Object.assign(U.ROUTES, { p: areaView, item: itemView, bag: toOrders, checkout: toOrders, order: toOrders });
 })();
