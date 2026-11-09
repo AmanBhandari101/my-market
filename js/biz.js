@@ -1444,9 +1444,8 @@
   }
 
   // ---------- Get found on Google: Maps (Business Profile) + Shopping (Merchant Center) ----------
-  // Everything the owner needs is on this one screen. Google only lets the owner create and verify
-  // their Business Profile and Merchant Center account, so those steps open Google with every answer
-  // ready to copy, and one thing (a link or a number) comes back here.
+  // Google only lets the owner create and verify their Business Profile and Merchant Center account,
+  // so those questions open Google with every answer ready to copy, and one thing comes back here.
   const gReady = (it) => {   // what Google needs before it shows an item; [] = ready
     const miss = [];
     if (!(it.price > 0)) miss.push("price");
@@ -1456,6 +1455,8 @@
     return miss;
   };
   const MAPS_RX = /^https:\/\/([a-z0-9-]+\.)*(google\.[a-z.]+|goo\.gl|g\.page)\/\S+$/i;
+  // One question at a time. Anything the shop has already filled in is skipped, so the owner
+  // only ever sees what's still missing. Each question says why Google needs it.
   function googleView() {
     const s = A.ownerShop(), CL = window.MM_CLOUD, CF = window.MM_CONFIG || {};
     const key = "glink:" + s.id;
@@ -1463,129 +1464,180 @@
     const site = (CF.siteUrl || "").replace(/\/$/, "");
     const feedUrl = (k) => (site && s.slug ? `${site}/feeds/${s.slug}/${k}.tsv` : "");
     const copy = async (text, msg) => { try { await navigator.clipboard.writeText(text); U.toast(msg); } catch { prompt("Copy this", text); } };
-    const save = async (patch, msg) => {
-      if (!s.cloud || !CL || !CL.saveGoogle) return U.toast("Log in with your mobile number and PIN first");
-      try { g = await CL.saveGoogle(s.id, patch); A.store.set(key, g); if (msg) U.toast(msg); draw(); }
-      catch (x) { U.toast(navigator.onLine ? x.message : "No internet — try again when you're online"); }
+    const saveG = async (patch, msg) => {
+      if (!s.cloud || !CL || !CL.saveGoogle) { U.toast("Log in with your mobile number and PIN first"); return false; }
+      try { g = await CL.saveGoogle(s.id, patch); A.store.set(key, g); if (msg) U.toast(msg); return true; }
+      catch (x) { U.toast(navigator.onLine ? x.message : "No internet — try again when you're online"); return false; }
     };
-    let open = null;
-    const draw = () => {
-      const items = s.items.filter((i) => !i.removed);
-      const ready = items.filter((i) => !gReady(i).length), notReady = items.filter((i) => gReady(i).length);
-      const photos = (s.cover ? 1 : 0) + (s.gallery || []).length;
-      const checks = [
-        ["Shop name", !!s.name], ["Phone number", String(s.phone || "").replace(/\D/g, "").length >= 10],
-        ["Area and PIN code", !!(s.locality && s.pincode)], ["Map pin", s.lat != null],
-        ["About your shop (a few lines)", String(s.about || "").trim().length >= 40], ["Your Gmail address", !!g.gmail],
-      ];
-      const done = [
-        checks.every((c) => c[1]),
-        !!s.logo && photos >= 3,
-        g.gbp_status === "live" && !!g.maps_url,
-        ready.length >= 5,
-        g.mc_status === "live",
-      ];
-      const cur = open ?? Math.max(0, done.indexOf(false));
-      const step = (n, title, sub, body) => `<div class="gstep ${done[n] ? "done" : ""} ${cur === n ? "open" : ""}">
-        <button class="gsh" data-step="${n}"><span class="gn">${done[n] ? "✓" : n + 1}</span><span><b>${title}</b><em>${sub}</em></span>${ic("arrow")}</button>
-        ${cur === n ? `<div class="gsb">${body}</div>` : ""}</div>`;
-      const field = (k, v, i) => `<div class="gc"><span><em>${k}</em>${esc(v)}</span><button class="link" data-cp="${i}">Copy</button></div>`;
-      const gf = [...gfields(s), ["Store code (Advanced information)", g.store_code || "MM-" + s.id.slice(0, 8).toUpperCase()], ["Description", s.about || ""]];
-      U.app.innerHTML = `
-        ${bizTop("Get found on Google")}
-        <div class="rsec ghero"><b>Show your products on Google, next to the big online stores</b>
-          <p class="small quiet" style="margin:6px 0 0">When someone nearby searches for something you sell, Google can show <b>your shop, your price and "in stock · 0.4 km"</b>. It's free. Finish these 5 steps once — after that your stock goes to Google by itself.</p>
-          <div class="gprog"><i style="width:${done.filter(Boolean).length * 20}%"></i></div>
-          <p class="tiny faint" style="margin:6px 0 0">${done.filter(Boolean).length} of 5 done</p></div>
-        <div class="gsteps2">
-        ${step(0, "Shop details", checks.every((c) => c[1]) ? "All set" : `${checks.filter((c) => !c[1]).length} to fill in`, `
-          <ul class="gcheck">${checks.map(([k, ok]) => `<li class="${ok ? "ok" : ""}">${ok ? "✓" : "○"} ${k}</li>`).join("")}</ul>
-          <p class="small quiet">Google shows these exactly as you write them here. Name, address and phone must be the same everywhere.</p>
-          <div class="form" style="margin-top:6px">
-            <label>Your Gmail <span class="faint tiny">— the Google account you'll use for your shop</span><input class="field" id="ggm" type="email" inputmode="email" placeholder="yourshop@gmail.com" value="${esc(g.gmail || "")}"></label>
-            <div class="two"><button class="btn" id="ggms" type="button">Save Gmail</button><a class="btn line" href="#/biz/site">Edit about &amp; photos</a></div>
-            <a class="link" href="#/biz/details">Edit shop name, phone, address or hours</a>
-          </div>`)}
-        ${step(1, "Shop photos", done[1] ? "All set" : `${s.logo ? "" : "Logo, "}${Math.max(0, 3 - photos)} more photo${3 - photos === 1 ? "" : "s"}`, `
-          <p class="small quiet">Google needs real photos of your shop. Take them in daylight:</p>
-          <ol class="gsteps"><li><b>Shop front</b> with your board/sign clearly readable (cover photo)</li><li><b>Inside</b>, showing shelves and stock</li><li><b>Counter</b> or best-selling products</li><li>Your <b>logo</b> (or the sign up close)</li></ol>
-          <a class="btn" href="#/biz/site">Add photos (${photos + (s.logo ? 1 : 0)} added)</a>`)}
-        ${step(2, "Google Maps profile", g.gbp_status === "live" ? "Live on Maps" : g.gbp_status === "verifying" ? "Waiting for Google to verify" : g.gbp_status === "started" ? "Started" : "About 10 minutes", `
-          <p class="small quiet" style="margin-top:0">Google lets only the owner add a shop to Maps. Do it on this phone — every answer is below, ready to copy.</p>
-          <ol class="gsteps">
-            <li><a class="link" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.name + " " + (s.locality || ""))}" target="_blank" rel="noopener">Search for your shop on Google Maps</a>. If it's there, open it and tap <b>Claim this business</b> / <b>Own this business?</b></li>
+    const digits = (v) => String(v || "").replace(/\D/g, "");
+    const photos = () => (s.cover ? 1 : 0) + (s.gallery || []).length;
+    const items = () => s.items.filter((i) => !i.removed);
+    const readyItems = () => items().filter((i) => !gReady(i).length);
+    const storeCode = () => g.store_code || "MM-" + s.id.slice(0, 8).toUpperCase();
+    const gf = () => [...gfields(s), ["Store code (Advanced information)", storeCode()], ["Description", s.about || ""]];
+    const copyRows = (rows) => `<div class="gcopy">${rows.map(([k, v], i) => `<div class="gc"><span><em>${esc(k)}</em>${esc(v)}</span><button class="link" data-cp="${i}">Copy</button></div>`).join("")}</div>`;
+    const photoBtn = (kind, label) => `<label class="btn"><input type="file" accept="image/*" hidden data-gup="${kind}">${ic("camera")}${label}</label>`;
+    const gbpLive = () => g.gbp_status === "live" && !!g.maps_url;
+
+    // ---- the questions, in order. done() = already answered, so it's skipped ----
+    // part: which of the three parts it belongs to; skip: the owner may leave it for later
+    const Q = [
+      { id: "name", part: "Your shop", done: () => !!String(s.name || "").trim(),
+        q: "What is your shop's name?", why: "Write it exactly as it is on your shop board. Google shows this name on Maps.",
+        body: () => `<input class="field gin" id="qa" maxlength="80" value="${esc(s.name || "")}" placeholder="e.g. Sharma Hardware">`,
+        save: () => { const v = $("#qa").value.trim(); if (v.length < 2) return "Type your shop's name"; A.updateShop(s.id, { name: v }); } },
+      { id: "phone", part: "Your shop", done: () => digits(s.phone).slice(-10).length === 10,
+        q: "Which phone number should customers call?", why: "Google shows it on your Maps profile. It must be a number you answer during shop hours.",
+        body: () => `<input class="field gin" id="qa" inputmode="tel" value="${esc(s.phone || "")}" placeholder="98765 43210">`,
+        save: () => { const v = digits($("#qa").value).slice(-10); if (v.length !== 10) return "Type a 10-digit mobile number"; A.updateShop(s.id, { phone: "+91 " + v.slice(0, 5) + " " + v.slice(5) }); } },
+      { id: "area", part: "Your shop", done: () => !!(s.locality && /^\d{6}$/.test(String(s.pincode || ""))),
+        q: "Which area is your shop in?", why: "Your area and PIN code go into your address on Google, so people nearby find you.",
+        body: () => `<div class="two"><label class="glab">Area / locality<input class="field" id="qa" value="${esc(s.locality || "")}" placeholder="e.g. Karol Bagh"></label>
+          <label class="glab">PIN code<input class="field" id="qb" inputmode="numeric" maxlength="6" value="${esc(s.pincode || "")}" placeholder="110005"></label></div>`,
+        save: () => { const a = $("#qa").value.trim(), p = digits($("#qb").value); if (a.length < 2) return "Type your area"; if (p.length !== 6) return "PIN code has 6 digits"; A.updateShop(s.id, { locality: a, pincode: p }); } },
+      { id: "pin", part: "Your shop", done: () => s.lat != null && s.lng != null,
+        q: "Where exactly is your shop on the map?", why: "Google puts your pin here and gives directions to it. Stand inside your shop when you set it.",
+        body: () => `<a class="btn" href="#/biz/details">${ic("pin")}Set the map pin</a>`, noSave: true },
+      { id: "about", part: "Your shop", done: () => String(s.about || "").trim().length >= 40,
+        q: "Describe your shop in a few lines", why: "Google shows this as your shop's description. Say what you sell, since when, and anything special (delivery, brands, repairs).",
+        body: () => `<textarea class="field gin" id="qa" rows="4" maxlength="600" placeholder="e.g. Family hardware shop since 1998. Taps, pipes, tools, paints and electricals from Jaquar, Asian Paints and Havells. Free home delivery nearby.">${esc(s.about || "")}</textarea>
+          <p class="gcount" id="qc"></p>`,
+        mount: () => { const t = $("#qa"), c = $("#qc"); const up = () => { const n = t.value.trim().length; c.textContent = n < 40 ? `${40 - n} more letters needed` : "✓ Good"; }; t.oninput = up; up(); },
+        save: () => { const v = $("#qa").value.trim(); if (v.length < 40) return "Write at least 40 letters — a line or two"; A.updateShop(s.id, { about: v }); } },
+      { id: "logo", part: "Your shop", skip: true, done: () => !!s.logo,
+        q: "Add your shop's logo", why: "A square picture of your logo, or a close photo of your shop board. It becomes your profile picture on Google.",
+        body: () => photoBtn("logo", "Take or choose a photo"), noSave: true },
+      { id: "cover", part: "Your shop", skip: true, done: () => !!s.cover,
+        q: "Add a photo of your shop front", why: "Take it in daylight from across the road, with your board readable. Google shows it first — it's how people recognise your shop.",
+        body: () => photoBtn("cover", "Take or choose a photo"), noSave: true },
+      { id: "inside", part: "Your shop", skip: true, done: () => photos() >= 3,
+        q: "Add photos from inside your shop", why: `Shelves, stock and the counter. Google wants at least 3 photos in all — you have ${photos()}.`,
+        body: () => `${(s.gallery || []).length ? `<div class="gthumbs">${s.gallery.map((p) => `<img src="${esc(p)}" alt="">`).join("")}</div>` : ""}${photoBtn("gallery", "Add a photo")}`, noSave: true },
+      { id: "gmail", part: "Google Maps", done: () => !!g.gmail,
+        q: "Which Gmail will you use for your shop?", why: "Your Google Maps profile belongs to this Google account. Use one you can always sign in to — not a staff member's.",
+        body: () => `<input class="field gin" id="qa" type="email" inputmode="email" value="${esc(g.gmail || "")}" placeholder="yourshop@gmail.com">`,
+        save: async () => { const v = $("#qa").value.trim().toLowerCase(); if (!/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/.test(v)) return "Type your Gmail, like yourshop@gmail.com"; if (!(await saveG({ gmail: v }))) return ""; } },
+      { id: "gbp", part: "Google Maps", done: () => ["started", "verifying", "live"].includes(g.gbp_status),
+        q: "Add your shop to Google Maps", why: "Only the owner can do this, so it opens Google on this phone. Every answer Google asks for is below — tap Copy, then paste.",
+        body: () => `<ol class="gsteps">
+            <li><a class="link" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s.name + " " + (s.locality || ""))}" target="_blank" rel="noopener">Search for your shop on Google Maps</a>. If it's there, open it and tap <b>Own this business?</b></li>
             <li>Not there? <a class="link" href="https://business.google.com/create" target="_blank" rel="noopener">Add your shop on Google</a>. Sign in with <b>${esc(g.gmail || "your Gmail")}</b>.</li>
-            <li>Fill in Google's questions with these (tap Copy, then paste):</li></ol>
-          <div class="gcopy">${gf.map(([k, v], i) => field(k, v, i)).join("")}</div>
-          <p class="small" style="margin:12px 0 4px"><b>Verification.</b> Google checks the shop is yours. If it asks for a <b>video</b>, record one continuous clip (30–60 s):</p>
-          <ol class="gsteps"><li>Start outside: the street and a nearby landmark</li><li>Your shop board with the name</li><li>Walk in: shelves, stock and the counter</li><li>Something only the owner has: shop keys, bill book, GST or trade licence</li></ol>
-          <p class="tiny faint">If Google offers a phone call or SMS instead, choose that — it's faster. Verification takes from a few minutes to about 5 days.</p>
-          <div class="words" style="margin:10px 0">${[["started", "I've submitted it"], ["verifying", "Google is verifying"]].map(([k, l]) => `<button class="word ${g.gbp_status === k ? "on" : ""}" data-gbp="${k}">${l}</button>`).join("")}</div>
-          <div class="form">
-            <label>Your Google Maps link <span class="faint tiny">— on your profile tap Share → Copy link</span><input class="field" id="gmu" inputmode="url" placeholder="https://maps.app.goo.gl/…" value="${esc(g.maps_url || "")}"></label>
-            <label>Your review link <span class="faint tiny">— profile → Ask for reviews → copy</span><input class="field" id="grv" inputmode="url" placeholder="https://g.page/r/…/review" value="${esc(g.review_url || "")}"></label>
-            <button class="btn" id="gml" type="button">My shop is live on Maps — save links</button>
-          </div>`)}
-        ${step(3, "Products ready for Google", `${ready.length} of ${items.length} ready`, `
-          <p class="small quiet" style="margin-top:0">Google shows an item only when it has <b>a price, a real photo</b> and <b>stock you've counted in the last 7 days</b>. Plain background, no watermark, no photos from other websites. Tap an item to fix it — the photo is under <b>Product details</b>.</p>
-          ${notReady.length ? `<div class="entries">${notReady.slice(0, 40).map((it) => `<a class="entry" href="#/biz/items?open=${it.id}"><div class="body"><div class="name">${esc(it.name)}</div>
-            <div class="note" style="color:var(--out)">Needs: ${gReady(it).join(", ")}</div></div>${ic("arrow")}</a>`).join("")}</div>
-            ${notReady.length > 40 ? `<p class="tiny faint">…and ${notReady.length - 40} more in Stock</p>` : ""}` : '<p class="small">All your items are ready. 🎉</p>'}
-          <p class="tiny faint" style="margin-top:8px">Tip: scan the barcode on branded goods — Google trusts items with a barcode more.</p>`)}
-        ${step(4, "Show products on Google Shopping", g.mc_status === "live" ? "Live" : g.mc_status === "review" ? "Google is reviewing" : !done[2] ? "After your Maps profile is live" : "About 15 minutes", `
-          ${!feedUrl("products") ? '<p class="small" style="color:var(--out)">Connect to the internet and tap Sync now in the menu once, then come back.</p>' : ""}
-          <p class="small quiet" style="margin-top:0">Google Merchant Center is where Google keeps shop products. My Market fills it for you every day — you set it up once.</p>
+            <li>Fill in Google's questions with these:</li></ol>${copyRows(gf())}`,
+        cta: "I've submitted it", save: async () => { if (!(await saveG({ gbp_status: "started" }))) return ""; } },
+      { id: "verify", part: "Google Maps", done: () => gbpLive(),
+        q: "Has Google verified your shop?", why: "Google checks the shop is really yours. This takes from a few minutes to about 5 days.",
+        body: () => `<p class="small" style="margin:0 0 6px"><b>If Google asks for a video</b>, record one clip of 30–60 seconds:</p>
+          <ol class="gsteps"><li>Outside: the street and a nearby landmark</li><li>Your shop board with the name</li><li>Walk in: shelves, stock and the counter</li><li>Something only the owner has: shop keys, bill book, GST or trade licence</li></ol>
+          <p class="tiny faint">If Google offers a phone call or SMS, choose that — it's faster.</p>
+          <div class="gq-sub"><b>Verified? Paste your Google Maps link</b><span>On your profile tap Share → Copy link</span></div>
+          <input class="field gin" id="qa" inputmode="url" value="${esc(g.maps_url || "")}" placeholder="https://maps.app.goo.gl/…">
+          <input class="field gin" id="qb" inputmode="url" value="${esc(g.review_url || "")}" placeholder="Review link (optional) — Ask for reviews → copy">`,
+        cta: "Save — my shop is live on Maps",
+        alt: () => ["Not yet — Google is checking", async () => { if (g.gbp_status !== "verifying") await saveG({ gbp_status: "verifying" }, "Saved — come back here when Google verifies your shop"); }],
+        save: async () => { const mu = $("#qa").value.trim(), rv = $("#qb").value.trim();
+          if (!MAPS_RX.test(mu)) return "Paste the link from Google Maps (Share → Copy link)";
+          if (rv && !MAPS_RX.test(rv)) return "That review link doesn't look like a Google link";
+          if (!(await saveG({ maps_url: mu, review_url: rv || null, gbp_status: "live" }, "Your website now shows your Google Maps profile"))) return ""; } },
+      { id: "items", part: "Google Shopping", skip: true, done: () => readyItems().length >= 5,
+        q: "Get 5 products ready for Google", why: "Google shows a product only when it has a price, a real photo and stock you counted in the last 7 days. Tap an item to fix it.",
+        body: () => { const nr = items().filter((i) => gReady(i).length); return `<p class="small" style="margin:0 0 8px"><b>${readyItems().length} of 5</b> ready</p>
+          <div class="entries">${nr.slice(0, 12).map((it) => `<a class="entry" href="#/biz/items?open=${it.id}"><div class="body"><div class="name">${esc(it.name)}</div>
+          <div class="note" style="color:var(--out)">Needs: ${gReady(it).join(", ")}</div></div>${ic("arrow")}</a>`).join("")}</div>`; }, noSave: true },
+      { id: "mc", part: "Google Shopping", blocked: () => !gbpLive(), done: () => ["feeds", "review", "live"].includes(g.mc_status),
+        q: "Connect Google Shopping", why: "Google Merchant Center holds shop products. You set it up once — after that My Market sends your prices and stock to Google every day.",
+        body: () => `${!feedUrl("products") ? '<p class="small" style="color:var(--out)">Connect to the internet and tap More → Sync now once, then come back.</p>' : ""}
           <ol class="gsteps">
-            <li><a class="link" href="https://merchants.google.com/" target="_blank" rel="noopener">Open Google Merchant Center</a> and sign in with <b>${esc(g.gmail || "the same Gmail")}</b>. Choose that you sell <b>in a physical shop</b>. Country: India. Website: your shop link (copy below).</li>
-            <li>When it asks, <b>link your Google Business Profile</b> (your Maps profile from step 3).</li>
-            <li>Turn on <b>Free local listings</b> and choose <b>"use your own product pages"</b>.</li>
-            <li>Add products → <b>from a file → "add file from a link"</b> → paste <b>Products link</b>. Set it to fetch <b>every day</b>.</li>
-            <li>Add your <b>local inventory / stock</b> data the same way → paste <b>Stock link</b>, every day.</li>
-            <li>Type your Merchant Center number (top right, e.g. 123456789) below.</li></ol>
-          <div class="gcopy">
-            <div class="gc"><span><em>Your shop link (website)</em>${esc(siteLink(s, "gmaps"))}</span><button class="link" id="cpsite">Copy</button></div>
-            <div class="gc"><span><em>Products link</em>${esc(feedUrl("products") || "—")}</span><button class="link" id="cpfp">Copy</button></div>
-            <div class="gc"><span><em>Stock link</em>${esc(feedUrl("local") || "—")}</span><button class="link" id="cpfl">Copy</button></div>
-            <div class="gc"><span><em>Store code</em>${esc(gf[6][1])}</span><button class="link" id="cpsc">Copy</button></div></div>
-          <div class="form" style="margin-top:10px">
-            <label>Merchant Center number<input class="field" id="gmid" inputmode="numeric" placeholder="123456789" value="${esc(g.merchant_id || "")}"></label>
-            <div class="words">${[["feeds", "Links added"], ["review", "Google is reviewing"], ["live", "Products are live"]].map(([k, l]) => `<button class="word ${g.mc_status === k ? "on" : ""}" data-mc="${k}">${l}</button>`).join("")}</div>
-          </div>
-          <p class="tiny faint" style="margin-top:8px">Google reviews new shops in about 3–7 days and may call or visit to check your stock. Keep stock correct: every bill lowers it by itself — when new stock arrives, add it in Stock.</p>`)}
-        </div>
-        <div class="rsec"><div class="rhd"><b>Stuck? We'll help</b></div>
-          ${g.help_at ? `<p class="small" style="margin:0 0 8px">✓ We got your request (${new Date(g.help_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}). My Market will call you.</p>` : ""}
-          <div class="form"><textarea class="field" id="ghn" rows="2" maxlength="300" placeholder="What's the problem? e.g. Google asked for a video, I'm not sure how">${esc(g.help_note || "")}</textarea>
-          <button class="btn line" id="ghelp" type="button">Ask My Market to help</button></div></div>
-        <div style="height:30px"></div>`;
-      bindTop();
-      $$("[data-step]").forEach((b) => b.onclick = () => { open = cur === +b.dataset.step ? -1 : +b.dataset.step; draw(); });
-      $$("[data-cp]").forEach((b) => b.onclick = () => { const [k, v] = gf[+b.dataset.cp]; copy(v, `${k.replace(/ \(.*\)/, "")} copied — paste it in Google`); });
-      $("#ggms") && ($("#ggms").onclick = () => {
-        const v = $("#ggm").value.trim().toLowerCase();
-        if (!/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/.test(v)) return U.toast("Type your Gmail, like yourshop@gmail.com");
-        save({ gmail: v }, "Gmail saved");
+            <li><a class="link" href="https://merchants.google.com/" target="_blank" rel="noopener">Open Google Merchant Center</a>, sign in with <b>${esc(g.gmail || "the same Gmail")}</b>, choose <b>I sell in a physical shop</b>, country India.</li>
+            <li>When it asks, link your <b>Google Business Profile</b>.</li>
+            <li>Turn on <b>Free local listings</b> and choose <b>use your own product pages</b>.</li>
+            <li>Products → add from a file → <b>add file from a link</b> → paste the Products link, every day. Do the same for stock with the Stock link.</li></ol>
+          ${copyRows([["Your shop link (website)", siteLink(s, "gmaps")], ["Products link", feedUrl("products") || "—"], ["Stock link", feedUrl("local") || "—"], ["Store code", storeCode()]])}`,
+        cta: "I've added both links", save: async () => { if (!(await saveG({ mc_status: "feeds" }))) return ""; } },
+      { id: "mcid", part: "Google Shopping", blocked: () => !gbpLive(), done: () => !!g.merchant_id,
+        q: "What is your Merchant Center number?", why: "It's at the top right of Merchant Center (for example 123456789). We use it to check your products reach Google.",
+        body: () => `<input class="field gin" id="qa" inputmode="numeric" value="${esc(g.merchant_id || "")}" placeholder="123456789">`,
+        save: async () => { const v = digits($("#qa").value); if (!/^\d{6,13}$/.test(v)) return "The number has 6 to 13 digits"; if (!(await saveG({ merchant_id: v }))) return ""; } },
+      { id: "mclive", part: "Google Shopping", blocked: () => !gbpLive() || !g.mc_status, done: () => g.mc_status === "live",
+        q: "Are your products showing on Google?", why: "Google reviews new shops in about 3–7 days and may call or visit to check your stock. Keep your stock correct meanwhile — every bill lowers it by itself.",
+        body: () => "", cta: "Yes, they're live",
+        alt: () => ["Not yet — Google is reviewing", async () => { if (g.mc_status !== "review") await saveG({ mc_status: "review" }, "Saved — come back when Google approves"); }],
+        save: async () => { if (!(await saveG({ mc_status: "live" }, "Your products are on Google 🎉"))) return ""; } },
+    ];
+
+    const skipped = new Set();
+    let at = null;                       // index of the question on screen; null = first one not answered
+    const firstOpen = (from = 0) => { for (let i = from; i < Q.length; i++) if (!Q[i].done() && !skipped.has(Q[i].id) && !(Q[i].blocked && Q[i].blocked())) return i; return -1; };
+    // a question that waits on Google (verification, review) ends the run for today
+    const waiting = () => (g.gbp_status === "verifying" && !gbpLive()) ? "maps" : (g.mc_status === "review" && !Q.find((q) => q.id === "mclive").done()) ? "shopping" : null;
+
+    const draw = () => {
+      const nDone = Q.filter((q) => q.done()).length;
+      let i = at ?? firstOpen();
+      const head = `${bizTop("Get found on Google")}
+        <div class="gwz-top"><div class="gprog"><i style="width:${Math.round((nDone / Q.length) * 100)}%"></i></div>
+          <span>${nDone} of ${Q.length} done</span></div>`;
+      const helpLink = `<button class="link gwz-help" id="ghelp">Stuck? Ask My Market to help</button>`;
+      if (i === -1) {   // nothing left to ask (or only skipped ones)
+        const left = Q.filter((q) => !q.done());
+        const w = waiting();
+        U.app.innerHTML = `${head}<div class="gwz">
+          <div class="gwz-end">${ic(left.length ? "clock" : "check")}
+            <b>${!left.length ? "Your shop is on Google 🎉" : w === "maps" ? "Google is verifying your shop" : w === "shopping" ? "Google is reviewing your products" : "Almost there"}</b>
+            <p>${!left.length ? "Customers nearby can find your shop on Google Maps and see your products and prices. Your stock goes to Google every day by itself."
+              : w ? "Nothing to do now. Come back here when Google sends you an email or SMS — we'll continue from the next question."
+              : `${left.length} thing${left.length > 1 ? "s" : ""} you skipped:`}</p>
+            ${left.length && !w ? `<div class="gwz-left">${left.map((q) => `<button class="word" data-goto="${Q.indexOf(q)}">${esc(q.q)}</button>`).join("")}</div>` : ""}
+            ${w ? `<button class="btn line" data-goto="${Q.findIndex((q) => !q.done() && !(q.blocked && q.blocked()))}">Google has replied — continue</button>` : ""}
+          </div>${helpLink}</div>`;
+      } else {
+        const q = Q[i], prev = i - 1, alt = q.alt && !q.done() ? q.alt() : null;
+        U.app.innerHTML = `${head}<div class="gwz">
+          <div class="gwz-card" style="--d:0">
+            <span class="gwz-part">${esc(q.part)} · question ${i + 1} of ${Q.length}</span>
+            <h2 class="gwz-q">${esc(q.q)}</h2>
+            <p class="gwz-why">${q.why}</p>
+            <div class="gwz-body">${q.body()}</div>
+            <p class="gwz-err" id="qerr"></p>
+            ${q.noSave ? (q.done() ? `<button class="btn" id="qnext">Next ${ic("arrow")}</button>` : "") : `<button class="btn" id="qsave">${esc(q.cta || "Save and continue")}</button>`}
+            ${alt ? `<button class="btn line" id="qalt">${esc(alt[0])}</button>` : ""}
+            <div class="gwz-nav">${prev >= 0 ? `<button class="link" id="qback">${ic("back")}Back</button>` : "<span></span>"}
+              ${(q.skip || q.noSave) && !q.done() ? `<button class="link" id="qskip">Skip for now</button>` : ""}</div>
+          </div>${helpLink}</div>`;
+        q.mount && q.mount();
+        const err = (m) => { const e = $("#qerr"); if (e && m) { e.textContent = m; e.classList.remove("shake"); void e.offsetWidth; e.classList.add("shake"); } };
+        const next = () => { at = firstOpen(i + 1); if (at === -1) at = firstOpen(0); draw(); window.scrollTo(0, 0); };
+        $("#qsave") && ($("#qsave").onclick = async (ev) => {
+          const b = ev.currentTarget; b.disabled = true;
+          const r = await q.save(); b.disabled = false;
+          if (typeof r === "string") return err(r);   // "" = the server save failed; its message is already shown
+          next();
+        });
+        $("#qnext") && ($("#qnext").onclick = next);
+        $("#qalt") && ($("#qalt").onclick = async () => { await alt[1](); skipped.add(q.id); next(); });
+        $("#qback") && ($("#qback").onclick = () => { at = prev; draw(); window.scrollTo(0, 0); });
+        $("#qskip") && ($("#qskip").onclick = () => { skipped.add(q.id); next(); });
+        $$("[data-cp]").forEach((b) => b.onclick = () => { const row = b.closest(".gc"); copy(row.querySelector("span").lastChild.textContent, `${row.querySelector("em").textContent.replace(/ \(.*\)/, "")} copied — paste it in Google`); });
+        $$("[data-gup]").forEach((inp) => inp.onchange = async () => {
+          const f = inp.files[0]; if (!f) return;
+          const kind = inp.dataset.gup, size = { cover: [1400, 0.78], logo: [500, 0.85], gallery: [1200, 0.78] }[kind];
+          U.toast("Adding photo…");
+          const data = await shrinkPhoto(f, size[0], size[1]);
+          if (!data) return U.toast("Couldn't read that photo");
+          A.setShopPhoto(s.id, kind, data); U.toast("Photo saved");
+          if (Q[i].done()) next(); else draw();
+        });
+      }
+      $$("[data-goto]").forEach((b) => b.onclick = () => { skipped.clear(); at = +b.dataset.goto; draw(); window.scrollTo(0, 0); });
+      $("#ghelp").onclick = () => U.openSheet(`<div class="eyebrow">Get found on Google</div><div class="title">We'll help you</div>
+        ${g.help_at ? `<p class="small" style="margin:6px 0 0">✓ We got your request on ${new Date(g.help_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}. My Market will call you.</p>` : ""}
+        <div class="form"><textarea class="field" id="ghn" rows="3" maxlength="300" placeholder="What's the problem? e.g. Google asked for a video, I'm not sure how">${esc(g.help_note || "")}</textarea>
+        <button class="btn" id="ghs" type="button">Ask My Market to call me</button></div>`, (el) => {
+        $("#ghs", el).onclick = async () => { if (await saveG({ help_at: new Date().toISOString(), help_note: $("#ghn", el).value.trim() || null }, "Thanks — My Market will call you soon")) U.closeSheet(); };
       });
-      $$("[data-gbp]").forEach((b) => b.onclick = () => save({ gbp_status: b.dataset.gbp }, "Saved"));
-      $("#gml") && ($("#gml").onclick = () => {
-        const mu = $("#gmu").value.trim(), rv = $("#grv").value.trim();
-        if (!MAPS_RX.test(mu)) return U.toast("Paste the link from Google Maps (Share → Copy link)");
-        if (rv && !MAPS_RX.test(rv)) return U.toast("That review link doesn't look like a Google link");
-        save({ maps_url: mu, review_url: rv || null, gbp_status: "live" }, "Saved — your website now shows your Google Maps profile");
-      });
-      $("#cpsite") && ($("#cpsite").onclick = () => copy(siteLink(s, "gmaps"), "Shop link copied"));
-      $("#cpfp") && ($("#cpfp").onclick = () => feedUrl("products") ? copy(feedUrl("products"), "Products link copied — paste it in Merchant Center") : U.toast("Sync first"));
-      $("#cpfl") && ($("#cpfl").onclick = () => feedUrl("local") ? copy(feedUrl("local"), "Stock link copied — paste it in Merchant Center") : U.toast("Sync first"));
-      $("#cpsc") && ($("#cpsc").onclick = () => copy(gf[6][1], "Store code copied"));
-      $$("[data-mc]").forEach((b) => b.onclick = () => {
-        const id = ($("#gmid").value || "").replace(/\D/g, "");
-        if (id && !/^\d{6,13}$/.test(id)) return U.toast("The Merchant Center number has 6 to 13 digits");
-        save({ mc_status: b.dataset.mc, ...(id ? { merchant_id: id } : {}) }, "Saved");
-      });
-      $("#ghelp").onclick = () => save({ help_at: new Date().toISOString(), help_note: $("#ghn").value.trim() || null }, "Thanks — My Market will call you soon");
     };
     draw();
-    if (s.cloud && CL && CL.googleLink) CL.googleLink(s.id).then((r) => { if (r) { g = r; A.store.set(key, r); if (location.hash.startsWith("#/biz/google")) draw(); } }).catch(() => {});
+    // the server copy may know more (another phone answered): redraw at the first open question
+    if (s.cloud && CL && CL.googleLink) CL.googleLink(s.id).then((r) => { if (r) { g = r; A.store.set(key, r); if (location.hash.startsWith("#/biz/google") && at === null) draw(); } }).catch(() => {});
   }
 
   // ---------- My website: the shop's page, sharing, QR poster, Google Maps ----------
