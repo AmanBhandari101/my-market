@@ -60,8 +60,7 @@ count is on the Orders tab, and the menu became the More page.
 | Orders | Accept / keep aside / make bill, WhatsApp | Becomes a tab with a count; friendly empty state | Group by today / earlier |
 | Stock | Steppers, filters, value at cost | Calmer stat tiles | Sort options |
 | Stock arrived | Tap or scan each piece | Back arrow | — |
-| Reports | Sales, daily chart, running low, not selling, searches | Analytics as a clean row; website link moved to More | — |
-| Shop analytics | All of it | Back arrow | — |
+| Reports | Everything from Reports and the old Shop analytics page | **One page** in four groups (Sales · Best sellers · Stock · Customers) with sticky jump buttons; "Order soon" folded into Running low, "Money in your stock" into Not selling; website link moved to More | — |
 | My website, Get found on Google | All of it | Under More, back arrow | — |
 | Shop details, Login & security, My plan, Back up bills | All of it | Under More, back arrow | — |
 | ☰ menu | — | Replaced by the More page | — |

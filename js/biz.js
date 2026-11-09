@@ -25,7 +25,7 @@
     if (sub === "more") return moreView();
     if (sub === "bills") return billsView();
     if (sub === "insights") return insightsView();
-    if (sub === "analytics") return analyticsView(params);
+    if (sub === "analytics") { location.replace("#/biz/reports"); return; } // merged into Reports
     return billView(); // home = the billing counter
   }
 
@@ -767,7 +767,7 @@
   // ---------- shop analytics ----------
   // Standard retail measures, worked out on the phone from the shop's own bills,
   // items and purchases — each with a plain "what to do".
-  function analyticsView(params) {
+  function analyticsParts(params, link) {
     const s = A.ownerShop();
     const DAY = 86400000, stage = planStage(s);
     // overdue past day 7: analytics stay as they were on the day the plan ended
@@ -868,14 +868,17 @@
     const tip = (t) => `<p class="an-tip">💡 ${t}</p>`;
     const none = (t) => `<p class="quiet small" style="margin:6px 0 0">${t}</p>`;
     const barRow = (label, v, max, sub) => `<div class="an-bar"><span>${esc(label)}</span><div><i style="width:${Math.max(2, (v / max) * 100)}%"></i></div><b>${sub}</b></div>`;
+    const sec = (title, side, body) => `<div class="rsec"><div class="rhd"><b>${title}</b>${side ? `<span class="faint tiny">${side}</span>` : ""}</div>${body}</div>`;
+    const has = bills.length > 0;
 
-    U.app.innerHTML = `
-      ${bizTop("Shop analytics")}
-      ${frozen ? `<a class="planbar bad" href="#/biz/plan">Analytics are frozen at ${new Date(now).toLocaleDateString("en-IN", { day: "numeric", month: "short" })} — pay ₹150 to see the latest${ic("arrow")}</a>` : ""}
-      <div class="pad an-period"><div class="words">${[7, 30, 90].map((k) => `<a class="word ${span === k ? "on" : ""}" href="#/biz/analytics?p=${k}">Last ${k} days</a>`).join("")}</div></div>
-      ${!bills.length ? `<div class="rsec">${none("No bills in this period yet. Analytics fill in as you bill — even a week of bills shows your best times and top sellers.")}</div>` : `
+    // Each part is one card on the Reports page; reportsView puts them in order.
+    return {
+      span, frozen, has,
+      period: `<div class="an-period">${[7, 30, 90].map((k) => `<a class="word ${span === k ? "on" : ""}" href="${link("p", k)}">${k} days</a>`).join("")}</div>`,
+      frozenBar: frozen ? `<a class="planbar bad" href="#/biz/plan">Figures are frozen at ${fmtD(now)} — pay ₹150 to see the latest${ic("arrow")}</a>` : "",
+      empty: has ? "" : `<div class="rsec">${none(`No bills in the last ${span} days yet. This fills in as you bill — even a week of bills shows your best times and top sellers.`)}</div>`,
 
-      <div class="rsec"><div class="rhd"><b>The basics</b><span class="faint tiny">vs the ${span} days before</span></div>
+      basics: !has ? "" : sec("The basics", `vs the ${span} days before`, `
         <div class="an-kpis">
           <div><em>Sales</em><b>${rupee(K.sales)}</b>${dChip(delta(K.sales, P.sales))}</div>
           <div><em>Bills</em><b>${K.n}</b>${dChip(delta(K.n, P.n))}</div>
@@ -885,65 +888,51 @@
           <div><em>Discounts given</em><b>${rupee(K.disc)}</b>${K.sales ? `<i class="an-d">${K.disc && pct(K.disc, K.sales + K.disc) < 1 ? "under 1" : pct(K.disc, K.sales + K.disc)}% of sales</i>` : ""}</div>
         </div>
         ${K.upb < 2 ? tip("Most customers buy just one thing. Keep small add-ons (tape, batteries, sachets) near the counter and suggest one with every bill — it raises the average bill.") : tip(`Each customer buys ${K.upb.toFixed(1)} items on average. Suggesting one matching item at the counter can lift your average bill above ${rupee(Math.round(K.atv * 1.15))}.`)}
-        ${cancelled ? `<p class="faint tiny" style="margin:6px 0 0">${cancelled} cancelled bill${cancelled > 1 ? "s" : ""} in this period.</p>` : ""}
-      </div>
+        ${cancelled ? `<p class="faint tiny" style="margin:6px 0 0">${cancelled} cancelled bill${cancelled > 1 ? "s" : ""} in this period.</p>` : ""}`),
 
-      <div class="rsec"><div class="rhd"><b>Busiest times</b></div>
+      times: !has ? "" : sec("Busiest times", "", `
         <div class="an-hours">${hrs.map((v, i) => `<div title="${hLabel(open0 + i)} · ${rupee(v)}"><i style="height:${Math.max(3, (v / hMax) * 100)}%" class="${open0 + i === peakH ? "pk" : ""}"></i><span>${(open0 + i) % 3 === 0 ? hLabel(open0 + i) : ""}</span></div>`).join("")}</div>
         <div class="an-wd">${WD.map((d, i) => barRow(d, wAvg[i], wMax, rupee(Math.round(wAvg[i])))).join("")}</div>
-        ${tip(`Your rush hour is <b>${hLabel(peakH)}–${hLabel((peakH + 1) % 24)}</b> and your best day is <b>${WD[bestWd]}</b>${quietH != null ? `; ${hLabel(quietH)} is quietest — use it to restock, count and clean` : ""}. ${worstWd !== bestWd && wdaysN[worstWd] ? `${WD[worstWd]} is slowest: try an offer on WhatsApp that morning.` : ""}`)}
-      </div>
+        ${tip(`Your rush hour is <b>${hLabel(peakH)}–${hLabel((peakH + 1) % 24)}</b> and your best day is <b>${WD[bestWd]}</b>${quietH != null ? `; ${hLabel(quietH)} is quietest — use it to restock, count and clean` : ""}. ${worstWd !== bestWd && wdaysN[worstWd] ? `${WD[worstWd]} is slowest: try an offer on WhatsApp that morning.` : ""}`)}`),
 
-      <div class="rsec"><div class="rhd"><b>Your top sellers</b><span class="faint tiny">80/20 rule</span></div>
+      pay: !has ? "" : sec("How customers pay", "", `
+        ${Object.entries(mix).filter(([, v]) => v > 0).map(([k, v]) => barRow(PAYS[k], v, Math.max(...Object.values(mix)), `${rupee(v)} · ${pct(v, K.sales)}%`)).join("")}
+        ${khataBills.length ? tip(`${khataBills.length} khata bill${khataBills.length > 1 ? "s" : ""} worth ${rupee(khataBills.reduce((a2, x) => a2 + x.total, 0))} in this period — remember to collect.`) : ""}`),
+
+      next: !has ? "" : sec("Next 7 days", "estimate", fc > 0 ? `<div class="an-fc">${fcDays.map((x) => `<div><i style="height:${Math.max(3, (x.v / fcMax) * 100)}%"></i><span>${x.d.toLocaleDateString("en-IN", { weekday: "short" })}</span></div>`).join("")}</div>
+          <p class="small" style="margin:8px 0 0">About <b>${rupee(Math.round(fc))}</b> in sales expected — based on the same weekdays over the last 4 weeks.</p>` : none("Needs a few weeks of bills to estimate.")),
+
+      top: !has ? "" : sec("Top sellers", "80/20 rule", `
         ${rowsBySales.slice(0, 8).map((r) => barRow(r.name, r.sales, rowsBySales[0].sales, `${rupee(r.sales)} · ${r.qty} sold`)).join("")}
-        ${rowsBySales.length >= 5 ? tip(`<b>${aItems.length} item${aItems.length > 1 ? "s" : ""}</b> (${aShare}% of what you sell) bring <b>80% of your sales</b>. Never let these run out — keep extra stock of them and check them every morning.`) : ""}
-      </div>
+        ${rowsBySales.length >= 5 ? tip(`<b>${aItems.length} item${aItems.length > 1 ? "s" : ""}</b> (${aShare}% of what you sell) bring <b>80% of your sales</b>. Never let these run out — keep extra stock of them and check them every morning.`) : ""}`),
 
-      <div class="rsec"><div class="rhd"><b>Profit</b><span class="faint tiny">items with a cost price</span></div>
+      profit: !has ? "" : sec("Profit", "items with a cost price", `
         ${topProfit.length ? `<div class="an-sub">Earn you the most</div>${topProfit.map((r) => barRow(r.name, r.profit, topProfit[0].profit, `${rupee(Math.round(r.profit))} · ${Math.round((r.profit / r.sales) * 100)}%`)).join("")}` : none("Add cost prices to your items (Stock → item → cost) to see profit per item.")}
         ${lowMargin.length ? `<div class="an-sub">Thin margin (under 8%)</div>${lowMargin.map((r) => `<div class="an-li"><span>${esc(r.name)}</span><b>${Math.round((r.profit / r.sales) * 100)}%</b></div>`).join("")}${tip("Check these prices: a small increase, or a cheaper supplier, adds straight to your profit.")}` : ""}
-        ${belowCost.length ? `<div class="an-warn">⚠ Sold <b>below cost</b>: ${belowCost.map((r) => esc(r.name)).join(", ")}. Check the price or the cost you entered.</div>` : ""}
-      </div>
+        ${belowCost.length ? `<div class="an-warn">⚠ Sold <b>below cost</b>: ${belowCost.map((r) => esc(r.name)).join(", ")}. Check the price or the cost you entered.</div>` : ""}`),
 
-      <div class="rsec"><div class="rhd"><b>Order soon</b><span class="faint tiny">at the speed they sell</span></div>
-        ${reorder.length ? reorder.map((r) => `<div class="an-li"><span>${esc(r.it.name)}<em>${r.it.qty} left · sells ${r.rate >= 1 ? Math.round(r.rate) : r.rate.toFixed(1)}/day</em></span><b class="${r.days < 3 ? "bad" : ""}">${r.days < 1 ? "today" : Math.floor(r.days) === 1 ? "1 day" : Math.floor(r.days) + " days"}</b><i class="an-need">order ${r.need || 1}</i></div>`).join("") + tip("“Order” = enough for the next 2 weeks at your current speed.") : none("Nothing will run out in the next 7 days at the current speed.")}
-        ${outSelling.length ? `<div class="an-warn">⚠ Out of stock but selling: ${outSelling.slice(0, 5).map((r) => esc(r.it.name)).join(", ")} — about <b>${rupee(Math.round(lostPerDay))} of sales lost every day</b>.</div>` : ""}
-      </div>
-
-      <div class="rsec"><div class="rhd"><b>Money in your stock</b></div>
-        <div class="an-kpis three">
+      // goes under Running low
+      lostSales: outSelling.length ? `<div class="an-warn">⚠ Out of stock but selling: ${outSelling.slice(0, 5).map((r) => esc(r.it.name)).join(", ")} — about <b>${rupee(Math.round(lostPerDay))} of sales lost every day</b>.</div>` : "",
+      // goes on top of Not selling
+      stockMoney: tracked.length ? `<div class="an-kpis two">
           <div><em>Stock value (at cost)</em><b>${rupee(Math.round(stockValue))}</b>${costedStock < tracked.length ? `<i class="an-d">${tracked.length - costedStock} items have no cost</i>` : ""}</div>
           <div><em>Days of stock</em><b>${daysOfStock == null ? "—" : daysOfStock}</b><i class="an-d">at last 30 days' speed</i></div>
-          <div><em>Stuck 45+ days</em><b>${rupee(Math.round(stuck))}</b><i class="an-d">not sold</i></div>
         </div>
-        ${daysOfStock != null && daysOfStock > 60 ? tip(`You hold about ${daysOfStock} days of stock — money sitting on shelves. Buy smaller amounts more often, and put the slow items on offer.`) : stuck > 0 ? tip("Put the items that haven't sold in 45+ days on a small offer, or bundle them with a top seller, to turn them back into cash.") : ""}
-        ${bought ? `<div class="an-li"><span>Stock bought in this period</span><b>${rupee(bought)}</b></div><div class="an-li"><span>Sales in this period</span><b>${rupee(K.sales)}</b></div>` : ""}
-      </div>
+        ${daysOfStock != null && daysOfStock > 60 ? tip(`You hold about ${daysOfStock} days of stock — money sitting on shelves. Buy smaller amounts more often, and put the slow items on offer.`) : ""}
+        ${bought ? `<div class="an-li"><span>Stock bought in the last ${span} days</span><b>${rupee(bought)}</b></div>` : ""}` : "",
 
-      <div class="rsec"><div class="rhd"><b>Customers</b><span class="faint tiny">bills with a phone number</span></div>
-        ${custs.length ? `<div class="an-kpis three">
+      customers: sec("Your customers", "bills with a phone number", custs.length ? `<div class="an-kpis three">
           <div><em>Customers</em><b>${active.length}</b><i class="an-d">${pct(withPhone, bills.length)}% of bills have a number</i></div>
           <div><em>Came back</em><b>${pct(repeat.length, active.length)}%</b><i class="an-d">${repeat.length} repeat</i></div>
           <div><em>Avg per customer</em><b>${active.length ? rupee(Math.round(active.reduce((a2, c2) => a2 + c2.recent, 0) / active.length)) : "—"}</b></div>
         </div>
         ${topCust.length ? `<div class="an-sub">Best customers</div>${topCust.map((c2) => `<div class="an-li"><span>+91 ${c2.ph.slice(0, 5)} ${c2.ph.slice(5)}<em>${c2.n} bill${c2.n > 1 ? "s" : ""} · since ${fmtD(c2.first)}</em></span><b>${rupee(c2.recent)}</b></div>`).join("")}` : ""}
         ${lapsed.length ? `<div class="an-sub">Haven't come in 30+ days</div>${lapsed.map((c2) => `<div class="an-li"><span>+91 ${c2.ph.slice(0, 5)} ${c2.ph.slice(5)}<em>last ${fmtD(c2.last)} · spent ${rupee(c2.spend)}</em></span><button class="link" data-wb="${c2.ph}">WhatsApp</button></div>`).join("")}${tip("A friendly message (“new stock arrived”) brings regulars back.")}` : ""}
-        ${pct(withPhone, bills.length) < 40 ? tip("Add the customer's WhatsApp number to more bills — you'll know your regulars and can bring them back.") : ""}`
-        : none("Add customers' WhatsApp numbers to bills to see your regulars, who came back, and who stopped coming.")}
-      </div>
+        ${bills.length && pct(withPhone, bills.length) < 40 ? tip("Add the customer's WhatsApp number to more bills — you'll know your regulars and can bring them back.") : ""}`
+        : none("Add customers' WhatsApp numbers to bills to see your regulars, who came back, and who stopped coming.")),
 
-      <div class="rsec"><div class="rhd"><b>How customers pay</b></div>
-        ${Object.entries(mix).filter(([, v]) => v > 0).map(([k, v]) => barRow(PAYS[k], v, Math.max(...Object.values(mix)), `${rupee(v)} · ${pct(v, K.sales)}%`)).join("")}
-        ${khataBills.length ? tip(`${khataBills.length} khata bill${khataBills.length > 1 ? "s" : ""} worth ${rupee(khataBills.reduce((a2, x) => a2 + x.total, 0))} in this period — remember to collect.`) : ""}
-      </div>
-
-      <div class="rsec"><div class="rhd"><b>Next 7 days</b><span class="faint tiny">estimate</span></div>
-        ${fc > 0 ? `<div class="an-fc">${fcDays.map((x) => `<div><i style="height:${Math.max(3, (x.v / fcMax) * 100)}%"></i><span>${x.d.toLocaleDateString("en-IN", { weekday: "short" })}</span></div>`).join("")}</div>
-          <p class="small" style="margin:8px 0 0">About <b>${rupee(Math.round(fc))}</b> in sales expected — based on the same weekdays over the last 4 weeks.</p>` : none("Needs a few weeks of bills to estimate.")}
-      </div>`}
-      <div style="height:30px"></div>`;
-    bindTop();
-    $$("[data-wb]").forEach((x) => x.onclick = () => U.openWhatsApp(x.dataset.wb, `Namaste! ${s.name} here — new stock has arrived. Visit us soon, or see what's in stock: ${siteLink(s, "share")}`));
+      bind: () => $$("[data-wb]").forEach((x) => x.onclick = () => U.openWhatsApp(x.dataset.wb, `Namaste! ${s.name} here — new stock has arrived. Visit us soon, or see what's in stock: ${siteLink(s, "share")}`)),
+    };
   }
 
   // ---------- find & add products: built-in list + shared catalogue + online ----------
@@ -2219,12 +2208,17 @@
 
     const sDays = params.get("sd") === "30" ? 30 : 7;
     const link = (k, v) => { const p = new URLSearchParams(params); p.set(k, v); return `#/biz/reports?${p}`; };
+    const an = analyticsParts(params, link);
+    const need = (it, rate) => Math.max(1, Math.ceil(rate * 14 - it.qty));   // enough for 2 weeks
+    // jump buttons: the page is long, so each group is one tap away
+    const JUMP = [["r-sales", "Sales"], ["r-best", "Best sellers"], ["r-stock", "Stock"], ["r-cust", "Customers"]];
     U.app.innerHTML = `
       ${bizTop("Reports")}
-      ${backupDue(s) ? `<a class="rsec sitecard due" href="#/biz/backup"><span>${ic("bag")}</span><div><b>Back up your bills</b><em>${backupDue(s)}</em></div>${ic("arrow")}</a>` : ""}
-      <a class="rsec sitecard an-card" href="#/biz/analytics"><span>${ic("chart")}</span><div><b>Shop analytics</b><em>Best times, top sellers, profit, what to reorder, your best customers</em></div>${ic("arrow")}</a>
+      <nav class="rjump">${JUMP.map(([id, l]) => `<button data-jump="${id}">${l}</button>`).join("")}</nav>
+      ${backupDue(s) ? `<a class="rsec sitecard due" href="#/biz/backup"><span>${ic("cloud")}</span><div><b>Back up your bills</b><em>${backupDue(s)}</em></div>${ic("arrow")}</a>` : ""}
 
-      <div class="rsec"><div class="rhd"><b>Sales</b><a class="link" href="#/biz/bills">All bills</a></div>
+      <h2 class="rgh" id="r-sales">Sales</h2>
+      <div class="rsec"><div class="rhd"><b>Sales so far</b><a class="link" href="#/biz/bills">All bills</a></div>
         <div class="salesrows">${rows.map(([label, a, b, word]) => `<div class="srow">
           <div><span class="sl">${label}</span><b>${rupee(a.t)}</b><em>${a.n} bill${a.n === 1 ? "" : "s"} · profit ${rupee(a.p)}${a.noCost ? "*" : ""}</em></div>
           <div class="sc">${change(a, b, word)}</div></div>`).join("")}</div>
@@ -2239,34 +2233,55 @@
         <p class="small" id="dayinfo" style="margin:10px 0 0">${total ? `${span} days: <b>${rupee(total)}</b> · average ${rupee(Math.round(total / span))}/day · best ${dayName(best.d0, true)} (${rupee(best.t)})` : "No sales in this period yet."}</p>
       </div>
 
+      <div class="rperiod"><span>Looking at the last</span>${an.period}</div>
+      ${an.frozenBar}${an.empty}${an.basics}${an.times}${an.pay}${an.next}
+
+      <h2 class="rgh" id="r-best">Best sellers</h2>
+      ${an.has ? an.top + an.profit : `<div class="rsec"><p class="quiet small" style="margin:0">Your top sellers and profit per item show here once you have bills in the last ${an.span} days.</p></div>`}
+
+      <h2 class="rgh" id="r-stock">Stock</h2>
       <div class="rsec"><div class="rhd"><b>Running low</b>${low.length ? `<a class="link" href="#/biz/stockin">Add stock</a>` : ""}</div>
         ${low.length ? `<div class="entries">${low.slice(0, 6).map(({ it, rate, left }) => `<a class="entry" href="#/biz/items?f=${it.qty === 0 ? "out" : "low"}">
           <span class="thumb sm" style="${U.catVars(it.cat)}">${U.pimg(it)}</span>
           <div class="body"><div class="name">${esc(it.name)}</div>
           <div class="note">${it.qty === 0 ? '<b class="down">Out of stock</b>' : `<b class="warn">${it.qty} left</b>`}${rate ? ` · sells ~${rate >= 1 ? Math.round(rate) + "/day" : Math.round(rate * 7) + "/week"}` : " · no sales in 2 weeks"}</div></div>
-          <div class="aside">${it.qty === 0 ? "" : left != null ? `<b>${left < 1 ? "<1" : Math.round(left)} day${Math.round(left) === 1 ? "" : "s"}</b>left` : ""}</div></a>`).join("")}</div>
-          ${low.length > 6 ? `<a class="link" href="#/biz/items?f=low" style="display:inline-block;margin-top:8px">All ${low.length} items</a>` : ""}`
+          <div class="aside">${rate ? `<b>order ${need(it, rate)}</b>${it.qty === 0 ? "now" : left != null ? `${left < 1 ? "<1" : Math.round(left)} day${Math.round(left) === 1 ? "" : "s"} left` : ""}` : ""}</div></a>`).join("")}</div>
+          ${low.length > 6 ? `<a class="link" href="#/biz/items?f=low" style="display:inline-block;margin-top:8px">All ${low.length} items</a>` : ""}
+          ${low.some((x) => x.rate) ? '<p class="faint tiny" style="margin:8px 0 0">“Order” = enough for the next 2 weeks at the speed it sells.</p>' : ""}`
         : `<p class="quiet small">${s.items.some((it) => it.qty != null) ? "Nothing is running low." : "Count your stock on the Stock page to see what's running low."}</p>`}
+        ${an.lostSales}
       </div>
 
-      <div class="rsec"><div class="rhd"><b>Not selling</b>
+      <div class="rsec"><div class="rhd"><b>Money in stock</b>
           <div class="words">${[15, 30, 60].map((k) => `<a class="word ${deadDays === k ? "on" : ""}" href="${link("dd", k)}">${k}d</a>`).join("")}</div></div>
-        ${dead.length ? `<p class="small" style="margin:0 0 6px">${dead.length} item${dead.length > 1 ? "s" : ""} not sold for ${deadDays}+ days${stuckTotal ? ` · <b>${rupee(stuckTotal)}</b> stuck in stock` : ""}</p>
+        ${an.stockMoney}
+        <div class="an-sub">Not sold in ${deadDays}+ days</div>
+        ${dead.length ? `<p class="small" style="margin:0 0 6px">${dead.length} item${dead.length > 1 ? "s" : ""}${stuckTotal ? ` · <b>${rupee(stuckTotal)}</b> stuck in stock` : ""}</p>
           <div class="entries">${dead.slice(0, 5).map((x) => `<a class="entry" href="#/biz/items">
           <span class="thumb sm" style="${U.catVars(x.it.cat)}">${U.pimg(x.it)}</span>
           <div class="body"><div class="name">${esc(x.it.name)}</div><div class="note">${x.sold ? `No sale for ${x.idle} days` : `Never sold · ${x.idle} days`} · ${x.it.qty} in stock</div></div>
           <div class="aside">${x.stuck ? `<b>${rupee(x.stuck)}</b>stuck` : ""}</div></a>`).join("")}</div>
-          <p class="faint tiny" style="margin:8px 0 0">Ideas: put it near the counter, offer a small discount, or don't reorder it.</p>`
-        : `<p class="quiet small">${s.items.length && youngest < deadDays && !Object.keys(lastSale).length ? `Nothing yet — items show here once they've been in stock ${deadDays} days without a sale.` : `Everything in stock has sold in the last ${deadDays} days.`}</p>`}
+          <p class="an-tip">💡 Put it near the counter, offer a small discount, bundle it with a top seller, or don't reorder it.</p>`
+        : `<p class="quiet small" style="margin:0">${s.items.length && youngest < deadDays && !Object.keys(lastSale).length ? `Nothing yet — items show here once they've been in stock ${deadDays} days without a sale.` : `Everything in stock has sold in the last ${deadDays} days.`}</p>`}
       </div>
 
+      <h2 class="rgh" id="r-cust">Customers</h2>
+      ${an.customers}
       <div class="rsec"><div class="rhd"><b>Customers looking for</b>
           <div class="words">${[7, 30].map((k) => `<a class="word ${sDays === k ? "on" : ""}" href="${link("sd", k)}">${k}d</a>`).join("")}</div></div>
         <p class="faint tiny" style="margin:0 0 6px">What people searched on My Market within 3 km of your shop.</p>
         <div id="looking"><p class="quiet small">Loading…</p></div>
       </div>
       <div style="height:30px"></div>`;
-    bindTop();
+    an.bind();
+    $$("[data-jump]").forEach((b) => b.onclick = () => {
+      const el = document.getElementById(b.dataset.jump); if (!el) return;
+      window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 118, behavior: "smooth" });
+    });
+    // after a period chip, keep the owner where they were instead of jumping to the top
+    const keepY = A.store.get("reportsY", null);
+    if (keepY != null) { A.store.set("reportsY", null); setTimeout(() => window.scrollTo(0, keepY), 0); }
+    $$(".rsec .words a, .an-period a").forEach((a) => a.addEventListener("click", () => A.store.set("reportsY", window.scrollY)));
     $$("[data-day]").forEach((b) => b.onclick = () => {
       const d = days[+b.dataset.day];
       $$("[data-day]").forEach((x) => x.classList.toggle("sel", x === b));
