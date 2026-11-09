@@ -367,15 +367,30 @@
     A.store.set("pushOn:" + s.id, true);
     return sub;
   }
-  // Every time the shop app opens: if alerts are on, make sure the server still has this phone.
-  // (The worker removes an address the push service says is gone; this puts the phone back.)
-  async function healAlerts() {
-    const s = A.ownerShop();
-    if (!s || !s.cloud || !A.store.get("pushOn:" + s.id, false) || !pushSupported() || !vapidKey() || Notification.permission !== "granted" || !navigator.onLine) return;
-    try { await window.MM_CLOUD.savePush(s.id, await pushSub(false), deviceName()); }
-    catch (x) { window.MM_CLOUD.logProblem("alerts:heal", x && x.message, s.id); }
+  // Keep this phone reachable. The server drops an address when Google says it's dead (410), so
+  // "not on the server" means "dead": re-saving the same address would only be dropped again at the
+  // next order. Make a NEW address instead and save that. Runs when the app opens, whenever it comes
+  // back on screen, and when the service worker says Chrome replaced the address.
+  const tail = (ep) => (ep ? "…" + String(ep).slice(-12) : "none");
+  let healAt = 0;
+  async function healAlerts(why = "open") {
+    const s = A.ownerShop(), CL = window.MM_CLOUD;
+    if (!s || !s.cloud || !CL || !A.store.get("pushOn:" + s.id, false) || !pushSupported() || !vapidKey() || Notification.permission !== "granted" || !navigator.onLine) return;
+    if (why !== "sw" && Date.now() - healAt < 60000) return;
+    healAt = Date.now();
+    try {
+      const reg = await navigator.serviceWorker.ready, cur = await reg.pushManager.getSubscription();
+      if (cur && await CL.pushSaved(s.id, cur.endpoint)) return;            // all good
+      const sub = await pushSub(!!cur);                                        // dead (or none): get a fresh one
+      await CL.savePush(s.id, sub, deviceName());
+      CL.logProblem("alerts:renewed", `why=${why} old=${tail(cur && cur.endpoint)} new=${tail(sub.endpoint)}`, s.id);
+    } catch (x) { CL.logProblem("alerts:heal", `${why}: ${x && x.message}`, s.id); }
   }
-  if (window.MM_APP === "business") setTimeout(healAlerts, 6000);
+  if (window.MM_APP === "business") {
+    setTimeout(() => healAlerts("open"), 6000);
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") healAlerts("visible"); });
+    if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", (e) => { if ((e.data || {}).type === "mm-subchange") healAlerts("sw"); });
+  }
   // test: straight to this phone, showing what the push service answered
   async function testAlert(s) {
     let sub = await turnOnAlerts(s, false), r = await window.MM_CLOUD.pushTestDirect(s.id, sub);
@@ -418,8 +433,12 @@
         if (!s.cloud) return fail(3, "local", "This shop isn't logged in on the server — log in with your mobile number and PIN.");
         try {
           if (await CL.pushSaved(s.id, sub.endpoint)) set(3, true, "Saved — new orders will be sent here");
-          else { await CL.savePush(s.id, sub, deviceName()); A.store.set("pushOn:" + s.id, true);
-            set(3, (await CL.pushSaved(s.id, sub.endpoint)) || false, "Was missing — saved it again now"); }
+          else {   // missing = Google said this address is dead: make a new one (re-saving the old one can't work)
+            const old = sub.endpoint; sub = await pushSub(true);
+            await CL.savePush(s.id, sub, deviceName()); A.store.set("pushOn:" + s.id, true);
+            CL.logProblem("alerts:renewed", `why=checkup old=${tail(old)} new=${tail(sub.endpoint)}`, s.id);
+            set(2, true, new URL(sub.endpoint).host + " · new address");
+            set(3, (await CL.pushSaved(s.id, sub.endpoint)) || false, "The old address had stopped working — made a new one and saved it"); }
         } catch (x) { fail(3, "save", "Couldn't save: " + (x.message || x)); }
       };
       check();

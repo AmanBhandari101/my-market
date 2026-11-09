@@ -1,6 +1,6 @@
 // Network-first for app files so updates show immediately; cache is only the
 // offline fallback. Map tiles and routing are not cached in v1.
-const CACHE = "mymarket-v2.7";
+const CACHE = "mymarket-v2.8";
 const SHELL = ["./", "index.html", "css/app.css", "css/commerce.css", "css/store.css", "css/biz.css", "css/customer.css","js/config.js", "js/cloud.js", "js/data.js", "js/api.js", "js/app.js", "js/shop.js", "js/biz.js", "icon.svg", "manifest.webmanifest", "business.html", "icon-business.svg", "manifest-business.webmanifest", "icons/icon-192.png", "icons/icon-business-192.png"];
 
 self.addEventListener("install", (e) => {
@@ -35,6 +35,16 @@ self.addEventListener("push", (e) => {
     self.clients.matchAll({ type: "window", includeUncontrolled: true })
       .then((list) => list.forEach((c) => c.postMessage({ type: "mm-order", alert: d }))),
   ]));
+});
+// Chrome sometimes replaces a push address. Get the new one at once and tell any open shop app,
+// which saves it on the server; if none is open, the app saves it the next time it opens.
+self.addEventListener("pushsubscriptionchange", (e) => {
+  const key = e.oldSubscription && e.oldSubscription.options && e.oldSubscription.options.applicationServerKey;
+  e.waitUntil((e.newSubscription ? Promise.resolve(e.newSubscription)
+    : key ? self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key }) : Promise.resolve(null))
+    .catch(() => null)
+    .then(() => self.clients.matchAll({ type: "window", includeUncontrolled: true }))
+    .then((list) => list.forEach((c) => c.postMessage({ type: "mm-subchange" }))));
 });
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
