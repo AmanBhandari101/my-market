@@ -257,8 +257,7 @@
       <div class="home-body">
       ${!area.shops.length && window.MM_CLOUD && !window.MM_CLOUD.publicDone ? `<p class="pad quiet small" style="margin:6px 0 14px">Finding shops near you…</p>` : ""}
       ${!markets.length && !area.shops.length && !(window.MM_CLOUD && !window.MM_CLOUD.publicDone) ? `<div class="banner" style="margin:0 var(--gut) 10px"><div class="serif">No shops on My Market near you yet.</div>
-        <p>Shops join with the My Market Business app (2 months free). Know a shop nearby? Tell them about it — or try a wider range above.</p>
-        <div class="btn-row"><a class="link accent" href="business.html" target="_blank" rel="noopener">My Market Business</a></div></div>` : ""}
+        <p>More shops are joining every week. Try a wider range above — Short ride or Whole city.</p></div>` : ""}
       ${!homeCat && !homeMarket && area.shops.length ? `<div class="hero"><b>Find it in your market today</b><span>Live stock and prices from ${area.shops.length} shop${area.shops.length > 1 ? "s" : ""} ${areaNote(area.km)}</span></div>` : ""}
       ${listTitle ? `<div class="card" id="flist"><h3><span>${esc(listTitle)} · ${filtered.length} shops</span><button class="link" id="clearf">Clear</button></h3>
         <div class="entries">${filtered.length ? filtered.map((s) => shopEntry(s)).join("") : '<p class="quiet">No shops here yet.</p>'}</div></div>` : ""}
@@ -1025,10 +1024,6 @@
         : '<p class="mnone">Tap the ♡ on a shop\'s page to keep it here.</p>'}
       <h3 class="mgh"><span>Recent searches</span>${recent.length ? '<button class="link" id="clrrec">Clear</button>' : ""}</h3>
       ${recent.length ? `<div class="words pad">${recent.map((r) => `<a class="word" href="#/search?q=${encodeURIComponent(r)}">${esc(r)}</a>`).join("")}</div>` : '<p class="mnone">None yet.</p>'}
-      <a class="bizcard" href="business.html" target="_blank" rel="noopener">
-        <span class="bz-ic">${ic("store")}</span>
-        <span class="body"><b>Own a shop? Get My Market Business</b><span>Billing, stock and your own website — 2 months free</span></span>${ic("arrow")}
-      </a>
       <button class="mout" id="demo-reset">Clear my history on this phone</button>
       <p class="mver">Shops and prices come from registered shops. Map © OpenStreetMap contributors.</p>`;
     $("#chg").onclick = openLocationSheet;
