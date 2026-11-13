@@ -781,7 +781,9 @@
     stationery: '<path d="M10 8h22a4 4 0 0 1 4 4v28H14a4 4 0 0 1-4-4z"/><path d="M10 36a4 4 0 0 1 4-4h22M17 15h12M17 21h9"/>',
     accessories: '<circle cx="24" cy="24" r="10"/><path d="M24 18v6l4 3M19 14l1-7h8l1 7M19 34l1 7h8l1-7"/>',
   };
-  const art = (cat, size = 64) => `<svg class="art" viewBox="0 0 48 48" width="${size}" height="${size}">${ART[cat]}</svg>`;
+  // a shopping bag for kinds of shop without their own drawing
+  const ART_BAG = '<path d="M11 16h26l-2 25H13z"/><path d="M18 16v-3a6 6 0 0 1 12 0v3"/>';
+  const art = (cat, size = 64) => `<svg class="art" viewBox="0 0 48 48" width="${size}" height="${size}">${ART[cat] || ART_BAG}</svg>`;
   const pimg = (it) => it.img ? `<img src="${it.img}" alt="${esc(it.name)}" loading="lazy">` : art(it.cat);
   const off = (it) => (it.price && it.mrp > it.price ? Math.round((1 - it.price / it.mrp) * 100) : 0);
   function priceLine(it) {

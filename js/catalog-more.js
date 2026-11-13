@@ -104,3 +104,5 @@
     for (const [n, b] of list) if (!have.has(n.toLowerCase())) { D.CATALOG[cat].push([n, b, null]); have.add(n.toLowerCase()); }
   }
 })();
+// every kind of shop has a (possibly empty) starter list, so no screen breaks on a new kind
+(function () { const D = window.MM_DATA; if (D && D.CATALOG) for (const k of Object.keys(D.CATEGORIES)) D.CATALOG[k] = D.CATALOG[k] || []; })();

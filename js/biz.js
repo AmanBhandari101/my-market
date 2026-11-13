@@ -1001,6 +1001,26 @@
     return out.map((i) => [sc(i), i]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).slice(0, limit).map((x) => CAT.rows[x[1]]);
   }
 
+  // kinds of shop without a built-in starter list: suggest popular products from the matching catalogue departments
+  const SHOP_DEPTS = {
+    general: ["Atta, Rice, Dal & Spices", "Snacks & Namkeen", "Biscuits & Bakery", "Personal Care", "Home & Cleaning"],
+    fruits: ["Fruits & Vegetables"], dairy: ["Dairy, Bread & Eggs"], sweets: ["Sweets & Chocolates", "Biscuits & Bakery"],
+    meat: ["Dairy, Bread & Eggs", "Frozen & Ice Cream"], dryfruits: ["Dry Fruits & Seeds", "Oil, Ghee & Masala"],
+    restaurant: ["Cold Drinks & Juices", "Breakfast & Instant Food"], paan: ["Paan Corner", "Sweets & Chocolates", "Cold Drinks & Juices"],
+    handloom: ["Clothes"], fabric: ["Clothes"], tailor: ["Clothes"], kids: ["Toys, Sports & Fitness", "Baby Care", "Clothes"],
+    cosmetics: ["Beauty & Makeup", "Personal Care"], optical: ["Bags, Watches & Accessories"], gifts: ["Toys, Sports & Fitness", "Bags, Watches & Accessories"],
+    sports: ["Toys, Sports & Fitness"], puja: ["Puja & Festive"], ayurveda: ["Pharmacy & Wellness", "Personal Care"], surgical: ["Pharmacy & Wellness"],
+    computer: ["Electronics", "Mobile & Accessories"], appliances: ["Electronics", "Electricals & Lighting"], repair: ["Mobile & Accessories", "Electronics"],
+    printing: ["Books & Stationery"], furnishing: ["Home & Cleaning"], paints: ["Hardware & Tools"], building: ["Hardware & Tools", "Plumbing & Bathroom"],
+    plywood: ["Hardware & Tools"], auto: ["Auto Accessories"], cycle: ["Toys, Sports & Fitness", "Auto Accessories"], pet: ["Pet Supplies"],
+    salon: ["Personal Care", "Beauty & Makeup"],
+  };
+  const catPopular = (k) => {
+    if (!CAT) return [];
+    const ds = SHOP_DEPTS[k];
+    return CAT.rows.filter((r) => { const a = CAT.aisles[r[4]]; return ds ? ds.includes(a[0]) : a[2] === k; }).slice(0, 30);
+  };
+
   function addItemsSheet(s, q0 = "", after, onAdd) {
     let q = q0, shared = [], online = null, offBusy = false, timer = null, seq = 0, catErr = false;
     const added = new Set();
@@ -1015,11 +1035,11 @@
     const draw = (el) => {
       const isCode = /^\d{6,14}$/.test(q.replace(/\s/g, ""));
       const local = !q ? A.catalogFor(s.cat).map((x) => ({ ...x, cat: s.cat })) : isCode ? [] : A.catalogSearch(q, s.cat);
-      const cat = q ? catSearch(q).filter((r) => !local.some((l) => l.name.toLowerCase() === r[1].toLowerCase())) : [];
+      const cat = q ? catSearch(q).filter((r) => !local.some((l) => l.name.toLowerCase() === r[1].toLowerCase())) : local.length ? [] : catPopular(s.cat);
       const sharedNew = shared.filter((p) => !local.some((l) => l.name.toLowerCase() === p.name.toLowerCase()) && !cat.some((r) => r[1].toLowerCase() === p.name.toLowerCase()));
       const box = $("#pres", el);
       box.innerHTML = `
-        ${cat.length ? `<div class="eyebrow" style="margin-top:6px">${isCode ? "Barcode " + esc(q) : "My Market catalogue"}</div>${cat.map((r, i) => row("c" + i, catImg(r), r[1],
+        ${cat.length ? `<div class="eyebrow" style="margin-top:6px">${isCode ? "Barcode " + esc(q) : q ? "My Market catalogue" : "Popular for " + esc(C[s.cat]?.name || "your shop")}</div>${cat.map((r, i) => row("c" + i, catImg(r), r[1],
           [r[8] === "veg" ? "🟢 Veg" : r[8] === "nonveg" ? "🔴 Non-veg" : "", r[2], r[3], CAT.aisles[r[4]][1]].filter(Boolean).join(" · ") + (r[0] && !isCode ? ` · ${r[0]}` : ""), CAT.aisles[r[4]][2], r[0])).join("")}` : ""}
         ${q && !CAT ? `<p class="quiet small" style="margin:8px 0">${catErr ? "Couldn't load the product catalogue — check the internet and type again." : "Loading the product catalogue…"}</p>` : ""}
         ${isCode && CAT && !cat.length ? `<p class="quiet small" style="margin:8px 0">Barcode ${esc(q)} isn't in the catalogue — search online below, or add it as a new item.</p>` : ""}
@@ -1662,7 +1682,15 @@
   // ---------- My website: the shop's page, sharing, QR poster, Google Maps ----------
   const GCAT = { mobile: "Mobile phone shop", electronics: "Electronics store", electrical: "Electrical supply store", hardware: "Hardware store",
     plumbing: "Plumbing supply store", clothes: "Clothing store", footwear: "Shoe store", kitchen: "Kitchen supply store", grocery: "Grocery store",
-    pharmacy: "Pharmacy", stationery: "Stationery store", accessories: "Bag shop" };
+    pharmacy: "Pharmacy", stationery: "Stationery store", accessories: "Bag shop",
+    general: "General store", fruits: "Fruit and vegetable store", dairy: "Dairy store", sweets: "Sweet shop", meat: "Butcher shop",
+    dryfruits: "Spice store", restaurant: "Restaurant", paan: "Paan shop", handloom: "Saree shop", fabric: "Fabric store", tailor: "Tailor",
+    kids: "Toy store", jewellery: "Jewelry store", cosmetics: "Cosmetics store", optical: "Optician", gifts: "Gift shop",
+    sports: "Sporting goods store", puja: "Religious goods store", flowers: "Florist", ayurveda: "Ayurvedic pharmacy",
+    surgical: "Medical supply store", computer: "Computer store", appliances: "Appliance store", repair: "Electronics repair shop",
+    printing: "Print shop", music: "Musical instrument store", furniture: "Furniture store", furnishing: "Home goods store",
+    paints: "Paint store", building: "Building materials store", plywood: "Glass & mirror shop", auto: "Auto parts store",
+    cycle: "Bicycle store", agri: "Agricultural supply store", pet: "Pet store", salon: "Beauty salon", other: "Store" };
   function gfields(s) {
     const m = A.getMarket(s.marketId);
     const addr = [s.shopNo && s.shopNo !== "—" ? `Shop ${s.shopNo}` : "", s.floor && s.floor !== "Ground floor" ? s.floor : "", s.landmark || "", m?.name || "",
@@ -2464,7 +2492,7 @@
       ${missed.length ? "" : '<p class="pad quiet small">No data yet — this fills in as customers search near you.</p>'}
       <div style="height:40px"></div>`;
     $$("[data-add]").forEach((b) => b.onclick = () => {
-      const t = A.D.CATALOG[s.cat].find(([n]) => n === b.dataset.add);
+      const t = (A.D.CATALOG[s.cat] || []).find(([n]) => n === b.dataset.add);
       A.addItem(s.id, t, s.cat); U.toast("Added to your items — in stock"); insightsView();
     });
   }

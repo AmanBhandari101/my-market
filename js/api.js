@@ -836,7 +836,7 @@ window.MM_API = (function () {
     }
     return out.sort((x, y) => (y.cat === firstCat) - (x.cat === firstCat)).slice(0, 40);
   }
-  const catalogFor = (cat) => D.CATALOG[cat].map(([n, b, p]) => ({ tmpl: [n, b, p], name: n, brand: b, price: p, img: PHOTOS.has(slug(n)) ? `img/items/${slug(n)}.jpg` : null }));
+  const catalogFor = (cat) => (D.CATALOG[cat] || []).map(([n, b, p]) => ({ tmpl: [n, b, p], name: n, brand: b, price: p, img: PHOTOS.has(slug(n)) ? `img/items/${slug(n)}.jpg` : null }));
 
   // "People searched for X near you and nobody had it" — the hook that tells a shop what to stock.
   function missedSales(shop) {
