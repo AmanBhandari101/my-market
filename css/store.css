@@ -945,3 +945,38 @@ body.has-scb .s-foot { padding-bottom: 110px; }
 .al-row.ok .al-ic { background: #1e8e4e; color: #fff; }
 .al-row.bad .al-ic { background: #d0402b; color: #fff; }
 .al-row.bad p { color: #b3261e; }
+
+/* ---------- selling online: sizes, payment, tracking ---------- */
+.popt { margin: 0 0 12px; }
+.popt b { display: block; font-size: 13px; margin-bottom: 6px; }
+.popt div { display: flex; flex-wrap: wrap; gap: 8px; }
+.popt button { min-width: 44px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line); background: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.popt button.on { border-color: var(--c, #1f7a4d); background: var(--t, #e8f4ec); color: var(--c, #1f7a4d); box-shadow: 0 0 0 2px var(--t, #e8f4ec); }
+.co-opt { display: flex; gap: 6px; margin-top: 4px; }
+.co-opt select { font: inherit; font-size: 13px; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--line); background: #fff; }
+.co-tot.sub { font-size: 14px; opacity: .85; }
+.co-pay { margin: 12px 0 4px; }
+.co-pay > b { display: block; font-size: 14px; margin-bottom: 8px; }
+.co-pay > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.co-pay button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: #fff; font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+.co-pay button em { font-style: normal; font-weight: 400; font-size: 12px; opacity: .7; }
+.co-pay button.on { border-color: var(--c, #1f7a4d); box-shadow: 0 0 0 2px var(--t, #e8f4ec); }
+.co-pay button .i { width: 18px; height: 18px; }
+.co-ret { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; margin: 10px 0 0; padding: 8px 10px; border-radius: 10px; background: #f6f5f0; }
+.co-ret .i { width: 16px; height: 16px; flex: none; margin-top: 2px; }
+.paybox { margin: 12px 0; padding: 12px; border-radius: 14px; border: 1px dashed var(--line); }
+.paybox a.co-go { text-decoration: none; }
+.payref { display: grid; gap: 4px; font-size: 13px; margin: 10px 0 6px; }
+.payref span { opacity: .7; }
+.payref input { font: inherit; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); }
+.mo-pay { margin: 8px 0 0; font-size: 13px; font-weight: 600; padding: 6px 10px; border-radius: 10px; background: #f6f5f0; }
+.mo-pay.paid { background: #e5f3ea; color: #1f6b42; }
+.mo-pay.claimed { background: #fff3d6; color: #8a5a00; }
+.mo-hist { margin-top: 8px; font-size: 13px; }
+.mo-hist summary { cursor: pointer; font-weight: 600; }
+.mo-hist div { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; border-bottom: 1px dotted var(--line); }
+.mo-hist em { font-style: normal; opacity: .7; }
+.opay { margin: 8px 0 0; font-size: 13px; font-weight: 600; padding: 6px 10px; border-radius: 10px; background: #f3f2ee; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.opay.ok { background: #e5f3ea; color: #1f6b42; }
+.opay.warn { background: #fff3d6; color: #8a5a00; }
+.opay.bad { background: #fde8e4; color: #9a3324; }

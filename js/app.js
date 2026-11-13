@@ -316,87 +316,143 @@
   const sc = {
     get: (sid) => A.store.get("siteCart:" + sid, []),
     set: (sid, v) => A.store.set("siteCart:" + sid, v),
-    qty: (sid, iid) => (sc.get(sid).find((l) => l.itemId === iid) || {}).qty || 0,
-    add(sid, iid, n) {
-      const c = sc.get(sid), l = c.find((x) => x.itemId === iid);
-      if (l) l.qty = Math.max(0, Math.min(99, l.qty + n)); else if (n > 0) c.push({ itemId: iid, qty: Math.min(99, n) });
+    qty: (sid, iid) => sc.get(sid).filter((l) => l.itemId === iid).reduce((x, l) => x + l.qty, 0),
+    same: (l, iid, o = {}) => l.itemId === iid && (l.size || "") === (o.size || "") && (l.color || "") === (o.color || ""),
+    // o = { size, color } for clothes and shoes; the same item in another size is its own line
+    add(sid, iid, n, o = {}) {
+      const c = sc.get(sid), l = c.find((x) => sc.same(x, iid, o));
+      if (l) l.qty = Math.max(0, Math.min(99, l.qty + n));
+      else if (n > 0) c.push({ itemId: iid, qty: Math.min(99, n), ...(o.size ? { size: o.size } : {}), ...(o.color ? { color: o.color } : {}) });
+      sc.set(sid, c.filter((x) => x.qty > 0));
+    },
+    // change a line's size / colour (merging with a line that already has it)
+    setOpt(sid, line, o) {
+      const c = sc.get(sid), l = c.find((x) => sc.same(x, line.itemId, line)); if (!l) return;
+      const other = c.find((x) => x !== l && sc.same(x, line.itemId, o));
+      if (other) { other.qty = Math.min(99, other.qty + l.qty); l.qty = 0; }
+      else { if (o.size) l.size = o.size; else delete l.size; if (o.color) l.color = o.color; else delete l.color; }
       sc.set(sid, c.filter((x) => x.qty > 0));
     },
     lines: (s) => sc.get(s.id).map((l) => ({ ...l, it: s.items.find((i) => i.id === l.itemId) })).filter((l) => l.it && A.itemStatus(l.it).key !== "out"),
   };
   const myOrders = () => A.store.get("myOrders", []);
+  // sizes / colours a product comes in: "Sizes" and "Colours" in its details, or a size like "S, M, L"
+  function optsOf(it) {
+    const sp = Object.fromEntries(Array.isArray(it.specs) ? it.specs : Object.entries(it.specs || it.specMap || {}));
+    const split = (v) => String(v || "").split(",").map((x) => x.trim()).filter(Boolean).slice(0, 15);
+    let sizes = split(sp.Sizes);
+    if (!sizes.length && /,/.test(it.size || "")) sizes = split(it.size);
+    return { sizes, colors: split(sp.Colours || sp.Colors) };
+  }
   const canOrder = (s) => !!(window.MM_CLOUD && window.MM_CLOUD.placeOrder && (s.live || s.cloud));
   const ordersOn = (s) => s.takesOrders !== false;
   const tm = (t) => new Date(t).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
   const orderWord = (o) => o.status === "cancelled" ? "Cancelled"
     : o.status === "done" ? (o.mode === "delivery" ? "Delivered — thank you!" : "Collected — thank you!")
-    : o.status === "ready" ? (o.kind === "hold" ? `Kept aside for you${o.hold_until ? " until " + tm(o.hold_until) : ""} ✓` : o.mode === "delivery" ? "Accepted — on its way soon ✓" : "Ready for pickup ✓")
+    : o.status === "ready" ? (o.kind === "hold" ? `Kept aside for you${o.hold_until ? " until " + tm(o.hold_until) : ""} ✓` : o.mode === "delivery" ? "Accepted — the shop is getting it ready ✓" : "Ready for pickup ✓")
+    : o.status === "packed" ? "Packed — leaving the shop soon ✓"
+    : o.status === "shipped" ? "Out for delivery 🚚"
     : "Sent — waiting for the shop to confirm";
   function orderText(s, kind, mode, lines, f, code) {
     const total = lines.reduce((x, l) => x + (l.it.price || 0) * l.qty, 0);
     return `Hi ${s.name}, I ${code ? "placed an order" : "would like to order"} on My Market.\n` +
       `${code ? `Order *${code}* · ` : ""}${kind === "hold" ? "Please *hold* these for me — I'll pick them up" : mode === "delivery" ? "*Buy* — home delivery" : "*Buy* — I'll pick it up"}\n` +
-      lines.map((l) => `• ${l.qty} × ${l.it.name}${l.it.price ? ` — ₹${(l.it.price * l.qty).toLocaleString("en-IN")}` : ""}`).join("\n") +
+      lines.map((l) => `• ${l.qty} × ${l.it.name}${l.size ? ` (Size ${l.size})` : ""}${l.color ? ` (${l.color})` : ""}${l.it.price ? ` — ₹${(l.it.price * l.qty).toLocaleString("en-IN")}` : ""}`).join("\n") +
       `\nTotal: ₹${total.toLocaleString("en-IN")}\nName: ${f.name}${mode === "delivery" ? `\nAddress: ${f.address}` : ""}${f.note ? `\nNote: ${f.note}` : ""}`;
   }
   function siteCheckout(s, kind = "hold", src = "app") {
     const me = A.store.get("me", {});
-    const f = { name: me.name || "", phone: me.phone || "", address: me.address || "", note: "" };
-    let mode = "pickup", busy = false;
+    const f = { name: me.name || "", phone: me.phone || "", address: me.address || "", pincode: me.pincode || "", note: "" };
+    let mode = "pickup", busy = false, pay = null, payChosen = false, set = null;
+    const CL = window.MM_CLOUD;
+    const redraw = () => { const el = $("#sheet"); if (el && el.classList.contains("co-sheet") && !busy) draw(el); };
+    // what the shop accepts (its UPI ID, cash on delivery, delivery fee, returns)
+    if (CL && CL.orderSettings && canOrder(s)) CL.orderSettings(s.id).then((v) => { set = v || {}; redraw(); }).catch(() => { set = {}; redraw(); });
+    else set = {};
+    // sizes / colours live in the long product details: fetch them for the items in the cart
+    const need = sc.lines(s).filter((l) => l.it.needDetails);
+    if (need.length && CL && CL.itemDetails) Promise.all(need.map((l) => CL.itemDetails(l.it.id).then((d) => A.addDetails(l.it, d)).catch(() => 0))).then(redraw);
     const draw = (el) => {
       const lines = sc.lines(s);
       if (!lines.length) { closeSheet(); return; }
       if (kind === "hold") mode = "pickup";
-      const total = lines.reduce((x, l) => x + (l.it.price || 0) * l.qty, 0), unknown = lines.some((l) => !l.it.price);
+      const st = set || {};
+      const items = lines.reduce((x, l) => x + (l.it.price || 0) * l.qty, 0), unknown = lines.some((l) => !l.it.price);
+      const fee = kind === "buy" && mode === "delivery" && !(st.free_above && items >= st.free_above) ? (st.fee || 0) : 0;
+      const total = items + fee;
+      const upiOk = !!st.upi, codOk = !(mode === "delivery" && st.cod === false);
+      // until the customer picks, UPI is offered first when the shop has a UPI ID (the settings may arrive after the first draw)
+      if (kind === "buy") { if (!payChosen || (pay === "upi" && !upiOk) || (pay === "cod" && !codOk)) pay = upiOk ? "upi" : "cod"; } else pay = "cod";
+      const opt = (l) => optsOf(l.it);
       el.innerHTML = `<div class="co" style="${catVars(s.cat)}">
         <div class="co-hd"><b>Your order</b><span>${esc(s.name)}</span></div>
         <div class="co-tabs"><button class="${kind === "hold" ? "on" : ""}" data-k="hold">${ic("clock")}Hold it for me</button><button class="${kind === "buy" ? "on" : ""}" data-k="buy">${ic("bag")}Buy</button></div>
-        <p class="co-why">${kind === "hold" ? `The shop keeps these aside for <b>4 hours</b>. Pay when you collect — nothing to pay now.` : `Pay at the shop${s.delivery ? " or on delivery" : ""} — cash or UPI. Nothing is charged online.`}</p>
-        <div class="co-lines">${lines.map((l) => `<div class="co-l"><span class="co-n">${esc(l.it.name)}<em>${l.it.price ? rupee(l.it.price) + " each" : "price at the shop"}</em></span>
-          <span class="co-q"><button data-cq="${l.itemId}" data-n="-1" aria-label="One less">−</button><b>${l.qty}</b><button data-cq="${l.itemId}" data-n="1" aria-label="One more">+</button></span>
-          <span class="co-p">${l.it.price ? rupee(l.it.price * l.qty) : "—"}</span></div>`).join("")}</div>
+        <p class="co-why">${kind === "hold" ? `The shop keeps these aside for <b>4 hours</b>. Pay when you collect — nothing to pay now.`
+          : upiOk ? `Pay now by UPI straight to the shop${codOk ? `, or ${mode === "delivery" ? "cash on delivery" : "pay at the shop"}` : ""}.`
+          : `Pay at the shop${s.delivery ? " or on delivery" : ""} — cash or UPI.`}</p>
+        <div class="co-lines">${lines.map((l, i) => { const o = opt(l); return `<div class="co-l"><span class="co-n">${esc(l.it.name)}<em>${l.it.price ? rupee(l.it.price) + " each" : "price at the shop"}</em>
+            ${o.sizes.length || o.colors.length ? `<span class="co-opt">${o.sizes.length ? `<select data-ls="${i}" aria-label="Size"><option value="">Size…</option>${o.sizes.map((z) => `<option ${z === l.size ? "selected" : ""}>${esc(z)}</option>`).join("")}</select>` : ""}
+              ${o.colors.length ? `<select data-lc="${i}" aria-label="Colour"><option value="">Colour…</option>${o.colors.map((z) => `<option ${z === l.color ? "selected" : ""}>${esc(z)}</option>`).join("")}</select>` : ""}</span>` : ""}</span>
+          <span class="co-q"><button data-cq="${i}" data-n="-1" aria-label="One less">−</button><b>${l.qty}</b><button data-cq="${i}" data-n="1" aria-label="One more">+</button></span>
+          <span class="co-p">${l.it.price ? rupee(l.it.price * l.qty) : "—"}</span></div>`; }).join("")}</div>
+        ${fee ? `<div class="co-tot sub"><span>Delivery</span><b>${rupee(fee)}</b></div>` : kind === "buy" && mode === "delivery" && st.fee && st.free_above ? `<div class="co-tot sub"><span>Delivery <em>free above ${rupee(st.free_above)}</em></span><b>Free</b></div>` : ""}
         <div class="co-tot"><span>Total${unknown ? " <em>+ items priced at the shop</em>" : ""}</span><b>${rupee(total)}</b></div>
-        ${kind === "buy" ? `<div class="co-mode"><button class="${mode === "pickup" ? "on" : ""}" data-m="pickup">${ic("store")}Pick up</button>${s.delivery ? `<button class="${mode === "delivery" ? "on" : ""}" data-m="delivery">${ic("truck")}Home delivery</button>` : `<span class="co-nod">This shop doesn't deliver yet</span>`}</div>` : ""}
+        ${kind === "buy" ? `<div class="co-mode"><button class="${mode === "pickup" ? "on" : ""}" data-m="pickup">${ic("store")}Pick up</button>${s.delivery || st.delivery ? `<button class="${mode === "delivery" ? "on" : ""}" data-m="delivery">${ic("truck")}Home delivery${st.fee ? ` · ${rupee(st.fee)}` : ""}</button>` : `<span class="co-nod">This shop doesn't deliver yet</span>`}</div>` : ""}
+        ${kind === "buy" && canOrder(s) ? (set === null ? `<p class="co-why">Loading payment options…</p>` : `<div class="co-pay"><b>How will you pay?</b><div>
+          ${upiOk ? `<button class="${pay === "upi" ? "on" : ""}" data-p="upi">${ic("wallet")}Pay now by UPI<em>GPay, PhonePe, Paytm…</em></button>` : ""}
+          ${codOk ? `<button class="${pay === "cod" ? "on" : ""}" data-p="cod">${ic("store")}${mode === "delivery" ? "Cash on delivery" : "Pay at the shop"}<em>cash or UPI then</em></button>` : ""}</div></div>`) : ""}
         <div class="co-form">
           <label>Your name<input data-f="name" autocomplete="name" maxlength="60" value="${esc(f.name)}" placeholder="e.g. Priya"></label>
           <label>Mobile number<input data-f="phone" inputmode="tel" autocomplete="tel" maxlength="16" value="${esc(f.phone)}" placeholder="98765 43210"></label>
-          ${mode === "delivery" ? `<label class="wide">Delivery address<textarea data-f="address" rows="2" maxlength="300" placeholder="House no., street, landmark">${esc(f.address)}</textarea></label>` : ""}
+          ${mode === "delivery" ? `<label class="wide">Delivery address<textarea data-f="address" rows="2" maxlength="300" placeholder="House no., street, landmark">${esc(f.address)}</textarea></label>
+          <label>PIN code<input data-f="pincode" inputmode="numeric" autocomplete="postal-code" maxlength="6" value="${esc(f.pincode)}" placeholder="248001"></label>` : ""}
           <label class="wide">Note for the shop <span>(optional)</span><input data-f="note" maxlength="300" value="${esc(f.note)}" placeholder="${kind === "hold" ? "e.g. I'll come at 6 pm" : "e.g. Call before coming"}"></label>
         </div>
+        ${kind === "buy" && st.returns ? `<p class="co-ret">${ic("receipt")}<span><b>Returns:</b> ${esc(st.returns)}</span></p>` : ""}
         <p class="co-err" id="co-err"></p>
-        <button class="co-go" id="co-go"><span>${kind === "hold" ? "Hold my items" : mode === "delivery" ? "Place delivery order" : "Place order"}</span><b>${rupee(total)}</b></button>
-        <p class="co-fine">${canOrder(s) ? "The shop gets your order straight away and confirms it here." : "This shop gets your order on WhatsApp."}</p>
+        <button class="co-go" id="co-go"><span>${kind === "hold" ? "Hold my items" : pay === "upi" ? "Place order and pay" : mode === "delivery" ? "Place delivery order" : "Place order"}</span><b>${rupee(total)}</b></button>
+        <p class="co-fine">${canOrder(s) ? (pay === "upi" && kind === "buy" ? "You pay the shop directly by UPI — My Market never holds your money." : "The shop gets your order straight away and confirms it here.") : "This shop gets your order on WhatsApp."}</p>
       </div>`;
       $$("[data-f]", el).forEach((x) => x.oninput = () => { f[x.dataset.f] = x.value; });
       $$("[data-k]", el).forEach((x) => x.onclick = () => { kind = x.dataset.k; draw(el); });
       $$("[data-m]", el).forEach((x) => x.onclick = () => { mode = x.dataset.m; draw(el); });
-      $$("[data-cq]", el).forEach((x) => x.onclick = () => { sc.add(s.id, x.dataset.cq, +x.dataset.n); paintSiteCart(s); draw(el); });
+      $$("[data-p]", el).forEach((x) => x.onclick = () => { pay = x.dataset.p; payChosen = true; draw(el); });
+      $$("[data-cq]", el).forEach((x) => x.onclick = () => { const l = lines[+x.dataset.cq]; sc.add(s.id, l.itemId, +x.dataset.n, l); paintSiteCart(s); draw(el); });
+      $$("[data-ls]", el).forEach((x) => x.onchange = () => { const l = lines[+x.dataset.ls]; sc.setOpt(s.id, l, { size: x.value, color: l.color }); draw(el); });
+      $$("[data-lc]", el).forEach((x) => x.onchange = () => { const l = lines[+x.dataset.lc]; sc.setOpt(s.id, l, { size: l.size, color: x.value }); draw(el); });
       const err = (m) => { const e = $("#co-err", el); e.textContent = m; e.classList.remove("shake"); void e.offsetWidth; e.classList.add("shake"); };
       $("#co-go", el).onclick = async () => {
         if (busy) return;
-        const name = f.name.trim(), ph = A.normPhone(f.phone);
+        const name = f.name.trim(), ph = A.normPhone(f.phone), pin = String(f.pincode || "").replace(/\D/g, "");
+        const noSize = lines.find((l) => (opt(l).sizes.length && !l.size) || (opt(l).colors.length && !l.color));
+        if (noSize) return err(`Choose the ${opt(noSize).sizes.length && !noSize.size ? "size" : "colour"} for ${noSize.it.name}`);
         if (!name) return err("Enter your name");
         if (!/^[6-9]\d{9}$/.test(ph)) return err("Enter your 10-digit mobile number");
         if (mode === "delivery" && f.address.trim().length < 6) return err("Enter the delivery address");
-        A.store.set("me", { name, phone: ph, address: f.address.trim() });
+        if (mode === "delivery" && canOrder(s) && !/^[1-9]\d{5}$/.test(pin)) return err("Enter the 6-digit PIN code");
+        A.store.set("me", { name, phone: ph, address: f.address.trim(), pincode: pin });
         if (!canOrder(s)) { // shop not online yet: the order goes as a WhatsApp message
           waShop(s, orderText(s, kind, mode, lines, { ...f, name }, null)); sc.set(s.id, []); paintSiteCart(s); closeSheet(); return;
         }
         busy = true; const btn = $("#co-go", el); btn.classList.add("busy"); btn.querySelector("span").textContent = "Sending your order…";
         try {
-          const r = await window.MM_CLOUD.placeOrder({ shopId: s.id, kind, mode, name, phone: ph, address: f.address.trim(), note: f.note.trim(), lines });
+          const r = await CL.placeOrder({ shopId: s.id, kind, mode, pay, name, phone: ph, address: f.address.trim(), pincode: pin, note: f.note.trim(),
+            lines: lines.map((l) => ({ itemId: l.itemId, qty: l.qty, size: l.size, color: l.color })) });
           A.store.set("myOrders", [{ token: r.token, shopId: s.id, code: r.code, at: Date.now() }, ...myOrders()].slice(0, 30));
           sc.set(s.id, []); paintSiteCart(s);
-          try { window.MM_CLOUD.logVisit(s.id, "whatsapp", src); } catch {}
+          try { CL.logVisit(s.id, "whatsapp", src); } catch {}
           const sent = lines.slice();
+          busy = false;
           el.innerHTML = `<div class="co done" style="${catVars(s.cat)}">
             <div class="co-tick">${ic("check")}</div>
             <h3>${kind === "hold" ? "Your items are on hold" : "Order placed"}</h3>
-            <p class="co-code">Order <b>${esc(r.code)}</b> · ${rupee(r.total)}</p>
-            <p class="co-why">${kind === "hold" ? `Show code <b>${esc(r.code)}</b> at ${esc(s.name)} within 4 hours.` : mode === "delivery" ? `${esc(s.name)} will confirm and deliver to you.` : `Pick it up at ${esc(s.name)} — show code <b>${esc(r.code)}</b>.`} You'll see when the shop confirms it on this page.</p>
+            <p class="co-code">Order <b>${esc(r.code)}</b> · ${rupee(r.total)}${r.fee ? ` <em>(incl. ${rupee(r.fee)} delivery)</em>` : ""}</p>
+            ${r.pay === "upi" && r.upi ? payBox({ token: r.token, code: r.code, total: r.total, upi: r.upi, shop_name: s.name })
+              : `<p class="co-why">${kind === "hold" ? `Show code <b>${esc(r.code)}</b> at ${esc(s.name)} within 4 hours.` : mode === "delivery" ? `${esc(s.name)} will confirm and deliver to you. Pay on delivery.` : `Pick it up at ${esc(s.name)} — show code <b>${esc(r.code)}</b>.`} You'll see when the shop confirms it on this page.</p>`}
             <button class="co-go" id="co-track"><span>${ic("receipt")}Track it in My orders</span></button>
             <button class="co-go wa" id="co-wa"><span>${ic("chat")}Tell the shop on WhatsApp</span></button>
             <button class="co-done" id="co-ok">Keep shopping</button></div>`;
+          bindPayBox(el);
           $("#co-wa", el).onclick = () => waShop(s, orderText(s, kind, mode, sent, { ...f, name }, r.code));
           $("#co-ok", el).onclick = () => { closeSheet(); route(); };
           $("#co-track", el).onclick = () => { closeSheet(); go(`#/orders?new=${encodeURIComponent(r.code)}`); };
@@ -407,12 +463,37 @@
     openSheet("", (el) => { el.classList.add("co-sheet"); draw(el); });
     cleanups.push(() => $("#sheet")?.classList.remove("co-sheet"));
   }
+  // Pay by UPI straight to the shop: the UPI app opens with the shop's ID, the amount and the order number filled in.
+  // "I've paid" tells the shop to check its UPI app; the shop marks the order paid.
+  const upiLink = (o) => `upi://pay?pa=${encodeURIComponent(o.upi)}&pn=${encodeURIComponent(o.shop_name || "Shop")}&am=${encodeURIComponent(o.total)}&cu=INR&tn=${encodeURIComponent("My Market order " + o.code)}`;
+  function payBox(o) {
+    return `<div class="paybox" data-pay-token="${esc(o.token)}">
+      <p class="co-why">Pay <b>${rupee(o.total)}</b> to <b>${esc(o.shop_name || "the shop")}</b> by UPI. The order number is filled in for the shop.</p>
+      <a class="co-go" href="${esc(upiLink(o))}"><span>${ic("wallet")}Pay ${rupee(o.total)} by UPI</span></a>
+      <p class="co-fine">UPI ID: <b>${esc(o.upi)}</b> <button class="link" data-copyupi="${esc(o.upi)}">Copy</button></p>
+      <label class="payref">Paid? UPI reference <span>(optional — 12 digits in your UPI app)</span><input inputmode="numeric" maxlength="30" placeholder="e.g. 412345678901"></label>
+      <button class="co-done" data-paid>I've paid</button></div>`;
+  }
+  function bindPayBox(root) {
+    $$("[data-copyupi]", root).forEach((b) => b.onclick = () => { try { navigator.clipboard.writeText(b.dataset.copyupi); toast("UPI ID copied"); } catch { toast(b.dataset.copyupi); } });
+    $$(".paybox", root).forEach((box) => {
+      const btn = $("[data-paid]", box); if (!btn) return;
+      btn.onclick = async () => {
+        btn.disabled = true; btn.textContent = "Telling the shop…";
+        try {
+          await window.MM_CLOUD.claimOrderPayment(box.dataset.payToken, $("input", box).value.trim());
+          box.innerHTML = `<p class="co-why">${ic("check")} Thanks — the shop will check its UPI app and mark your order paid.</p>`;
+          refreshOrders().catch(() => {});
+        } catch (x) { btn.disabled = false; btn.textContent = "I've paid"; toast(x.message || "Couldn't send — check your internet"); }
+      };
+    });
+  }
   // ---------- My orders: every order at every shop, tracked live ----------
   // The order list lives on this phone (myOrders: token, shop, code, time); each order's
   // status comes from the server by its private token. Carts not yet ordered are listed too,
   // so a customer can shop at several shops at once and check out each one from here.
   const ordCache = () => A.store.get("myOrdersCache", {});
-  const isActive = (st, o) => st && (st.status === "new" || st.status === "ready") && Date.now() - o.at < 3 * 86400000;
+  const isActive = (st, o) => st && ["new", "ready", "packed", "shipped"].includes(st.status) && Date.now() - o.at < 7 * 86400000;
   const activeOrders = () => { const c = ordCache(); return myOrders().filter((o) => isActive(c[o.token], o)).length; };
   async function refreshOrders() {
     const CL = window.MM_CLOUD; if (!CL || !CL.orderStatus || !navigator.onLine) return false;
@@ -436,8 +517,10 @@
     } } catch {}
     return out;
   }
-  const STEPS = (st) => st.kind === "hold" ? ["Sent", "Kept aside", "Collected"] : st.mode === "delivery" ? ["Sent", "Accepted", "Delivered"] : ["Sent", "Ready", "Collected"];
-  const stepAt = (st) => ({ new: 0, ready: 1, done: 2 })[st.status] ?? 0;
+  const STEPS = (st) => st.kind === "hold" ? ["Sent", "Kept aside", "Collected"] : st.mode === "delivery" ? ["Placed", "Accepted", "Packed", "Out for delivery", "Delivered"] : ["Placed", "Ready", "Collected"];
+  const stepAt = (st) => st.mode === "delivery" && st.kind !== "hold" ? ({ new: 0, ready: 1, packed: 2, shipped: 3, done: 4 })[st.status] ?? 0 : ({ new: 0, ready: 1, packed: 1, shipped: 1, done: 2 })[st.status] ?? 0;
+  const PAYWORD = (st) => st.pay_method === "upi" ? ({ paid: "Paid by UPI ✓", claimed: "You said you've paid — the shop is checking", refunded: "Refunded" })[st.pay_status] || "Not paid yet"
+    : st.pay_status === "paid" ? "Paid ✓" : st.pay_status === "refunded" ? "Refunded" : st.mode === "delivery" ? "Cash on delivery" : "Pay at the shop";
   const left = (t) => { const m = Math.round((Date.parse(t) - Date.now()) / 60000); return m <= 0 ? "time is up" : m < 60 ? `${m} min left` : `${Math.floor(m / 60)} h ${m % 60} min left`; };
   function orderCard(o, st, hl) {
     const s = A.getShop(o.shopId), ph = s ? String(s.phone || "").replace(/\D/g, "").slice(-10) : "";
@@ -449,18 +532,32 @@
       <div class="mo-sub">${st.kind === "hold" ? "Hold for pickup" : st.mode === "delivery" ? "Home delivery" : "Pickup"} · ${new Date(st.created_at || o.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</div>
       ${cancelled ? '<div class="mo-state x">Cancelled</div>' : `<div class="mo-steps">${steps.map((t, i) => `<span class="${i <= at ? "on" : ""} ${i === at ? "now" : ""}"><i></i>${t}</span>`).join("")}</div>
         <div class="mo-state">${esc(orderWord(st))}${st.kind === "hold" && st.status !== "done" && st.hold_until ? ` · ${left(st.hold_until)}` : ""}</div>`}
-      <div class="mo-lines">${lines.slice(0, 6).map((l) => `<div><span>${l.qty} × ${esc(l.name)}</span><b>${l.price ? rupee(l.price * l.qty) : "—"}</b></div>`).join("")}
+      <div class="mo-lines">${lines.slice(0, 6).map((l) => `<div><span>${l.qty} × ${esc(l.name)}${l.size ? ` · Size ${esc(l.size)}` : ""}${l.color ? ` · ${esc(l.color)}` : ""}</span><b>${l.price ? rupee(l.price * l.qty) : "—"}</b></div>`).join("")}
         ${lines.length > 6 ? `<div class="faint">…and ${lines.length - 6} more</div>` : ""}
+        ${st.delivery_fee ? `<div><span>Delivery</span><b>${rupee(st.delivery_fee)}</b></div>` : ""}
         <div class="mo-tot"><span>Total</span><b>${rupee(st.total || 0)}</b></div></div>
+      ${st.kind === "buy" && st.pay_method ? `<div class="mo-pay ${st.pay_status}">${esc(PAYWORD(st))}${st.upi_ref ? ` · ref ${esc(st.upi_ref)}` : ""}</div>` : ""}
+      ${st.pay_method === "upi" && st.pay_status === "unpaid" && !cancelled && st.upi ? payBox({ token: o.token, code: st.code, total: st.total, upi: st.upi, shop_name: st.shop_name || (s && s.name) }) : ""}
+      ${Array.isArray(st.history) && st.history.length > 1 ? `<details class="mo-hist"><summary>Timeline</summary>${st.history.map((h) => `<div><span>${esc({ new: "Placed", ready: st.kind === "hold" ? "Kept aside" : st.mode === "delivery" ? "Accepted" : "Ready", packed: "Packed", shipped: "Out for delivery", done: st.mode === "delivery" ? "Delivered" : "Collected", cancelled: "Cancelled" }[h.s] || h.s)}${h.p === "paid" ? " · paid" : h.p === "claimed" ? " · you said paid" : h.p === "refunded" ? " · refunded" : ""}</span><em>${new Date(h.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</em></div>`).join("")}</details>` : ""}
       <div class="mo-act">
         ${ph ? `<button data-wa="${o.token}">${ic("chat")}WhatsApp</button><a href="tel:+91${ph}">${ic("phone")}Call</a>` : ""}
         ${s && s.lat != null ? `<a href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}" target="_blank" rel="noopener">${ic("pin")}Directions</a>` : ""}
         ${st.status === "new" ? `<button class="x" data-cx="${o.token}">Cancel</button>` : ""}
         ${(st.status === "done" || cancelled) && s ? `<button data-again="${o.token}">${ic("bag")}Order again</button>` : ""}
+        <button data-share="${o.token}">${ic("arrow")}Share tracking link</button>
       </div></div>`;
   }
   function myOrdersView(params) {
-    const hl = params.get("new") || "";
+    let hl = params.get("new") || "";
+    // a tracking link opened on any phone: add that order to this phone's list
+    const t = params.get("t") || "";
+    if (/^[0-9a-f]{64}$/.test(t) && !myOrders().some((o) => o.token === t) && window.MM_CLOUD && window.MM_CLOUD.orderStatus) {
+      window.MM_CLOUD.orderStatus(t).then((st) => {
+        if (!st) return toast("This order link isn't valid any more");
+        A.store.set("myOrders", [{ token: t, shopId: st.shop_id, code: st.code, at: Date.parse(st.created_at) || Date.now() }, ...myOrders()].slice(0, 30));
+        go(`#/orders?new=${encodeURIComponent(st.code)}`);
+      }).catch(() => toast("Couldn't open this order — check your internet"));
+    }
     const draw = () => {
       const c = ordCache(), all = myOrders().filter((o) => Date.now() - o.at < 30 * 86400000);
       const act = all.filter((o) => isActive(c[o.token], o) || (c[o.token] === undefined && Date.now() - o.at < 86400000));
@@ -487,9 +584,16 @@
         try { await window.MM_CLOUD.cancelMyOrder(b.dataset.cx); toast("Order cancelled"); await refreshOrders(); draw(); }
         catch { toast("Couldn't cancel — check your internet"); }
       });
+      bindPayBox(app);
+      $$("[data-share]").forEach((b) => b.onclick = async () => {
+        const o = find(b.dataset.share), st = c[o.token] || {};
+        const url = new URL("index.html", location.href).href.split("#")[0] + "#/orders?t=" + o.token;
+        const text = `Track my order ${st.code || ""}${st.shop_name ? " from " + st.shop_name : ""}: ${url}`;
+        try { if (navigator.share) await navigator.share({ title: "My Market order", text, url }); else { await navigator.clipboard.writeText(url); toast("Tracking link copied"); } } catch {}
+      });
       $$("[data-again]").forEach((b) => b.onclick = () => {
         const o = find(b.dataset.again), st = c[o.token], s = A.getShop(o.shopId); if (!s) return;
-        let n = 0; for (const l of st.lines || []) if (s.items.find((i) => i.id === l.item_id)) { sc.add(s.id, l.item_id, l.qty); n++; }
+        let n = 0; for (const l of st.lines || []) if (s.items.find((i) => i.id === l.item_id)) { sc.add(s.id, l.item_id, l.qty, { size: l.size, color: l.color }); n++; }
         if (!n) return toast("These items aren't listed at the shop any more");
         go(`#/shop/${s.id}?cart=buy`);
       });
@@ -1121,7 +1225,7 @@
   window.MM_UI = {
     BIZ, A, C, $, $$, app, esc, ic, toast, badField, fmtHour, openWhatsApp, openSheet, closeSheet, go, rupee, dist, away, openWord, statusWord, stWord, catVars, mono, reverseName, stars, amt,
     sc, siteCheckout, paintSiteCart, newMap, meIcon, dotIcon, shopPopup, reachSteps, shopEntry, productCard, priceLine, pimg, art, off, bindAdd, bagBtn, refreshBag, orderEntry,
-    loc: () => loc, addCleanup: (f) => cleanups.push(f), ROUTES, route,
+    loc: () => loc, addCleanup: (f) => cleanups.push(f), ROUTES, route, optsOf,
   };
   window.addEventListener("hashchange", route);
 

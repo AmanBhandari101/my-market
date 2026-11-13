@@ -40,6 +40,8 @@
       </div>
 
       ${st.key !== "out" ? `<div class="pad pbuy" style="${U.catVars(s.cat)}">
+        ${(() => { const o = U.optsOf(it); return (o.sizes.length ? `<div class="popt"><b>Size</b><div>${o.sizes.map((z) => `<button type="button" data-psz="${esc(z)}">${esc(z)}</button>`).join("")}</div></div>` : "")
+          + (o.colors.length ? `<div class="popt"><b>Colour</b><div>${o.colors.map((z) => `<button type="button" data-pcl="${esc(z)}">${esc(z)}</button>`).join("")}</div></div>` : ""); })()}
         <div class="pbuy-q"><button id="pqm" aria-label="One less">−</button><b id="pqn">1</b><button id="pqp" aria-label="One more">+</button></div>
         <button class="pbuy-add" id="padd">${ic("bag")}Add to cart</button>
         <div class="pbuy-two"><button class="pbuy-hold" id="phold">${ic("clock")}Hold it for me</button><button class="pbuy-buy" id="pbuy">Buy now</button></div>
@@ -79,9 +81,21 @@
     if ($("#padd")) {
       let pq = 1; const setQ = (n) => { pq = Math.max(1, Math.min(99, n)); $("#pqn").textContent = pq; };
       $("#pqm").onclick = () => setQ(pq - 1); $("#pqp").onclick = () => setQ(pq + 1);
-      $("#padd").onclick = () => { U.sc.add(s.id, it.id, pq); U.toast(`Added to your cart at ${s.name}`); U.go(`#/shop/${s.id}?item=${it.id}`); };
-      $("#phold").onclick = () => { U.sc.add(s.id, it.id, pq); U.go(`#/shop/${s.id}?cart=hold`); };
-      $("#pbuy").onclick = () => { U.sc.add(s.id, it.id, pq); U.go(`#/shop/${s.id}?cart=buy`); };
+      // size / colour: must be chosen when the product comes in several
+      const opts = U.optsOf(it), pick = { size: opts.sizes.length === 1 ? opts.sizes[0] : "", color: opts.colors.length === 1 ? opts.colors[0] : "" };
+      const mark = () => { $$("[data-psz]").forEach((b) => b.classList.toggle("on", b.dataset.psz === pick.size)); $$("[data-pcl]").forEach((b) => b.classList.toggle("on", b.dataset.pcl === pick.color)); };
+      $$("[data-psz]").forEach((b) => b.onclick = () => { pick.size = b.dataset.psz; mark(); });
+      $$("[data-pcl]").forEach((b) => b.onclick = () => { pick.color = b.dataset.pcl; mark(); });
+      mark();
+      const ready = () => {
+        if (opts.sizes.length && !pick.size) { U.toast("Choose a size first"); $(".popt")?.scrollIntoView({ block: "center", behavior: "smooth" }); return false; }
+        if (opts.colors.length && !pick.color) { U.toast("Choose a colour first"); return false; }
+        return true;
+      };
+      const put = () => U.sc.add(s.id, it.id, pq, pick);
+      $("#padd").onclick = () => { if (!ready()) return; put(); U.toast(`Added to your cart at ${s.name}`); U.go(`#/shop/${s.id}?item=${it.id}`); };
+      $("#phold").onclick = () => { if (!ready()) return; put(); U.go(`#/shop/${s.id}?cart=hold`); };
+      $("#pbuy").onclick = () => { if (!ready()) return; put(); U.go(`#/shop/${s.id}?cart=buy`); };
     }
     $("#fb-yes").onclick = () => { A.feedback(s.id, it.id, true); U.toast("Thank you — marked in stock."); U.route(); };
     $("#fb-no").onclick = () => { A.feedback(s.id, it.id, false); U.toast("Thank you — we'll let others know."); U.route(); };

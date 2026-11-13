@@ -661,6 +661,12 @@ window.MM_API = (function () {
     if ("about" in patch) row.about = (patch.about || "").slice(0, 600) || null;
     if ("payMethods" in patch) row.pay_methods = patch.payMethods || [];
     if ("delivery" in patch) row.delivery = !!patch.delivery;
+    // online orders: the shop's own UPI ID, cash on delivery, delivery fee, free-delivery threshold, return policy
+    if ("upiId" in patch) row.upi_id = String(patch.upiId || "").trim() || null;
+    if ("cod" in patch) row.cod = !!patch.cod;
+    if ("deliveryFee" in patch) row.delivery_fee = Math.max(0, Math.min(5000, Math.round(+patch.deliveryFee || 0)));
+    if ("freeAbove" in patch) row.free_above = patch.freeAbove ? Math.max(0, Math.round(+patch.freeAbove)) : null;
+    if ("returnPolicy" in patch) row.return_policy = String(patch.returnPolicy || "").trim().slice(0, 500) || null;
     // shop details (menu → Shop details)
     if ("name" in patch) row.name = String(patch.name || "").trim().slice(0, 80) || sh.name;
     if ("owner" in patch) row.owner_name = String(patch.owner || "").trim().slice(0, 60) || null;
@@ -1051,6 +1057,7 @@ window.MM_API = (function () {
   const siteDetails = (r, photoUrl) => ({
     logo: r.logo_path ? photoUrl(r.logo_path) : null, cover: r.cover_path ? photoUrl(r.cover_path) : null,
     gallery: (r.gallery || []).map(photoUrl), galleryPaths: r.gallery || [], about: r.about || "", payMethods: r.pay_methods || [], delivery: !!r.delivery,
+    ...("upi_id" in r ? { upiId: r.upi_id || "", cod: r.cod !== false, deliveryFee: r.delivery_fee || 0, freeAbove: r.free_above ?? null, returnPolicy: r.return_policy || "" } : {}),
   });
   function productDetails(p, photoUrl, shopId) {
     return { productId: p.id, productMine: p.created_by === shopId && !p.verified, barcode: p.barcode || "", model: p.model || "", size: p.size || "",

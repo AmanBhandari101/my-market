@@ -429,20 +429,36 @@
 
   // ---------- orders from a shop's website (Hold it for me / Buy) ----------
   async function placeOrder(o) {
-    const { data, error } = await sb.rpc("place_order", { p_shop: o.shopId, p_kind: o.kind, p_mode: o.mode, p_name: o.name, p_phone: o.phone,
-      p_address: o.address || null, p_note: o.note || null, p_lines: o.lines.map((l) => ({ item_id: l.itemId, qty: l.qty })) });
+    const { data, error } = await sb.rpc("place_order_v2", { p: { shop: o.shopId, kind: o.kind, mode: o.mode, pay: o.pay || "cod", name: o.name, phone: o.phone,
+      address: o.address || null, pincode: o.pincode || null, note: o.note || null,
+      lines: o.lines.map((l) => ({ item_id: l.itemId, qty: l.qty, size: l.size || undefined, color: l.color || undefined })) } });
     if (error) throw new Error(/fetch|network/i.test(error.message) ? "No internet — check your connection and try again" : error.message);
     return data;
   }
   async function orderStatus(token) { const { data, error } = await sb.rpc("order_status", { p_token: token }); if (error) throw error; return data; }
+  // what the shop accepts at checkout (UPI ID, cash on delivery, delivery fee…); kept for 10 minutes
+  const setCache = {};
+  async function orderSettings(shopId) {
+    const h = setCache[shopId]; if (h && Date.now() - h.at < 600000) return h.v;
+    const { data, error } = await sb.rpc("shop_order_settings", { p_shop: shopId }); if (error) throw error;
+    setCache[shopId] = { at: Date.now(), v: data || {} }; return data || {};
+  }
+  async function claimOrderPayment(token, ref) {
+    const { data, error } = await sb.rpc("claim_order_payment", { p_token: token, p_ref: ref || null });
+    if (error) throw new Error(error.message); return data;
+  }
   async function cancelMyOrder(token) { const { data, error } = await sb.rpc("cancel_my_order", { p_token: token }); if (error) throw error; return data; }
   // the shop's side
   async function shopOrders(shopId) {
     const since = new Date(Date.now() - 4 * 86400000).toISOString();
-    const { data, error } = await sb.from("orders").select("id,code,kind,mode,name,phone,address,note,lines,total,status,hold_until,created_at")
+    const { data, error } = await sb.from("orders").select("id,code,kind,mode,name,phone,address,note,lines,total,status,hold_until,created_at,pay_method,pay_status,upi_ref,delivery_fee,pincode,history")
       .eq("shop_id", shopId).gte("created_at", since).order("created_at", { ascending: false }).limit(100);
     if (error) throw new Error(friendly(error));
     return data || [];
+  }
+  async function setOrderPay(id, pay_status) {
+    const { error } = await sb.from("orders").update({ pay_status, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) throw new Error(friendly(error));
   }
   async function setOrderStatus(id, status) {
     const { error } = await sb.from("orders").update({ status, updated_at: new Date().toISOString() }).eq("id", id);
@@ -562,7 +578,7 @@
   async function myNumber() { const { data } = await sb.auth.getSession(); const m = (data.session?.user?.email || "").match(/^91(\d{10})@/); return m ? m[1] : ""; }
   async function deleteShop(shopId) { const { error } = await sb.rpc("delete_my_shop", { p_shop: shopId }); if (error) throw new Error(friendly(error)); }
 
-  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, areaProduct, googleLink, saveGoogle, savePush, removePush, testPush, pushTestDirect, pushSaved, logProblem, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, isAdmin, importStatement, searchCatalog, searchOnline, myPlan, claimPayment, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl, newPhotoPath,
+  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, areaProduct, googleLink, saveGoogle, savePush, removePush, testPush, pushTestDirect, pushSaved, logProblem, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, isAdmin, importStatement, searchCatalog, searchOnline, myPlan, claimPayment, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, orderSettings, claimOrderPayment, setOrderPay, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl, newPhotoPath,
     pending: () => Q.get().length, failedOps: () => Q.failed(), relogin, needsLogin: () => needsLogin };
 
   // start-up

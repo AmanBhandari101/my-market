@@ -545,6 +545,7 @@
       <h3 class="mgh">Bills and account</h3>
       <div class="mlist">
         ${row("button", 'id="m-bs"', "receipt", "Bill settings", "Advert, phone and GSTIN on your bills")}
+        ${s.cloud ? row("button", 'id="m-oo"', "wallet", "Online orders & payment", s.upiId ? `UPI ${esc(s.upiId)}${s.delivery ? " · delivery on" : ""}` : "Add your UPI ID so customers can pay online", s.upiId ? "" : "warn") : ""}
         ${row("a", 'href="#/biz/plan"', "wallet", "My plan", esc(planNote), ["due", "orders_off", "read_only"].includes(st.state) ? "warn" : "")}
         ${row("a", 'href="#/biz/backup"', "cloud", "Back up bills", "Save a copy to Google Drive")}
         ${s.cloud ? row("a", 'href="#/biz/security"', "shield", "Login & security", "Backup number, change PIN, log out other phones") : ""}
@@ -552,6 +553,7 @@
       <button class="mout" id="m-out">${ic("out")} Log out</button>
       <p class="mver">My Market for Business${ver ? " · v" + esc(ver) : ""}</p>`;
     $("#m-bs").onclick = () => billSettings(s);
+    $("#m-oo") && ($("#m-oo").onclick = () => onlineOrdersSheet(s, () => moreView()));
     $("#m-al").onclick = () => alertsSheet(s);
     $("#m-sync") && ($("#m-sync").onclick = async () => {
       U.toast("Syncing…");
@@ -611,23 +613,37 @@
     let orders = null, showOld = false;
     const ago = (t) => { const m = Math.round((Date.now() - Date.parse(t)) / 60000); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
     const KIND = (o) => o.kind === "hold" ? "HOLD" : o.mode === "delivery" ? "DELIVERY" : "PICKUP";
+    const OPEN = ["new", "ready", "packed", "shipped"];
+    const PAYW = (o) => o.pay_method === "upi"
+      ? { paid: ["ok", "Paid by UPI"], claimed: ["warn", "Customer says paid — check your UPI app"], refunded: ["", "Refunded"] }[o.pay_status] || ["bad", "UPI · not paid yet"]
+      : o.pay_status === "paid" ? ["ok", "Paid"] : o.pay_status === "refunded" ? ["", "Refunded"] : ["", o.mode === "delivery" ? "Cash on delivery" : "Pay at the shop"];
+    // what the next button does, step by step
+    const NEXT = (o) => o.kind === "hold" ? { new: ["ready", "Keep aside"] }[o.status]
+      : o.mode === "delivery" ? { new: ["ready", "Accept"], ready: ["packed", "Packed"], packed: ["shipped", "Out for delivery"], shipped: ["done", "Delivered"] }[o.status]
+      : { new: ["ready", "Accept · ready for pickup"] }[o.status];
+    const STEPWORD = { new: "New", ready: "Accepted", packed: "Packed", shipped: "Out for delivery", done: "Done", cancelled: "Cancelled" };
     function drawOrders() {
       const box = $("#olist"); if (!box) return;
       const s = A.ownerShop();
       if (!s.cloud) { box.innerHTML = '<p class="quiet small">Log in with your number so customers can order from your website.</p>'; return; }
       if (!orders) return;
-      const open = orders.filter((o) => o.status === "new" || o.status === "ready"), old = orders.filter((o) => !(o.status === "new" || o.status === "ready"));
+      const open = orders.filter((o) => OPEN.includes(o.status)), old = orders.filter((o) => !OPEN.includes(o.status));
       const card = (o) => {
         const ph = String(o.phone || "");
         return `<div class="ocard ${o.status}">
           <div class="ohd"><span class="okind ${o.kind}">${KIND(o)}</span><b>${esc(o.code)}</b><span class="faint tiny">${ago(o.created_at)}</span>
-            <span class="ost ${o.status}">${{ new: "New", ready: o.kind === "hold" ? "Kept aside" : "Ready", done: "Done", cancelled: "Cancelled" }[o.status]}</span></div>
+            <span class="ost ${o.status}">${o.status === "ready" ? (o.kind === "hold" ? "Kept aside" : o.mode === "delivery" ? "Accepted" : "Ready") : STEPWORD[o.status] || o.status}</span></div>
           <div class="owho"><b>${esc(o.name)}</b> · <a href="tel:+91${esc(ph)}">${esc(ph.slice(0, 5) + " " + ph.slice(5))}</a>
             <button class="link" data-owa="${o.id}">WhatsApp</button></div>
-          ${(o.lines || []).map((l) => `<div class="oline"><span>${l.qty} × ${esc(l.name)}</span><span>${l.price ? rupee(l.price * l.qty) : "price?"}</span></div>`).join("")}
-          <div class="otot"><span>${o.mode === "delivery" ? "Deliver to: " + esc(o.address || "") : o.kind === "hold" && o.hold_until ? "Hold until " + new Date(o.hold_until).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : "Pickup at the shop"}</span><b>${rupee(o.total)}</b></div>
+          ${(o.lines || []).map((l) => `<div class="oline"><span>${l.qty} × ${esc(l.name)}${l.size || l.color ? ` <b>(${esc([l.size && "Size " + l.size, l.color].filter(Boolean).join(", "))})</b>` : ""}</span><span>${l.price ? rupee(l.price * l.qty) : "price?"}</span></div>`).join("")}
+          ${o.delivery_fee ? `<div class="oline"><span>Delivery</span><span>${rupee(o.delivery_fee)}</span></div>` : ""}
+          <div class="otot"><span>${o.mode === "delivery" ? "Deliver to: " + esc(o.address || "") + (o.pincode ? " – " + esc(o.pincode) : "") : o.kind === "hold" && o.hold_until ? "Hold until " + new Date(o.hold_until).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : "Pickup at the shop"}</span><b>${rupee(o.total)}</b></div>
+          ${o.kind === "buy" ? `<div class="opay ${PAYW(o)[0]}">${PAYW(o)[1]}${o.upi_ref ? ` · ref ${esc(o.upi_ref)}` : ""}
+            ${o.pay_status !== "paid" && o.pay_status !== "refunded" && o.status !== "cancelled" ? `<button class="link" data-opaid="${o.id}">Mark paid</button>` : ""}
+            ${o.pay_status === "paid" && o.status === "cancelled" ? `<button class="link" data-orefund="${o.id}">Mark refunded</button>` : ""}</div>` : ""}
           ${o.note ? `<div class="onote">“${esc(o.note)}”</div>` : ""}
-          ${o.status === "new" ? `<div class="oacts"><button class="btn auto" data-ost="${o.id}" data-to="ready">${o.kind === "hold" ? "Keep aside" : "Accept"}</button><button class="btn auto line" data-ost="${o.id}" data-to="cancelled">Can't do</button></div>`
+          ${o.status === "new" ? `<div class="oacts"><button class="btn auto" data-ost="${o.id}" data-to="ready">${NEXT(o)[1]}</button><button class="btn auto line" data-ost="${o.id}" data-to="cancelled">Can't do</button></div>`
+            : o.mode === "delivery" && o.kind === "buy" && ["ready", "packed", "shipped"].includes(o.status) ? `<div class="oacts"><button class="btn auto" data-ost="${o.id}" data-to="${NEXT(o)[0]}">${NEXT(o)[1]}</button>${o.status === "shipped" ? `<button class="btn auto line" data-obill="${o.id}">Delivered · make bill</button>` : ""}<button class="link" data-ost="${o.id}" data-to="cancelled">Cancel</button></div>`
             : o.status === "ready" ? `<div class="oacts"><button class="btn auto" data-obill="${o.id}">Collected · make bill</button><button class="btn auto line" data-ost="${o.id}" data-to="done">Collected</button><button class="link" data-ost="${o.id}" data-to="cancelled">Cancel</button></div>` : ""}
         </div>`;
       };
@@ -647,11 +663,27 @@
         x.disabled = true;
         try {
           await window.MM_CLOUD.setOrderStatus(o.id, to); o.status = to;
-          U.toast(to === "ready" ? `Done — ${o.name} sees it's ${o.kind === "hold" ? "kept aside" : "accepted"}` : to === "cancelled" ? "Order cancelled" : "Marked collected");
-          if (to === "ready") { const msg = o.kind === "hold" ? `Hi ${o.name}, your items are kept aside at ${s.name} (order ${o.code}).` : o.mode === "delivery" ? `Hi ${o.name}, ${s.name} accepted your order ${o.code} — we'll deliver soon.` : `Hi ${o.name}, your order ${o.code} is ready for pickup at ${s.name}.`;
-            if (confirm(`Tell ${o.name} on WhatsApp?`)) U.openWhatsApp(o.phone, msg); }
+          U.toast(to === "cancelled" ? "Order cancelled" : `Done — ${o.name} sees “${to === "ready" ? (o.kind === "hold" ? "kept aside" : "accepted") : STEPWORD[to]}” on their order`);
+          const msg = { ready: o.kind === "hold" ? `Hi ${o.name}, your items are kept aside at ${s.name} (order ${o.code}).` : o.mode === "delivery" ? `Hi ${o.name}, ${s.name} accepted your order ${o.code} — we'll deliver soon.` : `Hi ${o.name}, your order ${o.code} is ready for pickup at ${s.name}.`,
+            packed: `Hi ${o.name}, your order ${o.code} from ${s.name} is packed and will leave soon.`,
+            shipped: `Hi ${o.name}, your order ${o.code} from ${s.name} is out for delivery today.${o.pay_method === "cod" && o.pay_status !== "paid" ? ` Please keep ₹${o.total} ready.` : ""}`,
+            done: o.mode === "delivery" ? `Hi ${o.name}, your order ${o.code} is delivered. Thank you for shopping at ${s.name}!` : "",
+            cancelled: `Hi ${o.name}, sorry — ${s.name} can't do your order ${o.code}.${o.pay_status === "paid" || o.pay_status === "claimed" ? " We'll return your payment." : ""}` }[to];
+          if (msg && confirm(`Tell ${o.name} on WhatsApp?`)) U.openWhatsApp(o.phone, msg);
           pollOrders(); drawOrders();
         } catch (e) { x.disabled = false; U.toast(e.message || "No internet — try again"); }
+      });
+      $$("[data-opaid]", box).forEach((x) => x.onclick = async () => {
+        const o = find(x.dataset.opaid);
+        if (!confirm(`Did ${rupee(o.total)} from ${o.name} reach your ${o.pay_method === "upi" ? "UPI app" : "hand"}?${o.upi_ref ? `\nTheir UPI reference: ${o.upi_ref}` : ""}`)) return;
+        try { await window.MM_CLOUD.setOrderPay(o.id, "paid"); o.pay_status = "paid"; U.toast("Marked paid — the customer sees it"); drawOrders(); }
+        catch (e) { U.toast(e.message || "No internet — try again"); }
+      });
+      $$("[data-orefund]", box).forEach((x) => x.onclick = async () => {
+        const o = find(x.dataset.orefund);
+        if (!confirm(`Did you send ${rupee(o.total)} back to ${o.name}?`)) return;
+        try { await window.MM_CLOUD.setOrderPay(o.id, "refunded"); o.pay_status = "refunded"; U.toast("Marked refunded"); drawOrders(); }
+        catch (e) { U.toast(e.message || "No internet — try again"); }
       });
       $$("[data-obill]", box).forEach((x) => x.onclick = async () => {
         const o = find(x.dataset.obill);
@@ -1381,6 +1413,28 @@
   }
 
   // Shop's bill details: the small advert and GSTIN printed on every bill.
+  // How customers pay for website orders: straight to the shop's own UPI ID, or cash.
+  function onlineOrdersSheet(s, after) {
+    U.openSheet(`<div class="eyebrow">Your website</div><div class="title">Online orders & payment</div>
+      <p class="small quiet" style="margin:4px 0 10px">Customers pay <b>straight to your UPI</b> — My Market never holds your money. You check your UPI app and tap <b>Mark paid</b> on the order.</p>
+      <div class="form" style="margin-top:0">
+        <label>Your UPI ID <span class="faint tiny">— e.g. 98765 43210@ybl, shopname@okaxis</span><input class="field" id="ou" autocomplete="off" value="${esc(s.upiId || "")}" placeholder="yourname@upi"></label>
+        <label style="display:flex;gap:10px;align-items:center;text-transform:none;letter-spacing:0;font-weight:400"><input type="checkbox" id="odl" ${s.delivery ? "checked" : ""}> I deliver to customers' homes</label>
+        <label style="display:flex;gap:10px;align-items:center;text-transform:none;letter-spacing:0;font-weight:400"><input type="checkbox" id="ocod" ${s.cod !== false ? "checked" : ""}> Customers can pay cash on delivery</label>
+        <div class="two"><label>Delivery charge ₹<input class="field" id="ofee" inputmode="numeric" value="${esc(s.deliveryFee || "")}" placeholder="0 = free"></label>
+          <label>Free delivery above ₹ <span class="faint tiny">(optional)</span><input class="field" id="ofree" inputmode="numeric" value="${esc(s.freeAbove ?? "")}" placeholder="e.g. 999"></label></div>
+        <label>Return / exchange policy <span class="faint tiny">— shown before customers order</span><textarea class="field" id="oret" rows="2" maxlength="500" placeholder="e.g. Exchange within 7 days with the tag on. No return on innerwear.">${esc(s.returnPolicy || "")}</textarea></label>
+        <p class="small" id="oerr" style="color:var(--out);margin:0;min-height:1em"></p>
+        <button class="btn" id="osave" type="button">Save</button></div>`, (el) => {
+      $("#osave", el).onclick = () => {
+        const upi = $("#ou", el).value.trim().replace(/\s+/g, "");
+        if (upi && !/^[A-Za-z0-9._-]{2,255}@[A-Za-z][A-Za-z0-9.-]{1,64}$/.test(upi)) return ($("#oerr", el).textContent = "That UPI ID doesn't look right — it looks like name@bank");
+        A.updateShop(s.id, { upiId: upi, delivery: $("#odl", el).checked, cod: $("#ocod", el).checked,
+          deliveryFee: +$("#ofee", el).value || 0, freeAbove: +$("#ofree", el).value || null, returnPolicy: $("#oret", el).value.trim() });
+        U.closeSheet(); U.toast(upi ? "Saved — customers can now pay you by UPI" : "Saved"); after && after();
+      };
+    });
+  }
   function billSettings(s) {
     U.openSheet(`<div class="eyebrow">On every bill</div><div class="title">Bill settings</div>
       <div class="form"><label>Advert / message <span class="faint tiny">(up to 90 letters)</span><input class="field" id="bp" maxlength="90" value="${esc(s.promo || "")}" placeholder="e.g. Free screen-guard fitting with every cover"></label>
@@ -2178,13 +2232,20 @@
         <label>Model <span class="faint tiny">(optional)</span><input class="field" id="dmd" value="${esc(d.model || "")}" ${dis}></label></div>
       <label>Key features <span class="faint tiny">— one per line</span><textarea class="field" id="dft" rows="3" placeholder="Brass body&#10;Full bore&#10;For hot and cold water" ${dis}>${esc((d.features || []).join("\n"))}</textarea></label>
       <label>Description<textarea class="field" id="dds" rows="2" ${dis}>${esc(d.description || "")}</textarea></label>
-      <label>Specifications <span class="faint tiny">— "Name: value", one per line</span><textarea class="field" id="dsp" rows="3" placeholder="Material: Brass&#10;Warranty: 1 year (printed on pack)" ${dis}>${esc(specText(d.specMap))}</textarea></label>
+      <div class="two"><label>Sizes available <span class="faint tiny">— customers choose one</span><input class="field" id="dsizes" value="${esc((d.specMap || {}).Sizes || "")}" placeholder="S, M, L, XL" ${dis}></label>
+        <label>Colours <span class="faint tiny">(optional)</span><input class="field" id="dcols" value="${esc((d.specMap || {}).Colours || "")}" placeholder="Red, Blue, Black" ${dis}></label></div>
+      <label>Specifications <span class="faint tiny">— "Name: value", one per line</span><textarea class="field" id="dsp" rows="3" placeholder="Material: Brass&#10;Warranty: 1 year (printed on pack)" ${dis}>${esc(specText(Object.fromEntries(Object.entries(d.specMap || {}).filter(([k]) => k !== "Sizes" && k !== "Colours"))))}</textarea></label>
       <label>Other words customers use <span class="faint tiny">— comma separated</span><input class="field" id="dkw" value="${esc((d.keywords || []).join(", "))}" placeholder="nal, tonti, tap" ${dis}></label>
     </details>`;
   }
   function readDetails(el, base) {
+    const specMap = parseSpecs($("#dsp", el).value);
+    // "s, m ,L" -> "S, M, L"
+    const list = (v) => v.split(",").map((x) => x.trim()).filter(Boolean).map((x) => (x.length <= 4 ? x.toUpperCase() : x)).slice(0, 15).join(", ");
+    const sizes = list($("#dsizes", el)?.value || ""), cols = list($("#dcols", el)?.value || "");
+    if (sizes) specMap.Sizes = sizes; if (cols) specMap.Colours = cols;
     return { ...base, size: $("#dsz", el).value.trim(), model: $("#dmd", el).value.trim(), features: lines($("#dft", el).value).slice(0, 8),
-      description: $("#dds", el).value.trim(), specMap: parseSpecs($("#dsp", el).value), keywords: $("#dkw", el).value.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean).slice(0, 15) };
+      description: $("#dds", el).value.trim(), specMap, keywords: $("#dkw", el).value.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean).slice(0, 15) };
   }
 
   function newItemSheet(s, after, presetName = "") {

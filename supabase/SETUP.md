@@ -38,6 +38,7 @@ Running it again later is safe.
 19. Then `supabase/lite.sql` (lite data model: one docs table for bills/stock in/counts, stock kept by the server from documents, documents older than 45 days folded nightly into one row per shop per day). Run it **before** publishing app v58+.
 20. Then `supabase/photos_cloudflare.sql` (photos live on Cloudflare: removes upload rights on the item-photos store; reading stays public). Run it **after** the app uses `photosUrl` (v70+).
 21. Then `supabase/catalog_private.sql` (each shop's own products are private unless shared; barcodes unique only among shared products). Run it **before** publishing app v88+.
+22. Then `supabase/orders_online.sql` (selling online: pay by UPI straight to the shop or cash on delivery, delivery fee and PIN code, size / colour on order lines, Packed and Out-for-delivery steps with a timeline, "I've paid", shop marks paid). Run it **before** publishing app v91+.
 
 ## 3. Login settings
 
