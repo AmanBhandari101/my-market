@@ -2,7 +2,7 @@
 --
 -- Customers have no account: they give a name and mobile number. Orders go in only
 -- through place_order(), which takes prices from the shop's own items (never from the
--- customer's phone) and limits how many open orders one number can have.
+-- customer's phone). There is no cap on open orders; only a flood guard (100 an hour per number).
 -- The customer follows the order with a long private token; the shop sees and updates
 -- its own orders in the shop app.
 
@@ -60,10 +60,10 @@ begin
   if p_mode = 'delivery' and length(trim(coalesce(p_address, ''))) < 6 then raise exception 'Enter the delivery address'; end if;
   if p_lines is null or jsonb_typeof(p_lines) <> 'array' or jsonb_array_length(p_lines) not between 1 and 50 then raise exception 'Your cart is empty'; end if;
 
-  select count(*) into n from orders where shop_id = p_shop and phone = v_phone and status in ('new', 'ready');
-  if n >= 5 then raise exception 'You already have 5 open orders at this shop'; end if;
+  -- No limit on how many orders a customer can have open. Only a flood guard: a script hammering
+  -- one number (no real customer places 100 orders in an hour).
   select count(*) into n from orders where phone = v_phone and created_at > now() - interval '1 hour';
-  if n >= 10 then raise exception 'Too many orders from this number — try again in an hour'; end if;
+  if n >= 100 then raise exception 'Too many orders from this number — try again in an hour'; end if;
 
   for l in select value from jsonb_array_elements(p_lines) loop
     if coalesce(l ->> 'item_id', '') !~ '^[0-9a-f-]{36}$' then continue; end if;
