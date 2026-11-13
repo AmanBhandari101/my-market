@@ -630,6 +630,8 @@ window.MM_API = (function () {
     if (cloudOn()) {
       try {
         await window.MM_CLOUD.signIn(normPhone(phone), String(pin));
+        // changes made on this phone while logged out go up first, so the download doesn't refuse
+        for (let i = 0; i < 20 && window.MM_CLOUD.pending() > 0 && navigator.onLine; i++) await window.MM_CLOUD.flush();
         const id = await window.MM_CLOUD.pullShop();
         claimShop(id);
         await window.MM_CLOUD.topUpBillNos(id);

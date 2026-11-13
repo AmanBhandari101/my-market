@@ -51,8 +51,16 @@
   };
   let busy = false, timer = null, online = navigator.onLine, lastError = "";
 
+  let needsLogin = false;
+  // log in again on this phone without touching its saved data, then send what's waiting
+  async function relogin(ph, pin) {
+    await signIn(ph, pin);
+    needsLogin = false; lastError = "";
+    await flush();
+    return Q.get().length;
+  }
   function status() {
-    const detail = { pending: Q.get().length, failed: Q.failed().length, online, busy, lastError };
+    const detail = { pending: Q.get().length, failed: Q.failed().length, online, busy, lastError, needsLogin };
     window.dispatchEvent(new CustomEvent("mm-sync", { detail }));
     return detail;
   }
@@ -103,7 +111,14 @@
     online = navigator.onLine;
     if (!online || !Q.get().length) return status();
     const { data } = await sb.auth.getSession();
-    if (!data.session) return status();
+    // changes are waiting but this phone's login is gone (expired, or logged out elsewhere):
+    // say so, so the app can ask for the PIN, instead of waiting quietly for ever
+    if (!data.session) {
+      if (!needsLogin) { needsLogin = true; window.dispatchEvent(new CustomEvent("mm-relogin", { detail: { pending: Q.get().length } })); }
+      lastError = "Log in again to send your changes";
+      return status();
+    }
+    needsLogin = false;
     busy = true; status();
     try {
       for (;;) {
@@ -548,7 +563,7 @@
   async function deleteShop(shopId) { const { error } = await sb.rpc("delete_my_shop", { p_shop: shopId }); if (error) throw new Error(friendly(error)); }
 
   window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, areaProduct, googleLink, saveGoogle, savePush, removePush, testPush, pushTestDirect, pushSaved, logProblem, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, isAdmin, importStatement, searchCatalog, searchOnline, myPlan, claimPayment, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl, newPhotoPath,
-    pending: () => Q.get().length, failedOps: () => Q.failed() };
+    pending: () => Q.get().length, failedOps: () => Q.failed(), relogin, needsLogin: () => needsLogin };
 
   // start-up
   if (window.MM_APP === "business") {

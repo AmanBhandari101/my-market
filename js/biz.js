@@ -473,6 +473,7 @@
   function syncWord(d) {
     const c = window.MM_CLOUD; if (!c) return "";
     d = d || { pending: c.pending(), failed: c.failedOps().length, online: navigator.onLine };
+    if (d.needsLogin && d.pending) return `<b class="warn">Log in again · ${d.pending} waiting</b>`;
     if (d.failed) return `<b class="bad">${d.failed} not saved</b>`;
     if (!d.online && d.pending) return `<b class="warn">Offline · ${d.pending} waiting</b>`;
     if (!d.online) return "Offline";
@@ -480,6 +481,42 @@
     return "✓ Saved";
   }
   window.addEventListener("mm-sync", (e) => $$("[data-sync]").forEach((el) => { el.innerHTML = syncWord(e.detail); }));
+
+  // The server login on this phone has gone (expired, or logged out from another phone) while
+  // changes are waiting: ask for the PIN here. Nothing on the phone is cleared.
+  let reloginOpen = false;
+  function reloginSheet(n) {
+    const s = A.ownerShop(); if (!s || !s.cloud || reloginOpen) return;
+    const ph = A.normPhone(s.phone || "");
+    reloginOpen = true;
+    U.openSheet(`<div class="eyebrow" style="color:var(--warn,#b87818)">Log in again</div><div class="title">Your login on this phone has ended</div>
+      <p class="small quiet" style="margin:4px 0 12px">${n ? `<b>${n} change${n > 1 ? "s" : ""}</b> made here ${n > 1 ? "are" : "is"} saved on this phone and will go to the server as soon as you log in.` : "Log in to keep this phone in step with your shop."} Nothing is lost.</p>
+      <div class="form" style="margin-top:0">
+        <label>Mobile number<input class="field" id="rph" inputmode="tel" value="${esc(ph)}"></label>
+        <label>6-digit PIN<input class="field" id="rpin" type="password" inputmode="numeric" maxlength="6" autocomplete="current-password"></label>
+        <p class="small" id="rerr" style="color:var(--out);margin:0;min-height:1em"></p>
+        <button class="btn" id="rgo" type="button">Log in and send</button>
+        <button class="link" id="rlater" type="button" style="justify-self:center">Later</button></div>`, (el) => {
+      setTimeout(() => $("#rpin", el)?.focus(), 200);
+      $("#rlater", el).onclick = () => { reloginOpen = false; U.closeSheet(); };
+      $("#rgo", el).onclick = async () => {
+        const p = A.normPhone($("#rph", el).value), pin = $("#rpin", el).value, err = (m) => ($("#rerr", el).textContent = m);
+        if (p.length !== 10) return err("Enter your 10-digit mobile number");
+        if (!/^\d{6}$/.test(pin)) return err("Enter your 6-digit PIN");
+        $("#rgo", el).disabled = true; $("#rgo", el).textContent = "Logging in…";
+        try {
+          const left = await window.MM_CLOUD.relogin(p, pin);
+          reloginOpen = false; U.closeSheet(); U.toast(left ? `Logged in · sending ${left} change${left > 1 ? "s" : ""}…` : "Logged in · everything is saved");
+        } catch (x) { err(x.message); $("#rgo", el).disabled = false; $("#rgo", el).textContent = "Log in and send"; }
+      };
+    });
+    U.addCleanup(() => { reloginOpen = false; });
+  }
+  window.addEventListener("mm-relogin", (e) => reloginSheet(e.detail?.pending || 0));
+  // tapping "Log in again · N waiting" opens it again
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("[data-sync]") && window.MM_CLOUD?.needsLogin?.()) { reloginOpen = false; reloginSheet(window.MM_CLOUD.pending()); }
+  });
 
   // ---------- More: everything that isn't done every day ----------
   function moreView() {
