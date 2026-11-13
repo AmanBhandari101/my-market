@@ -1034,12 +1034,20 @@
         <span class="pick-add">${have(name, code) ? ic("check") : ic("plus")}</span></button>`;
     const draw = (el) => {
       const isCode = /^\d{6,14}$/.test(q.replace(/\s/g, ""));
+      // My products: what this shop already has (its own catalogue), found by name, brand, barcode or own code
+      const qw = q.toLowerCase().split(/\s+/).filter(Boolean);
+      const mine = !q ? [] : s.items.filter((it) => isCode ? [it.barcode, it.code].some((c) => c && noZeros(c) === noZeros(q))
+        : qw.every((w) => `${it.name} ${it.brand || ""} ${it.barcode || ""} ${it.code || ""}`.toLowerCase().includes(w))).slice(0, 20);
       const local = !q ? A.catalogFor(s.cat).map((x) => ({ ...x, cat: s.cat })) : isCode ? [] : A.catalogSearch(q, s.cat);
       const cat = q ? catSearch(q).filter((r) => !local.some((l) => l.name.toLowerCase() === r[1].toLowerCase())) : local.length ? [] : catPopular(s.cat);
       const sharedNew = shared.filter((p) => !local.some((l) => l.name.toLowerCase() === p.name.toLowerCase()) && !cat.some((r) => r[1].toLowerCase() === p.name.toLowerCase()));
       const box = $("#pres", el);
       box.innerHTML = `
-        ${cat.length ? `<div class="eyebrow" style="margin-top:6px">${isCode ? "Barcode " + esc(q) : q ? "My Market catalogue" : "Popular for " + esc(C[s.cat]?.name || "your shop")}</div>${cat.map((r, i) => row("c" + i, catImg(r), r[1],
+        ${mine.length ? `<div class="eyebrow" style="margin-top:6px">My products</div>${mine.map((it, i) => `<button class="entry pick-row ${onAdd ? "" : "on"}" data-my="${i}" style="width:100%;text-align:left">
+          <span class="thumb" style="${U.catVars(it.cat)}">${U.pimg(it)}</span>
+          <div class="body"><div class="name">${esc(it.name)}</div><div class="note">${esc([it.brand !== "Generic" ? it.brand : "", it.size, it.price ? "₹" + it.price : "", it.qty != null ? it.qty + " in stock" : ""].filter(Boolean).join(" · "))}</div></div>
+          <span class="pick-add">${onAdd ? ic("plus") : ic("check")}</span></button>`).join("")}` : ""}
+        ${cat.length ? `<div class="eyebrow" style="margin-top:${mine.length ? 14 : 6}px">${isCode ? "Barcode " + esc(q) : q ? "My Market catalogue" : "Popular for " + esc(C[s.cat]?.name || "your shop")}</div>${cat.map((r, i) => row("c" + i, catImg(r), r[1],
           [r[8] === "veg" ? "🟢 Veg" : r[8] === "nonveg" ? "🔴 Non-veg" : "", r[2], r[3], CAT.aisles[r[4]][1]].filter(Boolean).join(" · ") + (r[0] && !isCode ? ` · ${r[0]}` : ""), CAT.aisles[r[4]][2], r[0])).join("")}` : ""}
         ${q && !CAT ? `<p class="quiet small" style="margin:8px 0">${catErr ? "Couldn't load the product catalogue — check the internet and type again." : "Loading the product catalogue…"}</p>` : ""}
         ${isCode && CAT && !cat.length ? `<p class="quiet small" style="margin:8px 0">Barcode ${esc(q)} isn't in the catalogue — search online below, or add it as a new item.</p>` : ""}
@@ -1048,9 +1056,14 @@
         ${online && online.length ? `<div class="eyebrow" style="margin-top:14px">Online product databases</div>${online.map((p, i) => row("o" + i, p.img, p.name, [p.brand, p.size, p.label].filter(Boolean).join(" · "), p.cat || s.cat)).join("")}` : ""}
         ${q ? `<div class="pick-more">
           ${online == null ? `<button class="btn line" id="ponl">${ic("search")} Search online for “${esc(q)}”</button>` : online.length ? "" : offBusy ? `<p class="quiet small" style="margin:0 0 8px">Online search is busy — try again in a minute.</p><button class="btn line" id="ponl">Try again</button>` : `<p class="quiet small" style="margin:0 0 8px">Nothing online for “${esc(q)}”.</p>`}
-          <button class="btn" id="pnew">+ Add “${esc(q)}” as my own item</button></div>` : `<p class="faint tiny" style="margin:12px 0 10px">Type a name or tap Scan to find the product. Not in the list? Add your own with a photo:</p>
-          <button class="btn line" id="pnew">${ic("camera")} + Add my own item</button>`}`;
+          <button class="btn" id="pnew">+ New product “${esc(q)}”</button></div>` : `<p class="faint tiny" style="margin:12px 0 10px">Type a name or tap Scan to find the product. Not in the list? Add your own with a photo:</p>
+          <button class="btn line" id="pnew">${ic("camera")} + New product (your own)</button>`}`;
       const L = local, S = sharedNew, O = online || [], K = cat;
+      $$("[data-my]", box).forEach((x) => x.onclick = () => {
+        const it = mine[+x.dataset.my];
+        if (onAdd) { onAdd(it); U.toast(`${it.name} added to this delivery`); }
+        else U.toast("Already in your products — find it in Stock to edit it");
+      });
       $$("[data-k]", box).forEach((x) => x.onclick = async () => {
         const k = x.dataset.k, i = +k.slice(1);
         if (x.classList.contains("on")) return;
@@ -2157,6 +2170,8 @@
         <div class="two"><label>Selling price ₹<input class="field" id="pr" inputmode="numeric" value="${esc(f.price || "")}"></label><label>MRP on pack ₹<input class="field" id="mrp" inputmode="numeric" value="${esc(p.mrp || f.mrp || "")}"></label></div>
         <div class="two"><label>Your cost ₹ <span class="faint tiny">(private)</span><input class="field" id="co" inputmode="numeric" value="${esc(f.cost || "")}"></label><label>Quantity in stock<input class="field" id="qt" inputmode="numeric" placeholder="e.g. 20" value="${esc(f.qty || "")}"></label></div>
         ${detailsHTML(d, locked)}
+        ${found && found.source === "catalog" ? "" : `<label style="display:flex;gap:10px;align-items:flex-start;text-transform:none;letter-spacing:0;font-weight:400">
+          <input type="checkbox" id="nshare" style="margin-top:3px"><span><b>Share with other shops</b><br><span class="faint tiny">Off: only your shop sees this product in its catalogue. Customers still see it on your shop page.</span></span></label>`}
         <p class="small" id="nerr" style="color:var(--out);margin:0;min-height:1em"></p>
         <button class="btn" id="nsave" type="button">Save item</button></div>`;
       const keep = () => ({ name: $("#nm", el).value, brand: $("#br", el).value, price: $("#pr", el).value, mrp: $("#mrp", el).value, cost: $("#co", el).value, qty: $("#qt", el).value, barcode: $("#bc", el).value });
@@ -2188,6 +2203,8 @@
         let details = { barcode, mrp: mrp > 0 ? mrp : null };
         if (found && found.source === "catalog") details = { ...details, ...A.productDetails(found.product, (pp) => window.MM_CLOUD?.photoUrl(pp), s.id) };
         if (!(found && found.source === "catalog" && found.product.created_by !== s.id)) details = readDetails(el, details);
+        // the shop's own new product: private unless shared
+        if (!(found && found.source === "catalog")) details.share = !!$("#nshare", el)?.checked;
         if (found && found.source !== "catalog") Object.assign(details, { productPhoto: found.product.photo_url, photoCredit: found.product.photo_credit, source: "openfoodfacts" });
         const it = A.addOwnItem(s.id, { name, brand: $("#br", el).value.trim(), cat, price: pr, cost: co > 0 ? co : null, photo, qty: qv === "" ? null : Math.max(0, Math.round(+qv)), details });
         if (!it) return ($("#nerr", el).textContent = "You already have an item with this name");

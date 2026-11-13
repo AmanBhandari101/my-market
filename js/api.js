@@ -686,7 +686,8 @@ window.MM_API = (function () {
   // ---------- product details (shared catalogue) ----------
   // details d = { productId?, barcode, model, size, mrp, features[], description, specMap{}, keywords[],
   //               productPhoto (url), photoCredit, source }
-  const DETAIL_KEYS = ["barcode", "model", "size", "features", "description", "specMap", "keywords", "productPhoto", "photoCredit", "productId", "productMine"];
+  // share: the shop let other shops see this product (otherwise it's private to the shop)
+  const DETAIL_KEYS = ["barcode", "model", "size", "features", "description", "specMap", "keywords", "productPhoto", "photoCredit", "productId", "productMine", "share"];
   function persistOwnerItem(shopId, it) {
     const all = store.get("ownerItems", {}); const list = all[shopId] || [];
     const i = list.findIndex((x) => x.id === it.id);
@@ -699,6 +700,8 @@ window.MM_API = (function () {
     mrp: d.mrp ?? null, features: d.features || [], description: (d.description || "").slice(0, 1000) || null, specs: d.specMap || {}, keywords: d.keywords || [],
     photo_url: d.productPhoto && /^https:/.test(d.productPhoto) ? d.productPhoto : null, photo_credit: d.photoCredit || null,
     source: d.source || "shop", created_by: shopId,
+    // private unless the shop ticked "Share with other shops" (left out when not decided: the server keeps what it had)
+    ...(d.share !== undefined ? { private: !d.share } : {}),
   });
   // Save details for an item: link to an existing catalogue product, update our own
   // (unverified) one, or add a new product to the shared catalogue.
