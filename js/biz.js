@@ -225,8 +225,10 @@
       const st = planStage(s), fmt = (t) => new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
       const amt = months === 12 ? 1500 : 150;
       const link = `upi://pay?pa=${encodeURIComponent(upi).replace("%40", "@")}&pn=${encodeURIComponent(name)}&am=${amt}&cu=INR&tn=${encodeURIComponent(`${ref} ${months === 12 ? "12M" : "1M"} MyMarket`)}`;
+      const life = s.cloud && st.lifetime === true;
       const head = !s.cloud ? ["Log in to see your plan", "Your plan lives on the server with your shop."]
         : st.state === "unknown" ? ["Checking your plan…", "Needs the internet once."]
+        : life ? ["Free for life ✓", "Your shop uses My Market free, forever — billing, stock, reports, your website and orders. Nothing to pay, ever."]
         : st.state === "trial" ? [`Free plan · ${st.daysLeft} day${st.daysLeft === 1 ? "" : "s"} left`, `Free till ${fmt(st.end)}. After that ₹150 a month — everything stays the same.`]
         : st.state === "active" ? [`Plan active till ${fmt(st.end)}`, st.provisional_until && Date.parse(st.provisional_until) > Date.now() && !(Date.parse(st.paid_until || 0) > Date.now()) ? "Your payment is on its way — it's confirmed automatically when it reaches us. Everything works meanwhile." : "Thank you! Everything is on."]
         : st.state === "due" ? ["₹150 due", `Your plan ended on ${fmt(st.end)}. Everything still works for ${7 - st.daysOver} more day${7 - st.daysOver === 1 ? "" : "s"}.`]
@@ -234,7 +236,11 @@
         : ["Read-only", "You can see all your bills, back them up and export them. Pay to make new bills again — nothing was lost."];
       U.app.innerHTML = `
         ${bizTop("My plan")}
-        <div class="rsec plancard ${st.state}"><b>${esc(head[0])}</b><p>${esc(head[1])}</p></div>
+        <div class="rsec plancard ${life ? "active" : st.state}"><b>${esc(head[0])}</b><p>${esc(head[1])}</p></div>
+        ${life ? "" : `${s.cloud ? `<div class="rsec"><div class="rhd"><b>Have a coupon code?</b></div>
+          <div class="form" style="display:flex;gap:8px"><input class="field" id="coupon" placeholder="Type your coupon code" autocomplete="off" autocapitalize="characters" spellcheck="false" style="flex:1;text-transform:uppercase">
+            <button class="btn" id="applycp" style="width:auto;padding:0 18px">Apply</button></div>
+          <p class="faint tiny" style="margin:6px 0 0">A valid coupon makes your shop free for life.</p></div>` : ""}
         <div class="rsec"><div class="rhd"><b>Price</b></div>
           <div class="planopts">
             <button class="planopt ${months === 1 ? "on" : ""}" data-mo="1"><b>₹150</b><span>per month</span></button>
@@ -256,12 +262,21 @@
           <i>${{ claimed: "Confirming…", confirmed: "Paid ✓", rejected: "Not received" }[x.status]}</i></div>`).join("") : '<p class="quiet small">No payments yet.</p>'}</div></div>
         <div class="rsec"><div class="rhd"><b>If a payment is missed</b></div>
           <ol class="gsteps"><li>Days 1–7: everything works, with a reminder.</li><li>Days 8–15: billing and stock work; your website is switched off and analytics stop updating.</li><li>After day 15: read-only — you can still see, back up and export everything.</li></ol>
-          <p class="faint tiny" style="margin:6px 0 0">Pay any time and everything turns back on at once. Nothing is ever deleted.</p></div>
+          <p class="faint tiny" style="margin:6px 0 0">Pay any time and everything turns back on at once. Nothing is ever deleted.</p></div>`}
         <div style="height:30px"></div>`;
       bindTop();
       $$("[data-mo]").forEach((x) => x.onclick = () => { months = +x.dataset.mo; draw(); });
       $("#copyref") && ($("#copyref").onclick = async () => { try { await navigator.clipboard.writeText(ref); U.toast("Payment code copied"); } catch { prompt("Your payment code", ref); } });
       if ($("#payqr")) makeQR(link).then((qr) => { const el = $("#payqr"); if (el) el.innerHTML = qr.createSvgTag({ cellSize: 3, margin: 2, scalable: true }); }).catch(() => { const el = $("#payqr"); el && el.remove(); });
+      $("#applycp") && ($("#applycp").onclick = async (ev) => {
+        const code = $("#coupon").value.trim();
+        if (!code) return U.toast("Type your coupon code");
+        if (!navigator.onLine) return U.toast("Needs the internet — try again when you're online");
+        const b = ev.currentTarget; b.disabled = true; b.textContent = "Checking…";
+        try { const p = await window.MM_CLOUD.redeemCoupon(s.id, code); A.store.set("plan:" + s.id, p); U.toast("Coupon applied — your shop is free for life 🎉", 6000); draw(); }
+        catch (x) { b.disabled = false; b.textContent = "Apply"; U.toast(x.message, 7000); }
+      });
+      $("#coupon") && ($("#coupon").onkeydown = (e) => { if (e.key === "Enter") $("#applycp").click(); });
       $("#paid") && ($("#paid").onclick = async (ev) => {
         ev.currentTarget.disabled = true;
         try { const p = await window.MM_CLOUD.claimPayment(s.id, "", months); A.store.set("plan:" + s.id, p); U.toast("Thank you! Everything stays on — it's confirmed as soon as your payment reaches us", 6000); await loadPays(); draw(); }
@@ -523,7 +538,7 @@
     const s = A.ownerShop(), st = planStage(s), alertsOn = A.store.get("pushOn:" + s.id, false);
     const row = (tag, attrs, icon, name, note, tone = "") => `<${tag} class="mrow ${tone}" ${attrs}><span class="mic">${ic(icon)}</span>
       <span class="mtx"><b>${name}</b><em>${note}</em></span>${ic("arrow")}</${tag}>`;
-    const planNote = st.state === "trial" ? `Free plan · ${st.daysLeft} day${st.daysLeft === 1 ? "" : "s"} left` : st.state === "active" ? "Active" : st.state === "unknown" ? "2 months free, then ₹150/month" : "Payment due";
+    const planNote = st.lifetime === true ? "Free for life ✓" : st.state === "trial" ? `Free plan · ${st.daysLeft} day${st.daysLeft === 1 ? "" : "s"} left` : st.state === "active" ? "Active" : st.state === "unknown" ? "2 months free, then ₹150/month" : "Payment due";
     const ver = ((document.querySelector('script[src*="js/biz.js"]') || {}).src || "").replace(/.*v=(\d+).*/, "$1");
     U.app.innerHTML = `
       ${bizTop("More")}

@@ -410,6 +410,13 @@
     if (error) throw new Error(/fetch|network/i.test(error.message) ? "No internet — try again" : error.message);
     return data;
   }
+  // a coupon code: lifetime free plan (the server limits each code to a few shops)
+  async function redeemCoupon(shopId, code) {
+    const { data, error } = await sb.rpc("redeem_coupon", { p_shop: shopId, p_code: code });
+    if (error) throw new Error(/fetch|network/i.test(error.message) ? "No internet — try again" : error.message);
+    if (data && data.error) throw new Error(data.error);
+    return data;
+  }
   async function myPayments(shopId) {
     const { data, error } = await sb.from("payments").select("id,amount,months,method,ref,status,reason,created_at").eq("shop_id", shopId).order("created_at", { ascending: false }).limit(24);
     if (error) throw new Error(friendly(error)); return data || [];
@@ -578,7 +585,7 @@
   async function myNumber() { const { data } = await sb.auth.getSession(); const m = (data.session?.user?.email || "").match(/^91(\d{10})@/); return m ? m[1] : ""; }
   async function deleteShop(shopId) { const { error } = await sb.rpc("delete_my_shop", { p_shop: shopId }); if (error) throw new Error(friendly(error)); }
 
-  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, areaProduct, googleLink, saveGoogle, savePush, removePush, testPush, pushTestDirect, pushSaved, logProblem, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, isAdmin, importStatement, searchCatalog, searchOnline, myPlan, claimPayment, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, orderSettings, claimOrderPayment, setOrderPay, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl, newPhotoPath,
+  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, areaProduct, googleLink, saveGoogle, savePush, removePush, testPush, pushTestDirect, pushSaved, logProblem, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, isAdmin, importStatement, searchCatalog, searchOnline, myPlan, claimPayment, redeemCoupon, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, orderSettings, claimOrderPayment, setOrderPay, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl, newPhotoPath,
     pending: () => Q.get().length, failedOps: () => Q.failed(), relogin, needsLogin: () => needsLogin };
 
   // start-up
