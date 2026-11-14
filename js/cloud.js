@@ -473,11 +473,14 @@
   }
 
   // ---------- shop website visits ----------
-  const SRCS = ["app", "qr", "bill", "share", "gmaps", "link", "search", "google", "web"];
+  const SRCS = ["app", "qr", "bill", "share", "gmaps", "link", "search", "google", "web", "offer"];
   function logVisit(shopId, kind, src) {
     if (!/^[0-9a-f-]{36}$/.test(shopId)) return;
-    sb.from("shop_visits").insert({ shop_id: shopId, kind, src: SRCS.includes(src) ? src : "link" })
-      .then(({ error }) => error && console.warn("[MM cloud] visit not logged", error.message));
+    const add = (sr) => sb.from("shop_visits").insert({ shop_id: shopId, kind, src: sr });
+    const sr = SRCS.includes(src) ? src : "link";
+    // a source the server doesn't know yet (supabase/offers.sql not run) still counts, as "link"
+    add(sr).then(({ error }) => error && (sr !== "link" && /check constraint/i.test(error.message) ? add("link") : Promise.resolve({ error })))
+      .then((r) => r && r.error && console.warn("[MM cloud] visit not logged", r.error.message));
   }
   async function visitsSummary(shopId, days = 7) {
     const { data, error } = await sb.rpc("shop_visits_summary", { p_shop: shopId, p_days: days });

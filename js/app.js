@@ -47,6 +47,7 @@
     eye: '<path d="M2.8 12S6 5.8 12 5.8 21.2 12 21.2 12 18 18.2 12 18.2 2.8 12 2.8 12z"/><circle cx="12" cy="12" r="2.8"/>',
     out: '<path d="M10 4.5H5.5v15H10M15 8l4 4-4 4M9.5 12H19"/>',
     pen: '<path d="M4.5 19.5l1-4L16 5l3 3L8.5 18.5z"/><path d="M14 7l3 3"/>',
+    tag: '<path d="M3.5 12.5V4.5a1 1 0 011-1h8l8 8-9 9z"/><circle cx="8" cy="8" r="1.6"/>',
   };
   const ic = (n, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24">${P[n]}</svg>`;
 

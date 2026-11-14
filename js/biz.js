@@ -14,6 +14,7 @@
     if (sub === "stockin") return stockInView();
     if (sub === "reports") return reportsView(params);
     if (sub === "site") return siteView(params);
+    if (sub === "offer") return offerView();
     if (sub === "google") return googleView();
     if (sub === "details") return detailsView();
     if (sub === "security") return securityView();
@@ -477,7 +478,7 @@
   }
   // Top bar. Main pages (the five tabs) show their name; every other page gets a back arrow to its tab.
   const PARENT = { cart: "#/biz", stockin: "#/biz/items", analytics: "#/biz/reports", insights: "#/biz/reports", bills: "#/biz/reports",
-    site: "#/biz/more", google: "#/biz/more", details: "#/biz/more", security: "#/biz/more", plan: "#/biz/more", backup: "#/biz/more" };
+    site: "#/biz/more", google: "#/biz/more", details: "#/biz/more", security: "#/biz/more", plan: "#/biz/more", backup: "#/biz/more", offer: "#/biz/more" };
   function bizTop(title) {
     const s = A.ownerShop(), up = PARENT[(location.hash.split("?")[0].split("/")[2]) || ""];
     return `<header class="btop">${up ? `<a class="bback" href="${up}" aria-label="Back">${ic("back")}</a>` : `<img class="blogo" src="icon-business.svg" alt="">`}
@@ -548,6 +549,7 @@
       <h3 class="mgh">Your shop</h3>
       <div class="mlist">
         ${row("a", 'href="#/biz/details"', "pen", "Shop details", "Name, phone, category, address, map pin, hours")}
+        ${row("a", 'href="#/biz/offer"', "tag", "Offer poster", "Make a sale banner for WhatsApp status, Instagram, Facebook")}
         ${row("a", 'href="#/biz/site"', "globe", "My website", "Share it, QR poster, photos, see visits")}
         ${row("a", 'href="#/biz/google"', "search", "Get found on Google", "Google Maps and Google Shopping, step by step")}
         ${row("a", `href="index.html#/shop/${esc(s.id)}" target="_blank" rel="noopener"`, "eye", "See my shop as customers do", "Opens the My Market customer app")}
@@ -1891,6 +1893,8 @@
         <div id="qrbox" class="qrbox"><p class="quiet small">Making the QR code…</p></div>
         <div class="two" style="margin-top:10px"><button class="btn" id="post">Download poster (PDF)</button><button class="btn line" id="postp">Print</button></div>
       </div>
+      <a class="rsec glink" href="#/biz/offer"><div class="rhd"><b>Offer poster for WhatsApp status</b>${ic("arrow")}</div>
+        <p class="small quiet" style="margin:0">Type your sale or offer — the app makes a banner with your shop's QR code and link, ready to put on WhatsApp status, Instagram or Facebook.</p></a>
       <a class="rsec glink" href="#/biz/google"><div class="rhd"><b>Get found on Google</b>${ic("arrow")}</div>
         <p class="small quiet" style="margin:0">Put your shop on Google Maps and your products on Google Shopping — with your price and "in stock nearby". Step by step, everything ready to copy.</p></a>
       <div class="rsec"><div class="rhd"><b>Visits</b><div class="words">${[7, 30].map((k) => `<a class="word ${(+params.get("d") || 7) === k ? "on" : ""}" href="#/biz/site?d=${k}">${k}d</a>`).join("")}</div></div>
@@ -1931,7 +1935,7 @@
     // visits
     const box = $("#visits");
     if (!(window.MM_CLOUD && s.cloud)) { box.innerHTML = '<p class="quiet small">Visits show once your shop is online.</p>'; return; }
-    const SRC = { gmaps: "Google Maps", google: "Google Search & Shopping", web: "Web", qr: "QR poster", bill: "Bills", share: "Shared links", link: "Your link", app: "My Market app", search: "Search" };
+    const SRC = { gmaps: "Google Maps", google: "Google Search & Shopping", web: "Web", qr: "QR poster", offer: "Offer posters", bill: "Bills", share: "Shared links", link: "Your link", app: "My Market app", search: "Search" };
     window.MM_CLOUD.visitsSummary(s.id, +params.get("d") || 7).then((rows) => {
       const views = rows.filter((r) => r.kind === "view"), tot = views.reduce((a, r) => a + +r.n, 0);
       const act = (k) => rows.filter((r) => r.kind === k).reduce((a, r) => a + +r.n, 0);
@@ -1942,6 +1946,348 @@
           <div><b>${act("directions")}</b><span>directions</span></div><div><b>${act("call")}</b><span>calls</span></div></div>
         <div class="bars">${views.sort((a, b) => b.n - a.n).map((r) => `<div class="bar"><div class="bl"><b>${SRC[r.src] || r.src}</b><span>${r.n}</span></div><div class="bt"><i style="width:${(r.n / max) * 100}%"></i></div></div>`).join("")}</div>`;
     }).catch((x) => { box.innerHTML = `<p class="quiet small">${esc(x.message)}</p>`; });
+  }
+
+  // ---------- offer poster: a sale banner for WhatsApp status / Instagram / Facebook ----------
+  // The owner types the offer; this phone draws the banner (a canvas) with the shop's QR code and
+  // link, then shares the picture + a caption with the link through the phone's share menu
+  // (WhatsApp → My status, Instagram, Facebook…). Nothing is uploaded. The text is kept on this
+  // phone so the same offer can be shared again; an own photo is used for this visit only.
+  const OFFER_THEMES = {
+    red:   { name: "Sale red", bg: ["#e3262f", "#8c0d1b"], ink: "#ffffff", soft: "rgba(255,255,255,.86)", acc: "#ffd84a", accInk: "#4d0910", dot: "#ffffff" },
+    gold:  { name: "Festive", bg: ["#5a1877", "#b72f7c"], ink: "#ffffff", soft: "rgba(255,255,255,.86)", acc: "#ffc93c", accInk: "#3a0b4f", dot: "#ffc93c" },
+    green: { name: "Fresh", bg: ["#08744a", "#16a86b"], ink: "#ffffff", soft: "rgba(255,255,255,.88)", acc: "#fff15c", accInk: "#073a24", dot: "#ffffff" },
+    night: { name: "Classic", bg: ["#152130", "#2c4762"], ink: "#ffffff", soft: "rgba(255,255,255,.82)", acc: "#ffa41c", accInk: "#2a1700", dot: "#ffa41c" },
+    cream: { name: "Light", bg: ["#fff8ea", "#ffe3b3"], ink: "#2a1a05", soft: "rgba(42,26,5,.74)", acc: "#d7263d", accInk: "#ffffff", dot: "#d7263d" },
+  };
+  const OFFER_PICKS = [
+    { k: "pct", label: "% off", tag: "Sale", head: "30% OFF", sub: "on everything in the shop", theme: "red" },
+    { k: "flat", label: "Flat ₹ off", tag: "Offer", head: "FLAT ₹200 OFF", sub: "on shopping above ₹1,500", theme: "night" },
+    { k: "bogo", label: "Buy 1 Get 1", tag: "Special offer", head: "BUY 1 GET 1 FREE", sub: "on selected items", theme: "green" },
+    { k: "new", label: "New stock", tag: "Just arrived", head: "NEW STOCK", sub: "Fresh collection is here — come and see", theme: "cream" },
+    { k: "fest", label: "Festival", tag: "Festive offer", head: "FESTIVE SALE", sub: "Special prices this festival season", theme: "gold" },
+    { k: "clr", label: "Clearance", tag: "Last chance", head: "CLEARANCE SALE", sub: "Up to 50% off · while stock lasts", theme: "red" },
+  ];
+  const OFONT = 'Inter, system-ui, "Segoe UI", Roboto, sans-serif';
+  const offerDate = (d, long) => { const t = new Date(d + "T12:00:00"); return isNaN(t) ? "" : t.toLocaleDateString("en-IN", long ? { weekday: "short", day: "numeric", month: "short" } : { day: "numeric", month: "short" }); };
+  const offerImgs = new Map();
+  const offerImg = (url) => {
+    if (!url) return Promise.resolve(null);
+    if (!offerImgs.has(url)) offerImgs.set(url, new Promise((res) => {
+      const im = new Image(); if (!url.startsWith("data:")) im.crossOrigin = "anonymous";   // a photo without CORS is skipped, never taints the canvas
+      im.onload = () => res(im); im.onerror = () => res(null); im.src = url;
+    }));
+    return offerImgs.get(url);
+  };
+  function wrapText(x, text, maxW) {
+    const out = []; let cur = "";
+    for (const w of String(text || "").split(/\s+/).filter(Boolean)) {
+      const t = cur ? cur + " " + w : w;
+      if (!cur || x.measureText(t).width <= maxW) cur = t; else { out.push(cur); cur = w; }
+    }
+    if (cur) out.push(cur);
+    return out;
+  }
+  function fitText(x, text, maxW, maxLines, big, small, weight) {
+    for (let sz = big; sz >= small; sz -= 4) {
+      x.font = `${weight} ${sz}px ${OFONT}`;
+      const lines = wrapText(x, text, maxW);
+      if (lines.length <= maxLines && lines.every((l) => x.measureText(l).width <= maxW)) return { sz, lines };
+    }
+    x.font = `${weight} ${small}px ${OFONT}`;
+    return { sz: small, lines: wrapText(x, text, maxW).slice(0, maxLines) };
+  }
+  const clipText = (x, t, maxW) => { if (x.measureText(t).width <= maxW) return t; while (t.length > 1 && x.measureText(t + "…").width > maxW) t = t.slice(0, -1); return t + "…"; };
+  function rrect(x, X, Y, w, h, r) { x.beginPath(); x.moveTo(X + r, Y); x.arcTo(X + w, Y, X + w, Y + h, r); x.arcTo(X + w, Y + h, X, Y + h, r); x.arcTo(X, Y + h, X, Y, r); x.arcTo(X, Y, X + w, Y, r); x.closePath(); }
+  function coverImg(x, im, X, Y, w, h) {
+    const k = Math.max(w / im.width, h / im.height), sw = w / k, sh = h / k;
+    x.drawImage(im, (im.width - sw) / 2, (im.height - sh) / 2, sw, sh, X, Y, w, h);
+  }
+  // o = { tag, head, sub, until, theme, size }; a = { qr, link, logo, photo, cards: [{ img, name, price, mrp }] }
+  function drawOffer(o, s, a) {
+    const story = o.size !== "post", W = 1080, H = story ? 1920 : 1350, k = story ? 1 : 0.8, P = Math.round(68 * k);
+    const T = OFFER_THEMES[o.theme] || OFFER_THEMES.red, light = T.ink !== "#ffffff";
+    const c = document.createElement("canvas"); c.width = W; c.height = H;
+    const x = c.getContext("2d");
+    // background: gradient, soft circles, a ring of dots
+    const g = x.createLinearGradient(0, 0, W * 0.5, H); g.addColorStop(0, T.bg[0]); g.addColorStop(1, T.bg[1]);
+    x.fillStyle = g; x.fillRect(0, 0, W, H);
+    x.fillStyle = light ? T.acc : "#ffffff";
+    for (const [cx, cy, r, al] of [[W - 90 * k, 300 * k, 330 * k, 0.09], [60 * k, H * 0.58, 250 * k, 0.07], [W * 0.82, H * 0.74, 120 * k, 0.06]]) {
+      x.globalAlpha = al; x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.fill();
+    }
+    x.globalAlpha = 0.5; x.fillStyle = T.dot;
+    for (let i = 0; i < 14; i++) { const an = (i / 14) * Math.PI * 2; x.beginPath(); x.arc(W - 160 * k + Math.cos(an) * 120 * k, 300 * k + Math.sin(an) * 120 * k, 6 * k, 0, Math.PI * 2); x.fill(); }
+    x.globalAlpha = 1;
+    // header: logo + shop name + place
+    const y = P + 8 * k;
+    const L = Math.round(116 * k), nx = P + L + 26 * k, nw = W - nx - P;
+    if (a.logo) {
+      x.save(); x.beginPath(); x.arc(P + L / 2, y + L / 2, L / 2, 0, Math.PI * 2); x.closePath(); x.fillStyle = "#fff"; x.fill(); x.clip();
+      coverImg(x, a.logo, P, y, L, L); x.restore();
+      x.lineWidth = 5 * k; x.strokeStyle = T.acc; x.beginPath(); x.arc(P + L / 2, y + L / 2, L / 2, 0, Math.PI * 2); x.stroke();
+    } else {
+      x.fillStyle = T.acc; x.beginPath(); x.arc(P + L / 2, y + L / 2, L / 2, 0, Math.PI * 2); x.fill();
+      x.fillStyle = T.accInk; x.font = `800 ${Math.round(L * 0.5)}px ${OFONT}`; x.textAlign = "center"; x.textBaseline = "middle";
+      x.fillText((s.name || "?").trim().charAt(0).toUpperCase(), P + L / 2, y + L / 2 + 3 * k);
+    }
+    x.textAlign = "left"; x.textBaseline = "alphabetic";
+    const m = A.getMarket(s.marketId), place = [s.landmark, (m && m.name) || s.locality].filter(Boolean).join(", ");
+    const nm = fitText(x, s.name || "", nw, 2, Math.round(54 * k), Math.round(34 * k), 800);
+    const nameH = nm.lines.length * nm.sz * 1.1 + (place ? 44 * k : 0);
+    const ny = y + Math.max(0, (L - nameH) / 2) + nm.sz * 0.86;
+    x.fillStyle = T.ink; x.font = `800 ${nm.sz}px ${OFONT}`;
+    nm.lines.forEach((l, i) => x.fillText(l, nx, ny + i * nm.sz * 1.1));
+    if (place) { x.fillStyle = T.soft; x.font = `500 ${Math.round(30 * k)}px ${OFONT}`; x.fillText(clipText(x, "📍 " + place, nw), nx, ny + (nm.lines.length - 1) * nm.sz * 1.1 + 44 * k); }
+    const top = y + Math.max(L, nameH) + 56 * k;
+    // bottom panel (QR + link) and the "till" pill above it
+    const bh = Math.round(350 * k), by = H - P - bh - 30 * k;
+    let mediaEnd = by - 44 * k, until = null;
+    if (o.until && offerDate(o.until)) {
+      x.font = `700 ${Math.round(40 * k)}px ${OFONT}`;
+      const ut = `Offer till ${offerDate(o.until, true)}`, uw = x.measureText(ut).width + 70 * k, uh = Math.round(78 * k), uy = mediaEnd - uh;
+      until = { ut, uw, uh, uy }; mediaEnd = uy - 40 * k;
+    }
+    // the offer text, measured first so it can be centred when there are no photos
+    const tw = W - 2 * P;
+    let tag = null;
+    if (o.tag) { x.font = `800 ${Math.round(38 * k)}px ${OFONT}`; const t = o.tag.toUpperCase(); tag = { t, w: Math.min(tw, x.measureText(t).width + 80 * k + t.length * 4 * k), h: Math.round(78 * k) }; }
+    const room = mediaEnd - top;
+    const cards = a.photo ? [] : a.cards || [];
+    const n = cards.length, gap = 24 * k;
+    let cw = n ? Math.min(Math.round(330 * k), (tw - gap * (n - 1)) / n) : 0;
+    let wantMedia = a.photo ? 420 * k : n ? cw + 150 * k : 0;
+    // with photos, the headline gives way (down to a size still readable on a status) so they fit
+    let hd, sb, textH;
+    for (let big = 230; ; big -= 10) {
+      hd = fitText(x, o.head || "", tw, 3, Math.round(big * k), Math.round(Math.min(big, 80) * k), 800);
+      sb = o.sub ? fitText(x, o.sub, tw - 40 * k, 3, Math.round(Math.min(58, big / 3) * k), Math.round(34 * k), 600) : null;
+      textH = (tag ? tag.h + 46 * k : 0) + hd.lines.length * hd.sz * 1.02 + (sb ? 24 * k + sb.lines.length * sb.sz * 1.28 : 0);
+      if (!wantMedia || textH + 44 * k + wantMedia <= room || big <= 120) break;
+    }
+    if (n && textH + 44 * k + wantMedia > room) { cw = Math.max(0, room - textH - 44 * k - 150 * k); wantMedia = cw + 150 * k; }
+    if (a.photo && textH + 44 * k + wantMedia > room) wantMedia = Math.max(260 * k, room - textH - 44 * k);
+    const ch = cw + 150 * k;
+    const showMedia = wantMedia && (a.photo ? room - textH - 44 * k >= 260 * k : cw >= 200 * k);
+    let ty = top + (showMedia ? 0 : Math.max(0, (room - textH) / 2) * 0.9);
+    x.textAlign = "center";
+    if (tag) {
+      x.fillStyle = T.acc; rrect(x, (W - tag.w) / 2, ty, tag.w, tag.h, tag.h / 2); x.fill();
+      x.fillStyle = T.accInk; x.font = `800 ${Math.round(38 * k)}px ${OFONT}`;
+      try { x.letterSpacing = `${Math.round(4 * k)}px`; } catch {}
+      x.fillText(clipText(x, tag.t, tag.w - 40 * k), W / 2, ty + tag.h * 0.67);
+      try { x.letterSpacing = "0px"; } catch {}
+      ty += tag.h + 46 * k;
+    }
+    x.fillStyle = T.ink; x.font = `800 ${hd.sz}px ${OFONT}`;
+    if (!light) { x.shadowColor = "rgba(0,0,0,.25)"; x.shadowBlur = 18 * k; x.shadowOffsetY = 6 * k; }
+    hd.lines.forEach((l, i) => x.fillText(l, W / 2, ty + hd.sz * 0.84 + i * hd.sz * 1.02));
+    x.shadowColor = "transparent"; x.shadowBlur = 0; x.shadowOffsetY = 0;
+    ty += hd.lines.length * hd.sz * 1.02;
+    if (sb) {
+      ty += 24 * k; x.fillStyle = T.soft; x.font = `600 ${sb.sz}px ${OFONT}`;
+      sb.lines.forEach((l, i) => x.fillText(l, W / 2, ty + sb.sz * 0.9 + i * sb.sz * 1.28));
+      ty += sb.lines.length * sb.sz * 1.28;
+    }
+    // photos: the owner's own photo, or up to 3 product cards with prices
+    if (showMedia) {
+      const mt = ty + 44 * k, mh = mediaEnd - mt;
+      if (a.photo) {
+        const ph = Math.min(mh, tw * a.photo.height / a.photo.width), pw = Math.min(tw, ph * a.photo.width / a.photo.height);
+        const px = (W - pw) / 2, py = mt + (mh - ph) / 2;
+        x.save(); x.shadowColor = "rgba(0,0,0,.3)"; x.shadowBlur = 30 * k; x.fillStyle = "#fff"; rrect(x, px - 10 * k, py - 10 * k, pw + 20 * k, ph + 20 * k, 34 * k); x.fill(); x.restore();
+        x.save(); rrect(x, px, py, pw, ph, 26 * k); x.clip(); x.drawImage(a.photo, px, py, pw, ph); x.restore();
+      } else {
+        const x0 = (W - (n * cw + (n - 1) * gap)) / 2, cy = mt + (mh - ch) / 2, pad = 14 * k, iw = cw - 2 * pad;
+        cards.forEach((cd, i) => {
+          const cx = x0 + i * (cw + gap);
+          x.save(); x.shadowColor = "rgba(0,0,0,.28)"; x.shadowBlur = 26 * k; x.shadowOffsetY = 8 * k; x.fillStyle = "#fff"; rrect(x, cx, cy, cw, ch, 26 * k); x.fill(); x.restore();
+          x.save(); rrect(x, cx + pad, cy + pad, iw, iw, 18 * k); x.clip(); x.fillStyle = "#f3f4f4"; x.fillRect(cx + pad, cy + pad, iw, iw); coverImg(x, cd.img, cx + pad, cy + pad, iw, iw); x.restore();
+          x.textAlign = "left"; x.fillStyle = "#1d2222"; x.font = `600 ${Math.round(25 * k)}px ${OFONT}`;
+          const nl = wrapText(x, cd.name, iw);
+          nl.slice(0, 2).forEach((l, j) => x.fillText(j === 1 && nl.length > 2 ? clipText(x, l + "…", iw) : clipText(x, l, iw), cx + pad, cy + pad + iw + 38 * k + j * 31 * k));
+          if (cd.price != null) {
+            const pt = "₹" + Math.round(cd.price).toLocaleString("en-IN"), py = cy + ch - 22 * k;
+            x.fillStyle = "#b12704"; x.font = `800 ${Math.round(36 * k)}px ${OFONT}`;
+            x.fillText(pt, cx + pad, py);
+            if (cd.mrp && cd.mrp > cd.price) {
+              const pw = x.measureText(pt).width + 12 * k, mt2 = "₹" + Math.round(cd.mrp).toLocaleString("en-IN");
+              x.fillStyle = "#8a9191"; x.font = `500 ${Math.round(24 * k)}px ${OFONT}`; x.fillText(mt2, cx + pad + pw, py);
+              x.fillRect(cx + pad + pw, py - 8 * k, x.measureText(mt2).width, 2.5 * k);
+            }
+          }
+          x.textAlign = "center";
+        });
+      }
+    }
+    if (until) {
+      x.strokeStyle = T.ink; x.lineWidth = 4 * k; rrect(x, (W - until.uw) / 2, until.uy, until.uw, until.uh, until.uh / 2); x.stroke();
+      x.fillStyle = T.ink; x.font = `700 ${Math.round(40 * k)}px ${OFONT}`; x.fillText(until.ut, W / 2, until.uy + until.uh * 0.66);
+    }
+    // the white panel: QR code, what to do, the link, the phone number
+    x.save(); x.shadowColor = "rgba(0,0,0,.25)"; x.shadowBlur = 30 * k; x.fillStyle = "#ffffff"; rrect(x, P, by, W - 2 * P, bh, 34 * k); x.fill(); x.restore();
+    const qp = 26 * k, qs = bh - 2 * qp, qx = P + qp, qy = by + qp;
+    if (a.qr) {
+      const nq = a.qr.getModuleCount(), cs = qs / nq; x.fillStyle = "#0f1111";
+      for (let r = 0; r < nq; r++) for (let q = 0; q < nq; q++) if (a.qr.isDark(r, q)) x.fillRect(qx + q * cs, qy + r * cs, cs + 0.6, cs + 0.6);
+    }
+    const rx = (a.qr ? qx + qs + 34 * k : qx + 10 * k), rw = W - P - qp - rx;
+    x.textAlign = "left";
+    const h1 = fitText(x, a.qr ? "Scan to see stock & prices" : "See our stock & prices", rw, 2, Math.round(40 * k), Math.round(28 * k), 800);
+    let yy = qy + h1.sz * 0.9; x.fillStyle = "#0f1111"; x.font = `800 ${h1.sz}px ${OFONT}`;
+    h1.lines.forEach((l) => { x.fillText(l, rx, yy); yy += h1.sz * 1.15; });
+    x.fillStyle = "#565959"; x.font = `500 ${Math.round(27 * k)}px ${OFONT}`;
+    x.fillText(clipText(x, s.takesOrders !== false ? "Order on WhatsApp · get directions" : "WhatsApp us · get directions", rw), rx, yy + 4 * k); yy += 50 * k;
+    const shown = (a.link || "").replace(/^https?:\/\//, "").replace(/\?.*$/, "");
+    x.fillStyle = "#007185"; x.font = `600 ${Math.round(26 * k)}px ${OFONT}`;
+    const lines = []; let line = "";
+    for (const ch2 of shown) { if (line && x.measureText(line + ch2).width > rw) { lines.push(line); line = ch2; } else line += ch2; }
+    if (line) lines.push(line);
+    lines.slice(0, 2).forEach((l, i) => { x.fillText(i === 1 && lines.length > 2 ? clipText(x, l + "…", rw) : l, rx, yy); yy += 34 * k; });
+    const ph10 = String(s.phone || "").replace(/\D/g, "").slice(-10);
+    if (ph10.length === 10) {
+      x.fillStyle = "#0f1111"; x.font = `800 ${Math.round(36 * k)}px ${OFONT}`;
+      x.fillText(`📞 ${ph10.slice(0, 5)} ${ph10.slice(5)}`, rx, Math.min(yy + 26 * k, by + bh - qp - 4 * k));
+    }
+    x.textAlign = "center"; x.fillStyle = T.soft; x.font = `500 ${Math.round(24 * k)}px ${OFONT}`;
+    x.fillText("My Market · live stock and prices from shops near you", W / 2, H - P + 12 * k);
+    return c;
+  }
+  function offerView() {
+    const s = A.ownerShop(), key = "offerDraft:" + s.id, link = siteLink(s, "offer");
+    const today = new Date();
+    const inDays = (d) => { const t = new Date(today.getTime() + d * 864e5); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`; };
+    const p0 = OFFER_PICKS[0];
+    const o = Object.assign({ pick: p0.k, tag: p0.tag, head: p0.head, sub: p0.sub, theme: p0.theme, size: "story", until: inDays(7), items: [] }, A.store.get(key, {}));
+    let photo = null;   // own photo: this visit only (too big to keep on the phone)
+    const withPic = s.items.filter((i) => i.img || i.photo);
+    o.items = (o.items || []).filter((id) => withPic.some((i) => i.id === id));
+    const promoText = () => ([o.head, o.sub].filter(Boolean).join(" ") + (o.until && offerDate(o.until) ? ` · till ${offerDate(o.until)}` : "")).slice(0, 90);
+    const caption = () => {
+      const m = A.getMarket(s.marketId), place = (m && m.name) || s.locality || "";
+      return `🔥 ${o.tag ? o.tag.toUpperCase() + ": " : ""}${o.head}${o.sub ? " — " + o.sub : ""}${o.until && offerDate(o.until) ? ` (till ${offerDate(o.until, true)})` : ""}\n`
+        + `📍 ${s.name}${place ? ", " + place : ""}${s.phone ? " · 📞 " + s.phone : ""}\n`
+        + `See our stock and prices${s.takesOrders !== false ? ", order on WhatsApp" : ""}: ${link}`;
+    };
+    U.app.innerHTML = `
+      ${bizTop("Offer poster")}
+      ${!s.cloud ? '<div class="banner" style="margin:12px var(--gut) 0"><div class="serif">Not online yet</div><p>Log in with your mobile number and PIN so the link on your poster opens your shop.</p></div>' : ""}
+      <div class="rsec"><div class="rhd"><b>1 · Your offer</b></div>
+        <div class="words" id="opk">${OFFER_PICKS.map((p) => `<button type="button" class="word ${o.pick === p.k ? "on" : ""}" data-pk="${p.k}">${esc(p.label)}</button>`).join("")}</div>
+        <div class="form" style="margin-top:12px">
+          <label>Big text <span class="faint tiny">— the offer</span><input class="field" id="ohead" maxlength="40" value="${esc(o.head)}" placeholder="e.g. 30% OFF"></label>
+          <label>Details <input class="field" id="osub" maxlength="90" value="${esc(o.sub)}" placeholder="e.g. on all winter jackets"></label>
+          <div class="two"><label>Label <input class="field" id="otag" maxlength="20" value="${esc(o.tag)}" placeholder="e.g. Sale"></label>
+            <label>Offer till <input class="field" type="date" id="ountil" value="${esc(o.until || "")}" min="${inDays(0)}"></label></div>
+        </div>
+      </div>
+      <div class="oprev"><canvas id="ocv" aria-label="Poster preview"></canvas><p class="faint tiny" id="ost">Making the poster…</p></div>
+      <div class="rsec"><div class="rhd"><b>2 · Photos</b><span class="faint tiny" id="ocnt"></span></div>
+        <p class="small quiet" style="margin:0 0 8px">Pick up to 3 of your products — their photo and price go on the poster. Or use your own photo instead.</p>
+        ${withPic.length > 8 ? '<input class="field" id="oq" placeholder="Search your products" style="margin-bottom:8px">' : ""}
+        <div class="opick" id="oitems"></div>
+        <div class="two" style="margin-top:10px"><label class="btn line" style="text-align:center;cursor:pointer">${ic("camera")} Own photo<input type="file" accept="image/*" hidden id="ophoto"></label>
+          <button class="btn line" id="ophx" type="button">No photos</button></div>
+      </div>
+      <div class="rsec"><div class="rhd"><b>3 · Look</b></div>
+        <div class="oth" id="oth">${Object.entries(OFFER_THEMES).map(([k2, t]) => `<button type="button" class="${o.theme === k2 ? "on" : ""}" data-th="${k2}" style="--a:${t.bg[0]};--b:${t.bg[1]};--c:${t.acc}"><i></i><span>${esc(t.name)}</span></button>`).join("")}</div>
+        <div class="words" id="osz" style="margin-top:12px">
+          <button type="button" class="word ${o.size !== "post" ? "on" : ""}" data-sz="story">Status / Story (tall)</button>
+          <button type="button" class="word ${o.size === "post" ? "on" : ""}" data-sz="post">Post (Instagram, Facebook)</button></div>
+      </div>
+      <div class="rsec"><div class="rhd"><b>4 · Share it</b></div>
+        <button class="btn" id="osh">Share to WhatsApp status…</button>
+        <div class="two" style="margin-top:10px"><button class="btn line" id="odl">Save picture</button><button class="btn line" id="omsg">Send as message</button></div>
+        <p class="small quiet" style="margin:10px 0 0">On WhatsApp pick <b>My status</b> at the top — the caption carries your shop's link. On Instagram add a <b>Link</b> sticker and paste: the link is copied for you.</p>
+        <label style="display:flex;align-items:center;gap:10px;margin-top:12px;font-size:14px;text-transform:none"><input type="checkbox" id="oweb" ${s.promo && s.promo === promoText() ? "checked" : ""} style="width:20px;height:20px;accent-color:#1e8e4e;flex:none"><span>Also show this offer on my website and bills <span class="faint tiny">(replaces your bill message)</span></span></label>
+      </div>
+      <div style="height:30px"></div>`;
+    bindTop();
+    const save = () => { const { pick, tag, head, sub, theme, size, until, items } = o; A.store.set(key, { pick, tag, head, sub, theme, size, until, items }); };
+    // product picker
+    const drawItems = () => {
+      const q = ($("#oq") ? $("#oq").value : "").trim().toLowerCase();
+      const sel = o.items.map((id) => withPic.find((i) => i.id === id)).filter(Boolean);
+      const rest = withPic.filter((i) => !o.items.includes(i.id) && (!q || i.name.toLowerCase().includes(q)));
+      const list = [...sel, ...rest].slice(0, 40);
+      $("#oitems").innerHTML = list.length ? list.map((i) => `<button type="button" class="${o.items.includes(i.id) && !photo ? "on" : ""}" data-it="${esc(i.id)}">
+          <img src="${esc(i.img || i.photo)}" alt="" loading="lazy"><b>${esc(i.name)}</b>${i.price != null ? `<em>${rupee(i.price)}</em>` : ""}</button>`).join("")
+        : `<p class="quiet small" style="margin:0">${withPic.length ? "No product with that name." : "Your products have no photos yet — add photos in Items, or use your own photo."}</p>`;
+      $("#ocnt").textContent = photo ? "your own photo" : o.items.length ? `${o.items.length} of 3` : "";
+      $$("#oitems [data-it]").forEach((b) => b.onclick = () => {
+        const id = b.dataset.it;
+        if (photo) { photo = null; o.items = []; }
+        if (o.items.includes(id)) o.items = o.items.filter((v) => v !== id);
+        else { if (o.items.length >= 3) return U.toast("Up to 3 products — tap one to take it off"); o.items = [...o.items, id]; }
+        save(); drawItems(); redraw();
+      });
+    };
+    $("#oq") && ($("#oq").oninput = drawItems);
+    // the poster
+    let qr = null, busy = 0, last = null;
+    const assets = async () => {
+      if (!qr) qr = await makeQR(link).catch(() => null);
+      const items = o.items.map((id) => withPic.find((i) => i.id === id)).filter(Boolean);
+      const imgs = await Promise.all(items.map((i) => offerImg(i.img || i.photo)));
+      return { qr, link, logo: await offerImg(s.logo), photo, cards: items.map((i, j) => ({ img: imgs[j], name: i.name, price: i.price, mrp: i.mrp })).filter((cd) => cd.img) };
+    };
+    const render = async () => {
+      try { await Promise.all([document.fonts.load("800 100px Inter"), document.fonts.load("600 40px Inter")]); } catch {}
+      return drawOffer(o, s, await assets());
+    };
+    const redraw = async () => {
+      const n = ++busy; const c = await render(); if (n !== busy || !$("#ocv")) return;
+      last = c; const cv = $("#ocv"); cv.width = c.width / 2; cv.height = c.height / 2;
+      cv.getContext("2d").drawImage(c, 0, 0, cv.width, cv.height);
+      $("#ost").textContent = qr ? (o.size === "post" ? "Post · 1080 × 1350" : "Status / Story · 1080 × 1920") : "The QR code needs the internet once — the poster shows without it";
+    };
+    let tmr = 0; const soon = () => { clearTimeout(tmr); tmr = setTimeout(redraw, 180); };
+    const field = (id, k2) => { $(id).oninput = () => { o[k2] = $(id).value; save(); soon(); }; };
+    field("#ohead", "head"); field("#osub", "sub"); field("#otag", "tag"); field("#ountil", "until");
+    $$("#opk [data-pk]").forEach((b) => b.onclick = () => {
+      const p = OFFER_PICKS.find((v) => v.k === b.dataset.pk); Object.assign(o, { pick: p.k, tag: p.tag, head: p.head, sub: p.sub, theme: p.theme });
+      $("#ohead").value = p.head; $("#osub").value = p.sub; $("#otag").value = p.tag;
+      $$("#opk .word").forEach((w) => w.classList.toggle("on", w === b)); $$("#oth [data-th]").forEach((w) => w.classList.toggle("on", w.dataset.th === p.theme));
+      save(); redraw();
+    });
+    $$("#oth [data-th]").forEach((b) => b.onclick = () => { o.theme = b.dataset.th; $$("#oth [data-th]").forEach((w) => w.classList.toggle("on", w === b)); save(); redraw(); });
+    $$("#osz [data-sz]").forEach((b) => b.onclick = () => { o.size = b.dataset.sz; $$("#osz .word").forEach((w) => w.classList.toggle("on", w === b)); save(); redraw(); });
+    $("#ophoto").onchange = async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      const data = await shrinkPhoto(f, 1080, 0.86); if (!data) return U.toast("Couldn't read that photo");
+      photo = await offerImg(data); drawItems(); redraw();
+    };
+    $("#ophx").onclick = () => { photo = null; o.items = []; save(); drawItems(); redraw(); };
+    // sharing
+    const fname = () => `${(s.name || "shop").replace(/[^\w]+/g, "-").replace(/^-|-$/g, "")}-offer.jpg`;
+    const blob = async () => {
+      const c = last || await render();
+      try { return await new Promise((res, rej) => c.toBlob((b) => b ? res(b) : rej(new Error("no picture")), "image/jpeg", 0.92)); }
+      catch {   // a photo slipped through without permission to reuse it: make the poster without photos
+        const c2 = drawOffer(o, s, { qr, link, logo: null, photo: null, cards: [] }); U.toast("A photo couldn't be used — poster made without photos");
+        return await new Promise((res) => c2.toBlob(res, "image/jpeg", 0.92));
+      }
+    };
+    const copyCap = () => { try { navigator.clipboard.writeText(caption()).catch(() => {}); } catch {} };
+    const onWeb = () => { if ($("#oweb").checked && s.promo !== promoText()) A.updateShop(s.id, { promo: promoText() }); };
+    const download = (b) => { const u = URL.createObjectURL(b), el = document.createElement("a"); el.href = u; el.download = fname(); document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000); };
+    $("#osh").onclick = async () => {
+      if (!o.head.trim()) return U.toast("Type the offer first");
+      copyCap(); onWeb();
+      const b = await blob(), file = new File([b], fname(), { type: "image/jpeg" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], text: caption() }); return; }
+        catch (x) { if (x.name === "AbortError") return; }
+      }
+      download(b); U.toast("Picture saved · caption with your link copied — paste it when you post", 6000);
+    };
+    $("#odl").onclick = async () => { if (!o.head.trim()) return U.toast("Type the offer first"); copyCap(); onWeb(); download(await blob()); U.toast("Picture saved · caption copied", 4000); };
+    $("#omsg").onclick = () => { onWeb(); U.openWhatsApp("", caption()); };
+    $("#oweb").onchange = () => {
+      if ($("#oweb").checked) { A.updateShop(s.id, { promo: promoText() }); U.toast("Shows on your website and bills"); }
+      else if (s.promo === promoText()) { A.updateShop(s.id, { promo: "" }); U.toast("Taken off your website and bills"); }
+    };
+    drawItems(); redraw();
   }
 
   // ---------- bill PDF: A4 page, invoice layout ----------
