@@ -472,6 +472,21 @@
     if (error) throw new Error(friendly(error));
   }
 
+  // ---------- read a supplier's bill from photos (cloudflare/bills-worker.js) ----------
+  async function readBill(shopId, images) {
+    if (!C.billsUrl) throw new Error("Bill reading isn't switched on yet");
+    const { data } = await sb.auth.getSession();
+    if (!data.session) throw new Error("Log in again to read bills");
+    let res;
+    try {
+      res = await fetch(`${C.billsUrl}/read`, { method: "POST", body: JSON.stringify({ shopId, images }),
+        headers: { Authorization: `Bearer ${data.session.access_token}`, apikey: C.supabaseKey, "Content-Type": "application/json" } });
+    } catch { throw new Error("No internet — try again"); }
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || !j.ok) throw new Error(j.msg || "Couldn't read the bill — try again");
+    return j;
+  }
+
   // ---------- shop website visits ----------
   const SRCS = ["app", "qr", "bill", "share", "gmaps", "link", "search", "google", "web", "offer"];
   function logVisit(shopId, kind, src) {
@@ -588,7 +603,7 @@
   async function myNumber() { const { data } = await sb.auth.getSession(); const m = (data.session?.user?.email || "").match(/^91(\d{10})@/); return m ? m[1] : ""; }
   async function deleteShop(shopId) { const { error } = await sb.rpc("delete_my_shop", { p_shop: shopId }); if (error) throw new Error(friendly(error)); }
 
-  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, areaProduct, googleLink, saveGoogle, savePush, removePush, testPush, pushTestDirect, pushSaved, logProblem, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, isAdmin, importStatement, searchCatalog, searchOnline, myPlan, claimPayment, redeemCoupon, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, orderSettings, claimOrderPayment, setOrderPay, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl, newPhotoPath,
+  window.MM_CLOUD = { ready: true, addLoginNumber, loginNumbers, removeLoginNumber, checkPin, changePin, logoutOthers, myNumber, deleteShop, areaProduct, googleLink, saveGoogle, savePush, removePush, testPush, pushTestDirect, pushSaved, logProblem, logSearch, searchesNear, lookupBarcode, uploadBill, billFileUrl, billLink, logVisit, visitsSummary, shopLink, publicDone: false, isAdmin, importStatement, searchCatalog, searchOnline, myPlan, claimPayment, redeemCoupon, readBill, myPayments, placeOrder, orderStatus, cancelMyOrder, shopOrders, setOrderStatus, orderSettings, claimOrderPayment, setOrderPay, billShareLink, cleanOldBills, movedTo, loadShop, itemDetails, sb, enqueue, flush, status, retryFailed, topUpBillNos, signUp, signIn, signOut, userId, pullShop, loadPublic, photoUrl, newPhotoPath,
     pending: () => Q.get().length, failedOps: () => Q.failed(), relogin, needsLogin: () => needsLogin };
 
   // start-up

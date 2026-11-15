@@ -2684,6 +2684,119 @@
   }
 
   // ---------- stock arrived (purchase) ----------
+  // ---------- photo of the supplier's bill → the lines of this delivery ----------
+  // The photos (up to 4 pages, shrunk to 1600 px) go to the bill reader (cloudflare/bills-worker.js),
+  // which asks Claude to read them. Nothing is saved until the owner checks every line and taps Add.
+  const billReader = () => window.MM_BILLS_MOCK || (window.MM_CONFIG && window.MM_CONFIG.billsUrl && window.MM_CLOUD && window.MM_CLOUD.readBill) || null;
+  const nameWords = (t) => String(t || "").toLowerCase()
+    .replace(/(\d+(?:\.\d+)?)\s*(g|gm|gms|gram|grams|kg|ml|l|ltr|litre|pc|pcs|inch|mm)\b/g, "$1$2")
+    .replace(/[^a-z0-9. ]+/g, " ").split(/\s+/).filter((w) => w.length > 1 || /\d/.test(w));
+  function nameScore(a, b) {
+    const A = new Set(nameWords(a)), B = new Set(nameWords(b)); if (!A.size || !B.size) return 0;
+    let n = 0; for (const w of A) if (B.has(w) || [...B].some((x) => x.length > 3 && w.length > 3 && (x.startsWith(w) || w.startsWith(x)))) n++;
+    return (2 * n) / (A.size + B.size);
+  }
+  // the shop's usual selling price ÷ cost (middle value), for new items' suggested price
+  function usualMarkup(s) {
+    const saved = +A.store.get("markup:" + s.id, 0); if (saved >= 1) return saved;
+    const r = s.items.filter((i) => i.price > 0 && i.cost > 0).map((i) => i.price / i.cost).filter((x) => x >= 1 && x <= 4).sort((a, b) => a - b);
+    return r.length >= 3 ? Math.round(r[r.length >> 1] * 20) / 20 : 1.3;
+  }
+  function billPhotoSheet(s, onDone) {
+    const pages = [];   // JPEG data URLs
+    const draw = (el, busy, err) => {
+      el.innerHTML = `<div class="eyebrow">Stock arrived</div><div class="title">Photo of the supplier's bill</div>
+        <p class="small quiet" style="margin:4px 0 12px">Lay the bill flat in good light and fill the photo with it. A long bill? Add each page. The app reads the items — you check them before anything is saved.</p>
+        ${pages.length ? `<div class="bpages">${pages.map((p, i) => `<div><img src="${p}" alt="Page ${i + 1}"><button type="button" data-rmp="${i}" aria-label="Remove page" ${busy ? "disabled" : ""}>×</button></div>`).join("")}</div>` : ""}
+        ${busy ? `<div class="bbusy"><span class="spin"></span><b>Reading the bill…</b><span class="small quiet">This takes 15–40 seconds. Keep this screen open.</span></div>` : `
+        <div class="two" style="margin-top:4px">
+          <label class="btn ${pages.length ? "line" : ""}" style="text-align:center;cursor:pointer">${ic("camera")} ${pages.length ? "Add a page" : "Take photo"}<input type="file" accept="image/*" capture="environment" hidden id="bpcam" ${pages.length >= 4 ? "disabled" : ""}></label>
+          <label class="btn line" style="text-align:center;cursor:pointer">From gallery<input type="file" accept="image/*" multiple hidden id="bpgal" ${pages.length >= 4 ? "disabled" : ""}></label></div>
+        ${pages.length ? `<button class="btn" id="bpread" type="button" style="margin-top:10px">Read the bill${pages.length > 1 ? ` (${pages.length} pages)` : ""}</button>` : ""}`}
+        ${err ? `<p class="small" style="color:var(--out);margin:10px 0 0">${esc(err)}</p>` : ""}
+        <p class="faint tiny" style="margin:12px 0 0">The photo is sent to our AI reader (Claude, by Anthropic) only to read it, and is not stored by My Market.</p>
+        <div class="opts"><button class="link" id="bpx" type="button" ${busy ? "disabled" : ""}>Cancel</button></div>`;
+      if (busy) return;
+      const addFiles = async (files) => {
+        for (const f of [...files].slice(0, 4 - pages.length)) { const d = await shrinkPhoto(f, 1600, 0.8); if (d) pages.push(d); else U.toast("Couldn't read that photo"); }
+        draw(el);
+      };
+      $("#bpcam", el).onchange = (e) => addFiles(e.target.files);
+      $("#bpgal", el).onchange = (e) => addFiles(e.target.files);
+      $$("[data-rmp]", el).forEach((b) => b.onclick = () => { pages.splice(+b.dataset.rmp, 1); draw(el); });
+      $("#bpx", el).onclick = () => U.closeSheet();
+      $("#bpread", el) && ($("#bpread", el).onclick = async () => {
+        const read = billReader(); if (!read) return draw(el, false, "Bill reading isn't switched on yet");
+        draw(el, true);
+        try {
+          const r = await read(s.id, pages.map((p) => p.replace(/^data:image\/\w+;base64,/, "")));
+          if (!r.bill || !r.bill.readable || !(r.bill.lines || []).length) return draw(el, false, `Couldn't find items on this bill${r.bill && r.bill.problem ? ` — ${r.bill.problem}` : ""}. Try a sharper photo, flat and in good light.`);
+          billReviewSheet(s, r.bill, r, onDone);
+        } catch (x) { if (document.body.contains(el)) draw(el, false, x.message || "Couldn't read the bill — try again"); }
+      });
+    };
+    U.openSheet("", (el) => draw(el));
+  }
+  function billReviewSheet(s, bill, meta, onDone) {
+    let markup = usualMarkup(s);
+    const money = (v) => (v == null || !isFinite(v) ? null : Math.round(v * 100) / 100);
+    const rows = bill.lines.map((l) => {
+      const qty = Math.max(1, Math.round(+l.qty || 1));
+      const cost = money(l.rate != null ? l.rate : l.amount != null && l.qty ? l.amount / l.qty : null);
+      const ranked = s.items.map((it) => [nameScore(l.name, it.name + " " + (it.brand !== "Generic" ? it.brand || "" : "")), it]).filter((x) => x[0] > 0.25).sort((a, b) => b[0] - a[0]).slice(0, 25);
+      const best = ranked[0] && ranked[0][0] >= 0.6 ? ranked[0][1] : null;
+      return { l, on: true, qty, cost, match: best ? best.id : "", ranked, name: l.name.replace(/\s+/g, " ").trim().slice(0, 120), sell: null, mrp: l.mrp };
+    });
+    const sellOf = (r) => r.sell != null ? r.sell : r.cost ? Math.max(1, Math.round(r.cost * markup)) : null;
+    const draw = (el) => {
+      const on = rows.filter((r) => r.on), sum = on.reduce((a, r) => a + (r.l.amount != null && r.qty === Math.round(+r.l.qty || 1) ? r.l.amount : (r.cost || 0) * r.qty), 0);
+      const total = bill.bill_total, gap = total != null ? Math.round(total - sum) : null;
+      const nNew = on.filter((r) => !r.match).length;
+      el.innerHTML = `<div class="eyebrow">Check the bill</div><div class="title">${esc(bill.supplier || "Supplier's bill")}</div>
+        <p class="small quiet" style="margin:2px 0 10px">${[bill.bill_no && "Bill " + esc(bill.bill_no), bill.bill_date && esc(bill.bill_date), `${rows.length} line${rows.length > 1 ? "s" : ""} read`].filter(Boolean).join(" · ")}${meta && meta.limit ? ` · ${meta.used} of ${meta.limit} bills this month` : ""}</p>
+        <p class="small" style="margin:0 0 10px">Check each line against the paper bill. <b class="warn">Yellow</b> lines were hard to read.</p>
+        ${nNew ? `<label class="small bmk">New items: selling price = cost × <input class="field" id="bmk" inputmode="decimal" value="${markup}"></label>` : ""}
+        <div class="blines">${rows.map((r, i) => `<div class="bl ${r.on ? "" : "off"} ${r.l.unsure ? "unsure" : ""}">
+          <label class="blhd"><input type="checkbox" data-on="${i}" ${r.on ? "checked" : ""}><span><b>${esc(r.l.name)}</b>${r.l.unsure && r.l.note ? `<em>${esc(r.l.note)}</em>` : ""}
+            <em>Bill: ${r.l.qty ?? "?"}${r.l.unit ? " " + esc(r.l.unit) : ""}${r.l.rate != null ? ` × ${rupee(r.l.rate)}` : ""}${r.l.amount != null ? ` = ${rupee(r.l.amount)}` : ""}</em></span></label>
+          ${r.on ? `<select class="field" data-mt="${i}"><option value="">➕ New item</option>${r.ranked.map(([, it]) => `<option value="${esc(it.id)}" ${r.match === it.id ? "selected" : ""}>${esc(it.name)}</option>`).join("")}</select>
+          ${r.match ? "" : `<input class="field" data-nm="${i}" value="${esc(r.name)}" maxlength="120" placeholder="Item name">`}
+          <div class="blnum"><label>Qty<input class="field" data-q="${i}" inputmode="numeric" value="${r.qty}"></label>
+            <label>Cost each ₹<input class="field" data-c="${i}" inputmode="decimal" value="${r.cost ?? ""}"></label>
+            ${r.match ? "" : `<label>Sell at ₹<input class="field" data-s="${i}" inputmode="numeric" value="${sellOf(r) ?? ""}"></label>`}</div>` : ""}
+        </div>`).join("")}</div>
+        <p class="small" style="margin:12px 0 0">Lines add up to <b>${rupee(Math.round(sum))}</b>${total != null ? ` · bill total <b>${rupee(total)}</b>` : ""}</p>
+        ${gap != null && Math.abs(gap) > Math.max(5, total * 0.02) ? `<p class="small warn" style="margin:4px 0 0">Differs by ${rupee(Math.abs(gap))} — tax, discount or a line read wrong. Check the lines.</p>` : ""}
+        <div class="opts"><button class="btn" id="bradd" type="button">Add ${on.length} line${on.length === 1 ? "" : "s"} to this delivery</button><button class="link" id="brx" type="button">Cancel</button></div>`;
+      const ix = (e, k) => +e.dataset[k];
+      $$("[data-on]", el).forEach((c) => c.onchange = () => { rows[ix(c, "on")].on = c.checked; draw(el); });
+      $$("[data-mt]", el).forEach((m) => m.onchange = () => { rows[ix(m, "mt")].match = m.value; draw(el); });
+      $$("[data-nm]", el).forEach((m) => m.oninput = () => { rows[ix(m, "nm")].name = m.value; });
+      $$("[data-q]", el).forEach((m) => m.onchange = () => { rows[ix(m, "q")].qty = Math.max(1, Math.round(+m.value || 1)); draw(el); });
+      $$("[data-c]", el).forEach((m) => m.onchange = () => { const v = +m.value; rows[ix(m, "c")].cost = v > 0 ? money(v) : null; draw(el); });
+      $$("[data-s]", el).forEach((m) => m.onchange = () => { const v = Math.round(+m.value); rows[ix(m, "s")].sell = v > 0 ? v : null; });
+      $("#bmk", el) && ($("#bmk", el).onchange = (e) => { const v = +e.target.value; if (v >= 1 && v <= 10) { markup = Math.round(v * 100) / 100; A.store.set("markup:" + s.id, markup); } draw(el); });
+      $("#brx", el).onclick = () => U.closeSheet();
+      $("#bradd", el).onclick = () => {
+        if (planLocked(s)) { U.closeSheet(); return lockedSheet(); }
+        const out = [];
+        for (const r of rows.filter((x) => x.on)) {
+          let it = r.match && s.items.find((x) => x.id === r.match);
+          if (!it) {
+            const nm = r.name.trim(); if (!nm) return U.toast("A new item has no name");
+            it = A.addOwnItem(s.id, { name: nm, cat: s.cat, price: sellOf(r), cost: r.cost, details: r.mrp ? { mrp: Math.round(r.mrp) } : null })
+              || s.items.find((x) => x.name.trim().toLowerCase() === nm.toLowerCase());
+            if (!it) continue;
+          }
+          out.push({ itemId: it.id, name: it.name, qty: r.qty, cost: r.cost });
+        }
+        if (!out.length) return U.toast("Tick at least one line");
+        U.closeSheet(); onDone({ supplier: bill.supplier || "", lines: out });
+      };
+    };
+    U.openSheet("", draw);
+  }
+
   function stockInView() {
     const s = A.ownerShop();
     let lines = A.store.get("stockDraft:" + s.id, []); // [{itemId, name, qty, cost}]
@@ -2748,6 +2861,7 @@
       <div class="pad billhead"><b>What arrived?</b><span class="quiet small">Tap or scan each piece</span></div>
       <div class="pad scanrow"><div class="inshop">${ic("search")}<input id="bq" placeholder="Find an item" autocomplete="off"></div><button class="btn auto scanbtn" id="scanb">${ic("camera")} Scan</button></div>
       <div class="bgrid" id="bgrid"></div>
+      ${billReader() ? `<div class="pad" style="margin:12px 0 0"><button class="as-main bphoto" id="billph" type="button">${ic("camera")}<b>Photo of the supplier's bill</b><span>The app reads the items, quantities and rates — you check them</span></button></div>` : ""}
       <div class="pad" style="margin:12px 0 0"><button class="btn line" id="newit">${ic("search")} Add an item not in your list</button></div>
       <div style="height:110px"></div>
       <div class="billbar"><div id="bsum"></div><button class="btn auto" id="bgo">Review</button></div>`;
@@ -2766,6 +2880,15 @@
       if (it) add(it, 1); else linkCodeSheet(s, code, (x) => add(x, 1));
     };
     $("#bgo").onclick = review;
+    // lines read from the supplier's bill join this delivery, then the usual review saves it
+    $("#billph") && ($("#billph").onclick = () => {
+      if (planLocked(s)) return lockedSheet();
+      billPhotoSheet(s, (r) => {
+        for (const n of r.lines) { const l = lineOf(n.itemId); if (l) { l.qty += n.qty; if (n.cost) l.cost = n.cost; } else lines.push({ ...n }); }
+        if (r.supplier) supplier = r.supplier;
+        keep(); paint(); review();
+      });
+    });
     paint();
   }
 

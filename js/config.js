@@ -13,6 +13,9 @@ window.MM_CONFIG = {
   // The customer site Google reads (cloudflare/site-worker.js), e.g. "https://mymarket.example.in".
   // Empty = shop links stay on the app's own #/shop/<id> address.
   siteUrl: "https://mymarket.aman101bhandari.workers.dev",
+  // Reading supplier bills from a photo (cloudflare/bills-worker.js), e.g. "https://mymarket-bills.<you>.workers.dev".
+  // Empty = the "Photo of the supplier's bill" button stays hidden.
+  billsUrl: "",
   // Order alerts (Web Push): My Market's public VAPID key. The private half lives only in the site worker.
   vapidPublic: "BLNqmF-Oof4lsDm1lJRCzT9fOjdGAuZqicajNBYcom01ZbXKbgl9lcvdqI4iaMHW0aYlEo8mOjuAuwQ3OVWb64c",
 };

@@ -277,3 +277,27 @@ body.biz-app.tabs-on .billbar { bottom: calc(60px + env(safe-area-inset-bottom))
 .vgrid td { padding: 3px; }
 .vgrid input { width: 100%; min-width: 46px; padding: 8px 4px; text-align: center; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
 .bnone { padding: 4px 0; }
+
+/* photo of the supplier's bill */
+.bphoto { width: 100%; }
+.bpages { display: flex; gap: 8px; overflow-x: auto; margin-bottom: 10px; }
+.bpages div { position: relative; flex: none; }
+.bpages img { width: 84px; height: 112px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); display: block; }
+.bpages button { position: absolute; top: 3px; right: 3px; width: 24px; height: 24px; border-radius: 50%; border: 0; background: rgba(0,0,0,.6); color: #fff; font-size: 15px; line-height: 1; }
+.bbusy { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 18px 0; text-align: center; }
+.bbusy .spin { width: 30px; height: 30px; border-radius: 50%; border: 3px solid var(--line); border-top-color: #1e8e4e; animation: bspin 0.9s linear infinite; }
+@keyframes bspin { to { transform: rotate(360deg); } }
+.bmk { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; text-transform: none; letter-spacing: 0; }
+.bmk .field { width: 70px; padding: 6px 8px; }
+.blines { display: grid; gap: 8px; max-height: 52vh; overflow: auto; }
+.bl { border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: #fff; display: grid; gap: 8px; }
+.bl.unsure { background: #fff8e6; border-color: #f0d48a; }
+.bl.off { opacity: .55; }
+.blhd { display: flex; gap: 10px; align-items: flex-start; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.blhd input { width: 20px; height: 20px; flex: none; margin-top: 2px; accent-color: #1e8e4e; }
+.blhd b { display: block; font-size: 14px; }
+.blhd em { display: block; font-style: normal; font-size: 12px; color: var(--ink-2, #565959); }
+.blnum { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.blnum label { font-size: 11px; text-transform: none; letter-spacing: 0; }
+.blnum .field, .bl select.field, .bl > .field { padding: 7px 8px; font-size: 14px; }
+#sheet p.warn, #sheet b.warn { color: #9a6200; }
