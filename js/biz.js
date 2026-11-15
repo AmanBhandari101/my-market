@@ -728,7 +728,7 @@
     const s = A.ownerShop();
     const setup = params.get("setup") === "1";
     const FILTERS = { all: "All", low: "Running low", out: "Out", uncounted: "Not counted" };
-    let filter = FILTERS[params.get("f")] ? params.get("f") : "all", find = "";
+    let filter = FILTERS[params.get("f")] ? params.get("f") : "all", find = "", catTried = false;
 
     // One item: count, stock in/out with a reason, prices, alert level, history.
     function itemSheet(it) {
@@ -790,18 +790,27 @@
         return true;
       });
       const cat = A.catalogFor(s.cat);
+      // more popular products from the big catalogue (kinds of shop without a built-in list get only these)
+      const pop = setup && CAT ? catPopular(s.cat, 60).filter((r) => !cat.some((c) => c.name.toLowerCase() === r[1].toLowerCase())) : [];
+      if (setup && !CAT && !catTried) { catTried = true; loadCatalog().then(() => { if (/setup=1/.test(location.hash)) draw(); }).catch(() => {}); }
       U.app.innerHTML = `
         ${bizTop(setup ? "Your items" : "Stock")}
         ${setup ? `<div class="pad" style="margin-top:18px"><h1 class="title">Tap what you sell</h1>
-          <p class="quiet small" style="line-height:1.5">No typing — pick from the list. You can add prices later.</p></div>` : ""}
-        ${setup ? `<div class="block"><div class="pick">${cat.map((c) => `<button class="pickc ${listed.has(A.slug(c.name)) ? "on" : ""}" data-pick="${esc(c.name)}">
-            <span class="pimg sm" style="${U.catVars(s.cat)}">${c.img ? `<img src="${c.img}" alt="">` : U.art(s.cat, 36)}</span><span>${esc(c.name)}<em>${esc(c.brand)}</em></span></button>`).join("")}</div>
-          <div class="pad" style="margin:18px 0 0;padding:0"><button class="btn line" id="allp">${ic("search")} Search all products</button></div>
+          <p class="quiet small" style="line-height:1.5">No typing — tick what you sell, or “Select all” and untick what you don't. No need to count now: the app asks an item's price the first time you bill it, and counts come from your bills and deliveries.</p></div>` : ""}
+        ${setup ? `<div class="block"><div class="pickbar"><b id="pkn">${s.items.length} item${s.items.length === 1 ? "" : "s"} in your shop</b>${cat.length || pop.length ? '<button class="link" id="pkall" type="button">Select all</button>' : ""}</div>
+          <div class="pick">${cat.map((c) => `<button class="pickc ${listed.has(A.slug(c.name)) ? "on" : ""}" data-pick="${esc(c.name)}">
+            <span class="pimg sm" style="${U.catVars(s.cat)}">${c.img ? `<img src="${c.img}" alt="">` : U.art(s.cat, 36)}</span><span>${esc(c.name)}<em>${esc(c.brand)}</em></span></button>`).join("")}
+            ${pop.map((r, i) => `<button class="pickc ${itemOfRow(s, r) ? "on" : ""}" data-pc="${i}">
+            <span class="pimg sm" style="${U.catVars(s.cat)}">${rowImg(r, false) ? `<img src="${esc(rowImg(r, false))}" alt="" loading="lazy" onerror="this.remove()">` : U.art(s.cat, 36)}</span><span>${esc(r[1])}<em>${esc([r[2], r[3]].filter(Boolean).join(" · "))}</em></span></button>`).join("")}</div>
+          ${!CAT ? '<p class="faint tiny" style="margin:10px 0 0">Loading more popular items…</p>' : ""}
+          <div class="eyebrow" style="margin-top:20px">Other quick ways</div>${quickAddHTML(true)}
+          <div class="pad" style="margin:14px 0 0;padding:0"><button class="btn line" id="allp">${ic("search")} Search all products</button></div>
           <div class="pad" style="margin:12px 0 40px;padding:0"><a class="btn" href="#/biz">Done — start billing</a></div></div>` : `
         <div class="addstock">
           <a class="as-main" href="#/biz/stockin">${ic("truck")}<b>Stock arrived</b><span>Add quantities from a supplier</span></a>
           <button class="as-main" id="newit">${ic("search")}<b>Add item</b><span>Search by name or scan the barcode</span></button>
         </div>
+        <div class="pad" style="padding-top:12px"><div class="eyebrow" style="margin:0 0 8px">Add many at once</div>${quickAddHTML(false)}</div>
         <div class="stats">
           <div><b>${inv.units}</b><span>units counted</span></div>
           <div><b>${rupee(inv.value)}</b><span>stock value at cost</span></div>
@@ -826,12 +835,26 @@
           <p class="faint tiny" style="margin:16px 0 40px;line-height:1.6">“Count” starts tracking an item. Items you don't count yet still show as “Ask to confirm” to customers. Few left = at or below the alert level you set (default 3).</p></div>`}`;
       bindTop();
       $("#newit") && ($("#newit").onclick = () => addItemsSheet(s, "", draw));
+      bindQuickAdd(s, draw);
+      const pkn = () => { $("#pkn") && ($("#pkn").textContent = `${s.items.length} item${s.items.length === 1 ? "" : "s"} in your shop`); };
+      $$("[data-pc]").forEach((b) => b.onclick = () => {
+        const r = pop[+b.dataset.pc];
+        if (b.classList.contains("on")) { const it = itemOfRow(s, r); if (it) A.setItem(s.id, it.id, { removed: true }); }
+        else if (!addCatRow(s, r, false)) return U.toast("Already in your shop");
+        b.classList.toggle("on"); pkn();
+      });
+      $("#pkall") && ($("#pkall").onclick = () => {
+        let n = 0;
+        for (const c of cat) if (!s.items.some((i) => A.slug(i.name) === A.slug(c.name)) && A.addItem(s.id, c.tmpl, s.cat)) n++;
+        for (const r of pop) if (!itemOfRow(s, r) && addCatRow(s, r, false)) n++;
+        U.toast(n ? `${n} added — untick what you don't sell` : "All of them are already in your shop", 4000); draw();
+      });
       $$("[data-pick]").forEach((b) => b.onclick = () => {
         const c = cat.find((x) => x.name === b.dataset.pick);
         if (b.classList.contains("on")) {
           const it = s.items.find((i) => i.name === c.name); if (it) A.setItem(s.id, it.id, { removed: true });
         } else A.addItem(s.id, c.tmpl, s.cat);
-        b.classList.toggle("on");
+        b.classList.toggle("on"); pkn();
       });
       $$("[data-f]").forEach((b) => b.onclick = () => { filter = filter === b.dataset.f && b.dataset.f !== "all" ? "all" : b.dataset.f; draw(); });
       $("#sfind") && $("#sfind").addEventListener("input", (e) => { find = e.target.value; const pos = e.target.selectionStart; draw(); const f = $("#sfind"); f.focus(); f.setSelectionRange(pos, pos); });
@@ -1101,11 +1124,258 @@
     plywood: ["Hardware & Tools"], auto: ["Auto Accessories"], cycle: ["Toys, Sports & Fitness", "Auto Accessories"], pet: ["Pet Supplies"],
     salon: ["Personal Care", "Beauty & Makeup"],
   };
-  const catPopular = (k) => {
+  const catPopular = (k, n = 30) => {
     if (!CAT) return [];
     const ds = SHOP_DEPTS[k];
-    return CAT.rows.filter((r) => { const a = CAT.aisles[r[4]]; return ds ? ds.includes(a[0]) : a[2] === k; }).slice(0, 30);
+    return CAT.rows.filter((r) => { const a = CAT.aisles[r[4]]; return ds ? ds.includes(a[0]) : a[2] === k; }).slice(0, n);
   };
+
+  // a product from the built-in catalogue (a row of catalog/products.json) into the shop; the shop sets its price
+  // wiki: false leaves out photos matched from Wikipedia by name (often not the product) - used when adding many at once
+  const rowImg = (r, wiki = true) => (wiki || !String(r[5] || "").startsWith("w:") ? catImg(r) : "");
+  function addCatRow(s, r, wiki = true) {
+    const a = CAT.aisles[r[4]];
+    // two packs with the same name ("Maggi" 70 g and 280 g): the size goes into the name
+    const clash = s.items.some((x) => x.name.toLowerCase() === r[1].toLowerCase() && (x.brand || "Generic").toLowerCase() === (r[2] || "Generic").toLowerCase());
+    const name = clash && r[3] ? `${r[1]} ${r[3]}` : clash && r[0] ? `${r[1]} (${r[0].slice(-4)})` : r[1];
+    return A.addOwnItem(s.id, { name, brand: r[2] || "", cat: C[a[2]] ? a[2] : s.cat, price: null,
+      details: { barcode: r[0] || undefined, size: r[3] || undefined, productPhoto: rowImg(r, wiki) || undefined, photoCredit: (rowImg(r, wiki) && catCredit(r)) || undefined, source: "catalog" } });
+  }
+  // the shop's item that came from catalogue row r (by barcode, or by name)
+  const itemOfRow = (s, r) => s.items.find((i) => (r[0] && i.barcode && noZeros(i.barcode) === noZeros(r[0]))
+    || i.name.toLowerCase() === r[1].toLowerCase() || (r[3] && i.name.toLowerCase() === `${r[1]} ${r[3]}`.toLowerCase())) || null;
+
+  // ---------- quick ways to add many items (Stock page and first setup) ----------
+  const quickAddHTML = (setup) => `<div class="qadd">
+      ${setup ? "" : `<button type="button" data-qa="tick">${ic("check")}<b>Tick from a list</b><span>Common items for your kind of shop</span></button>`}
+      <button type="button" data-qa="scan">${ic("camera")}<b>Scan a shelf</b><span>Scan every pack — items and counts go in</span></button>
+      <button type="button" data-qa="sheet">${ic("receipt")}<b>From Excel or a list</b><span>A sheet, a supplier's list, or type it</span></button>
+      <button type="button" data-qa="var">${ic("grid")}<b>Sizes & colours</b><span>One design in many sizes — clothes, shoes</span></button>
+    </div>`;
+  function bindQuickAdd(s, after) {
+    $$("[data-qa]").forEach((b) => b.onclick = () => {
+      const k = b.dataset.qa;
+      if (k === "tick") return U.go("#/biz/items?setup=1");
+      if (planLocked(s)) return lockedSheet();
+      if (k === "scan") shelfScan(s, after);
+      else if (k === "sheet") importSheet(s, after);
+      else variantSheet(s, after);
+    });
+  }
+
+  // ---------- scan a shelf: every scan counts one; new barcodes come from the catalogue ----------
+  async function shelfScan(s, after) {
+    try { await loadCatalog(); } catch {}
+    const counts = new Map(), unknown = new Map(), added = new Set();
+    await scanBarcode({ title: "Scan a shelf", hint: "Scan every pack — each scan counts one. Same item again? Move it away for 2 seconds.", onCode: (c) => {
+      let it = A.itemByCode(s.id, c);
+      if (!it && CAT) {
+        const r = CAT.byCode.get(noZeros(c));
+        if (r) { it = addCatRow(s, r) || itemOfRow(s, r); if (it) { added.add(it.id); if (!it.barcode) A.setItem(s.id, it.id, { code: c }); } }
+      }
+      if (!it) { unknown.set(c, (unknown.get(c) || 0) + 1); return `New code ${c} — you'll name it after`; }
+      counts.set(it.id, (counts.get(it.id) || 0) + 1);
+      return `${it.name} · ${counts.get(it.id)} counted${added.has(it.id) ? " · new" : ""}`;
+    } });
+    if (counts.size || unknown.size) shelfSummary(s, counts, unknown, added, after);
+  }
+  function shelfSummary(s, counts, unknown, added, after) {
+    const total = [...counts.values(), ...unknown.values()].reduce((a, b) => a + b, 0);
+    U.openSheet(`<div class="eyebrow">Shelf scan</div><div class="title">${total} pack${total === 1 ? "" : "s"} scanned</div>
+      <p class="small quiet" style="margin:4px 0 10px">Check the numbers and fix any.${added.size ? ` ${added.size} new item${added.size > 1 ? "s were" : " was"} added from the catalogue — the app asks the price the first time you bill ${added.size > 1 ? "them" : "it"}.` : ""}</p>
+      <div class="entries" style="max-height:40vh;overflow:auto">${[...counts].map(([id, n]) => { const it = s.items.find((x) => x.id === id); return it ? `<div class="entry">
+        <span class="thumb" style="${U.catVars(it.cat)}">${U.pimg(it)}</span><div class="body"><div class="name">${esc(it.name)}</div><div class="note">${it.qty != null ? `now ${it.qty} in stock` : "not counted before"}${added.has(id) ? " · new" : ""}</div></div>
+        <input class="field" style="width:70px;text-align:center" inputmode="numeric" data-sc="${esc(id)}" value="${n}"></div>` : ""; }).join("")}</div>
+      ${unknown.size ? `<div class="eyebrow" style="margin-top:14px">Codes not in the catalogue</div><div class="entries">${[...unknown].map(([c, n]) => `<div class="entry"><div class="body"><div class="name">${esc(c)}</div><div class="note">${n} scanned</div></div>
+        <button class="btn line auto" data-uk="${esc(c)}" style="padding:8px 12px">Name it</button></div>`).join("")}</div>` : ""}
+      ${counts.size ? `<div class="two" style="margin-top:14px"><button class="btn" id="sset" type="button">Save as my count</button><button class="btn line" id="sadd" type="button">Stock arrived (+)</button></div>
+      <p class="faint tiny" style="margin:8px 0 0">Save as my count: these numbers become what you have. Stock arrived: they are added on top.</p>` : ""}
+      <div class="opts"><button class="link" id="sx" type="button">Close</button></div>`, (el) => {
+      const read = () => $$("[data-sc]", el).forEach((i) => counts.set(i.dataset.sc, Math.max(0, Math.round(+i.value || 0))));
+      const save = (set) => {
+        read(); let n = 0;
+        for (const [id, k] of counts) { if (!set && !k) continue; A.moveStock(s.id, id, set ? { set: k, reason: "count" } : { delta: k, reason: "received" }); n++; }
+        U.closeSheet(); U.toast(`${set ? "Counts saved" : "Stock added"} for ${n} item${n === 1 ? "" : "s"}`); after && after();
+      };
+      $("#sset", el) && ($("#sset", el).onclick = () => save(true));
+      $("#sadd", el) && ($("#sadd", el).onclick = () => save(false));
+      $("#sx", el).onclick = () => { U.closeSheet(); after && after(); };
+      $$("[data-uk]", el).forEach((b) => b.onclick = () => {
+        read(); const c = b.dataset.uk, n = unknown.get(c);
+        linkCodeSheet(s, c, (it) => { unknown.delete(c); counts.set(it.id, (counts.get(it.id) || 0) + n); shelfSummary(s, counts, unknown, added, after); });
+      });
+    });
+  }
+
+  // ---------- add from Excel / CSV / a pasted list ----------
+  let xlsxLoad = null;
+  const loadXLSX = () => xlsxLoad || (xlsxLoad = new Promise((res, rej) => {
+    const sc = document.createElement("script");
+    sc.src = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
+    sc.onload = () => res(window.XLSX); sc.onerror = () => { xlsxLoad = null; rej(new Error("Reading Excel needs the internet once")); };
+    document.head.appendChild(sc);
+  }));
+  function csvRows(text) {
+    const first = text.split(/\r?\n/).find((l) => l.trim()) || "";
+    const d = first.includes("\t") ? "\t" : (first.match(/;/g) || []).length > (first.match(/,/g) || []).length ? ";" : ",";
+    const rows = []; let row = [], cell = "", q = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (q) { if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (ch === '"') q = false; else cell += ch; }
+      else if (ch === '"' && !cell) q = true;
+      else if (ch === d) { row.push(cell); cell = ""; }
+      else if (ch === "\n" || ch === "\r") { if (ch === "\r" && text[i + 1] === "\n") i++; row.push(cell); rows.push(row); row = []; cell = ""; }
+      else cell += ch;
+    }
+    if (cell || row.length) { row.push(cell); rows.push(row); }
+    return rows;
+  }
+  // a typed / pasted list: "name, price, qty" — or "Parle-G 100g 10 48" (numbers at the end)
+  function listRows(text) {
+    return text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => {
+      if (/[\t,;|]/.test(l)) return l.split(/\s*[\t,;|]\s*/);
+      const m = l.match(/^(.*?)\s+(?:₹|rs\.?\s*)?(\d+(?:\.\d+)?)(?:\s+(\d+))?\s*$/i);
+      return m && m[1] ? [m[1], m[2], m[3] || ""] : [l];
+    });
+  }
+  const IMPCOLS = { name: /name|item|product|particular|descr|सामान|नाम/i, mrp: /mrp|m\.r\.p/i, price: /sell|price|rate|\bsp\b|amount|दाम|रेट/i,
+    cost: /cost|purchase|buy|\bcp\b|landing/i, qty: /qty|quant|stock|pcs|nos|units|count|मात्रा/i, barcode: /barcode|ean|upc|code/i,
+    brand: /brand|company|make|mfg/i, size: /size|pack|weight|volume/i };
+  function readItemRows(rows, s) {
+    rows = rows.map((r) => r.map((c) => String(c ?? "").trim())).filter((r) => r.some(Boolean));
+    if (!rows.length) return { items: [], dup: 0, bad: 0 };
+    const num = (v) => { const x = parseFloat(String(v || "").replace(/[₹,\s]|rs\.?/gi, "")); return isFinite(x) && x >= 0 ? x : null; };
+    let col = { name: 0, price: 1, qty: 2 }, start = 0;
+    const head = rows[0];
+    if (head.some((c) => IMPCOLS.name.test(c)) && !head.some((c) => num(c) != null && c !== "")) {
+      col = {}; start = 1;
+      // the more specific columns first, so "Selling price" isn't taken as cost or MRP
+      for (const k of ["barcode", "mrp", "cost", "qty", "brand", "size", "name", "price"]) {
+        const i = head.findIndex((c, j) => IMPCOLS[k].test(c) && !Object.values(col).includes(j));
+        if (i >= 0) col[k] = i;
+      }
+      if (col.name == null) col.name = 0;
+      if (col.price == null && col.mrp != null) col.price = col.mrp;
+    }
+    const have = new Set(s.items.map((i) => i.name.trim().toLowerCase()));
+    const items = [], seen = new Set(); let dup = 0, bad = 0;
+    for (const r of rows.slice(start)) {
+      const name = (r[col.name] || "").replace(/\s+/g, " ").trim().slice(0, 120), key = name.toLowerCase();
+      if (!name || num(name) != null) { bad++; continue; }
+      if (have.has(key) || seen.has(key)) { dup++; continue; }
+      seen.add(key);
+      const g = (k) => (col[k] != null ? r[col[k]] : "");
+      const price = num(g("price")), qty = num(g("qty"));
+      items.push({ name, brand: g("brand").slice(0, 60), price: price ? Math.round(price) : null, mrp: num(g("mrp")) ? Math.round(num(g("mrp"))) : null,
+        cost: num(g("cost")) ? Math.round(num(g("cost")) * 100) / 100 : null, qty: g("qty") !== "" && qty != null ? Math.round(qty) : null,
+        barcode: (g("barcode").match(/\d{6,14}/) || [""])[0], size: g("size").slice(0, 40) });
+    }
+    return { items, dup, bad };
+  }
+  function importSheet(s, after) {
+    let got = null;
+    const sample = "Name,Brand,Selling price,MRP,Cost,Quantity,Barcode,Size\nParle-G Biscuit,Parle,10,10,8.5,48,8901719101038,100 g\nTata Salt,Tata,28,28,24,20,,1 kg\nMen's cotton shirt,,799,999,420,12,,\n";
+    U.openSheet(`<div class="eyebrow">Stock</div><div class="title">Add from Excel or a list</div>
+      <p class="small quiet" style="margin:4px 0 10px">Choose an Excel or CSV file — your old billing app's item list, or a supplier's price list. Or paste / type a list, one item per line: <b>name, price, quantity</b>.</p>
+      <label class="btn line" style="text-align:center;cursor:pointer">${ic("receipt")} Choose Excel / CSV file<input type="file" hidden id="impf" accept=".xlsx,.xls,.csv,.txt,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
+      <div class="form" style="margin-top:10px"><textarea class="field" id="impt" rows="5" placeholder="Parle-G 100g, 10, 48&#10;Tata Salt 1kg, 28, 20&#10;Surf Excel 1kg, 140"></textarea>
+        <button class="btn line" id="impgo" type="button">Read this list</button></div>
+      <p class="faint tiny" style="margin:8px 0 0">Columns are found by their headings (Name, Price, MRP, Cost, Qty, Barcode, Brand, Size). <button class="link" id="imps" type="button">Download a sample sheet</button></p>
+      <div id="imprev"></div>
+      <div class="opts"><button class="link" id="impx" type="button">Close</button></div>`, (el) => {
+      const show = (r) => {
+        got = r;
+        const it = r.items, box = $("#imprev", el);
+        if (!it.length) { box.innerHTML = `<p class="small" style="color:var(--out);margin:12px 0 0">No new items found${r.dup ? ` — ${r.dup} already in your shop` : ""}. Check that each line has the item's name first.</p>`; return; }
+        const big = it.length > 500;
+        box.innerHTML = `<div class="eyebrow" style="margin-top:16px">${it.length} new item${it.length > 1 ? "s" : ""}${r.dup ? ` · ${r.dup} already in your shop (skipped)` : ""}</div>
+          <div class="imptab"><table><tr><th>Item</th><th>Price</th><th>Qty</th></tr>${it.slice(0, 8).map((x) => `<tr><td>${esc(x.name)}${x.brand ? ` <span class="faint">· ${esc(x.brand)}</span>` : ""}</td><td>${x.price ? rupee(x.price) : '<span class="faint">later</span>'}</td><td>${x.qty ?? '<span class="faint">—</span>'}</td></tr>`).join("")}</table>
+          ${it.length > 8 ? `<p class="faint tiny" style="margin:6px 0 0">…and ${it.length - 8} more</p>` : ""}</div>
+          ${big ? '<p class="small quiet">The first 500 are added now — import the rest again after.</p>' : ""}
+          <button class="btn" id="impadd" type="button" style="margin-top:10px">Add ${Math.min(500, it.length)} item${it.length > 1 ? "s" : ""}</button>`;
+        $("#impadd", el).onclick = async (e) => {
+          const btn = e.currentTarget; btn.disabled = true;
+          let n = 0;
+          for (const x of got.items.slice(0, 500)) {
+            const d = {}; if (x.barcode) d.barcode = x.barcode; if (x.size) d.size = x.size; if (x.mrp) d.mrp = x.mrp;
+            if (A.addOwnItem(s.id, { name: x.name, brand: x.brand, cat: s.cat, price: x.price, cost: x.cost, qty: x.qty, details: Object.keys(d).length ? d : null })) n++;
+            if (n % 25 === 0) { btn.textContent = `Adding… ${n}`; await new Promise((r) => setTimeout(r, 0)); }
+          }
+          U.closeSheet(); U.toast(`${n} item${n === 1 ? "" : "s"} added — they reach the server in the background`, 5000); after && after();
+        };
+      };
+      $("#impf", el).onchange = async (e) => {
+        const f = e.target.files[0]; if (!f) return;
+        $("#imprev", el).innerHTML = '<p class="quiet small" style="margin:12px 0 0">Reading the file…</p>';
+        try {
+          let rows;
+          if (/\.(xlsx|xls)$/i.test(f.name)) {
+            const X = await loadXLSX(), wb = X.read(await f.arrayBuffer(), { type: "array" });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            rows = X.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
+          } else rows = csvRows(await f.text());
+          show(readItemRows(rows, s));
+        } catch (x) { $("#imprev", el).innerHTML = `<p class="small" style="color:var(--out);margin:12px 0 0">${esc(x.message || "Couldn't read that file")}</p>`; }
+      };
+      $("#impgo", el).onclick = () => { const t = $("#impt", el).value.trim(); if (!t) return U.toast("Type or paste a list first"); show(readItemRows(listRows(t), s)); };
+      $("#imps", el).onclick = () => {
+        const u = URL.createObjectURL(new Blob(["﻿" + sample], { type: "text/csv" })), a = document.createElement("a");
+        a.href = u; a.download = "my-market-items.csv"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000);
+      };
+      $("#impx", el).onclick = () => { U.closeSheet(); after && after(); };
+    });
+  }
+
+  // ---------- one design in many sizes and colours: one item per size (and colour), each with its own stock ----------
+  const SIZE_SETS = { "S – XXL": "S, M, L, XL, XXL", "28 – 40": "28, 30, 32, 34, 36, 38, 40", "UK 6 – 11": "6, 7, 8, 9, 10, 11",
+    "Kids": "2-3Y, 4-5Y, 6-7Y, 8-9Y, 10-11Y, 12-13Y", "Free size": "Free size" };
+  function variantSheet(s, after) {
+    const f = { name: "", brand: "", price: "", cost: "", sizes: "", colours: "" }, qty = {};
+    const list = (v, up = true) => [...new Set(String(v || "").split(",").map((x) => x.trim()).filter(Boolean).map((x) => (up && x.length <= 4 ? x.toUpperCase() : x[0].toUpperCase() + x.slice(1))))].slice(0, 15);
+    const vName = (sz, co) => `${f.name.trim()} (${[sz, co].filter(Boolean).join(", ")})`;
+    U.openSheet("", (el) => {
+      const grid = () => {
+        const sz = list(f.sizes), cs = list(f.colours, false), cols = cs.length ? cs : [""];
+        if (!sz.length) return '<p class="faint tiny" style="margin:6px 0 0">Pick or type the sizes — then type how many you have of each (optional).</p>';
+        return `<div class="vgrid"><table><tr><th></th>${cols.map((c) => `<th>${esc(c || "Qty")}</th>`).join("")}</tr>
+          ${sz.map((z) => `<tr><th>${esc(z)}</th>${cols.map((c) => `<td><input inputmode="numeric" data-vq="${esc(z + "|" + c)}" value="${esc(qty[z + "|" + c] ?? "")}" placeholder="–"></td>`).join("")}</tr>`).join("")}</table></div>
+          <p class="faint tiny" style="margin:6px 0 0">${sz.length * cols.length} item${sz.length * cols.length > 1 ? "s" : ""} will be made, e.g. “${esc(vName(sz[0], cols[0]))}”. Empty box = not counted yet.</p>`;
+      };
+      el.innerHTML = `<div class="eyebrow">Stock</div><div class="title">Sizes & colours</div>
+        <p class="small quiet" style="margin:4px 0 10px">Type the design once — the app makes one item for each size${" "}(and colour), so you can bill and count each one.</p>
+        <div class="form">
+          <label>Name<input class="field" id="vn" maxlength="90" placeholder="e.g. Men's slim jeans" value="${esc(f.name)}"></label>
+          <label>Brand <span class="faint tiny">(optional)</span><input class="field" id="vb" maxlength="60" value="${esc(f.brand)}"></label>
+          <div class="two"><label>Selling price ₹<input class="field" id="vp" inputmode="numeric" value="${esc(f.price)}"></label><label>Your cost ₹ <span class="faint tiny">(private)</span><input class="field" id="vc" inputmode="numeric" value="${esc(f.cost)}"></label></div>
+          <label>Sizes</label><div class="words" id="vset">${Object.keys(SIZE_SETS).map((k) => `<button type="button" class="word" data-vs="${esc(k)}">${esc(k)}</button>`).join("")}</div>
+          <input class="field" id="vs" placeholder="or type: S, M, L" value="${esc(f.sizes)}">
+          <label>Colours <span class="faint tiny">(optional)</span><input class="field" id="vco" placeholder="e.g. Blue, Black" value="${esc(f.colours)}"></label>
+          <div id="vg">${grid()}</div>
+          <p class="small" id="verr" style="color:var(--out);margin:0;min-height:1em"></p>
+          <button class="btn" id="vsave" type="button">Add items</button></div>
+        <div class="opts"><button class="link" id="vx" type="button">Close</button></div>`;
+      const regrid = () => { $("#vg", el).innerHTML = grid(); $$("[data-vq]", el).forEach((i) => i.oninput = () => { qty[i.dataset.vq] = i.value.replace(/\D/g, ""); }); };
+      const bindF = (id, k, re) => { $(id, el).oninput = () => { f[k] = $(id, el).value; if (re) regrid(); }; };
+      bindF("#vn", "name", true); bindF("#vb", "brand"); bindF("#vp", "price"); bindF("#vc", "cost"); bindF("#vs", "sizes", true); bindF("#vco", "colours", true);
+      $$("[data-vs]", el).forEach((b) => b.onclick = () => { f.sizes = SIZE_SETS[b.dataset.vs]; $("#vs", el).value = f.sizes; regrid(); });
+      regrid();
+      $("#vx", el).onclick = () => { U.closeSheet(); after && after(); };
+      $("#vsave", el).onclick = () => {
+        const sz = list(f.sizes), cs = list(f.colours, false), pr = Math.round(+f.price), co = Math.round(+f.cost);
+        if (!f.name.trim()) return ($("#verr", el).textContent = "Type the design's name");
+        if (!sz.length) return ($("#verr", el).textContent = "Pick or type the sizes");
+        if (!(pr > 0)) return ($("#verr", el).textContent = "Type the selling price");
+        let n = 0, dup = 0;
+        for (const z of sz) for (const c of cs.length ? cs : [""]) {
+          const q = qty[z + "|" + c];
+          const it = A.addOwnItem(s.id, { name: vName(z, c), brand: f.brand.trim(), cat: s.cat, price: pr, cost: co > 0 ? co : null,
+            qty: q === undefined || q === "" ? null : +q, details: { size: z, specMap: { Size: z, ...(c ? { Colour: c } : {}) }, share: false } });
+          it ? n++ : dup++;
+        }
+        U.closeSheet(); U.toast(`${n} item${n === 1 ? "" : "s"} added${dup ? ` · ${dup} you already had` : ""}`, 4000); after && after();
+      };
+    });
+  }
 
   function addItemsSheet(s, q0 = "", after, onAdd) {
     let q = q0, shared = [], online = null, offBusy = false, timer = null, seq = 0, catErr = false;
@@ -1157,12 +1427,7 @@
         try {
           if (k[0] === "c") {
             // from the catalogue: name, brand, size, barcode and photo come along; the shop sets its price
-            const r = K[i], a = CAT.aisles[r[4]];
-            // two packs with the same name ("Maggi" 70 g and 280 g): the size goes into the name
-            const clash = s.items.some((x) => x.name.toLowerCase() === r[1].toLowerCase() && (x.brand || "Generic").toLowerCase() === (r[2] || "Generic").toLowerCase());
-            const name = clash && r[3] ? `${r[1]} ${r[3]}` : clash && r[0] ? `${r[1]} (${r[0].slice(-4)})` : r[1];
-            const it = A.addOwnItem(s.id, { name, brand: r[2] || "", cat: C[a[2]] ? a[2] : s.cat, price: null,
-              details: { barcode: r[0] || undefined, size: r[3] || undefined, productPhoto: catImg(r) || undefined, photoCredit: catCredit(r) || undefined, source: "catalog" } });
+            const r = K[i], it = addCatRow(s, r);
             if (!it) { U.toast("You already have this item"); return; }
             added.add(r[1].toLowerCase()); if (r[0]) added.add("#" + noZeros(r[0]));
             onAdd && onAdd(it);
@@ -1253,15 +1518,22 @@
         };
       });
     }
-    function otherItem() {
-      U.openSheet(`<div class="eyebrow">Not in your list</div><div class="title">Add an amount</div>
-        <div class="form"><label>What is it? <span class="faint tiny">(optional)</span><input class="field" id="on" maxlength="120" placeholder="e.g. Repair charge"></label>
+    // something not in the list: sell it now, and (ticked) keep it as an item for the next bill
+    function otherItem(name0 = "") {
+      U.openSheet(`<div class="eyebrow">Not in your list</div><div class="title">Add an item to the bill</div>
+        <div class="form"><label>What is it?<input class="field" id="on" maxlength="120" placeholder="e.g. Fevicol 50 g, or Repair charge" value="${esc(name0)}"></label>
         <div class="two"><label>Price ₹<input class="field" id="op" inputmode="numeric"></label><label>Quantity<input class="field" id="oq" inputmode="numeric" value="1"></label></div>
+        <label style="display:flex;gap:10px;align-items:center;text-transform:none;letter-spacing:0;font-weight:400"><input type="checkbox" id="okeep" checked style="width:20px;height:20px;flex:none;accent-color:#1e8e4e"> Save to my items for next time</label>
         <button class="btn" id="ook" type="button">Add to bill</button></div>`, (el) => {
-        setTimeout(() => $("#op", el).focus(), 50);
+        setTimeout(() => $(name0 ? "#op" : "#on", el).focus(), 50);
         $("#ook", el).onclick = () => {
-          const p = Math.round(+$("#op", el).value), n = Math.max(1, Math.round(+$("#oq", el).value || 1));
+          const p = Math.round(+$("#op", el).value), n = Math.max(1, Math.round(+$("#oq", el).value || 1)), nm = $("#on", el).value.trim();
           if (!(p > 0)) return U.toast("Type the price");
+          if ($("#okeep", el).checked && nm) {
+            const it = A.addOwnItem(s.id, { name: nm, cat: s.cat, price: p })
+              || s.items.find((x) => x.name.trim().toLowerCase() === nm.toLowerCase());
+            if (it) { if (!it.price) A.setItem(s.id, it.id, { price: p }); it.price = it.price || p; U.closeSheet(); U.toast(`${it.name} saved to your items`); return add(it, n); }
+          }
           cart.lines.push({ itemId: null, key: "x" + Date.now(), name: $("#on", el).value.trim() || "Other item", qty: n, price: p, cost: null });
           keep(true); U.closeSheet(); paint();
         };
@@ -1280,9 +1552,11 @@
           <span class="bprice">${it.price ? rupee(it.price) : '<span class="faint">set price</span>'}</span>${left}
           ${n ? `<span class="bstep"><button data-dec="${it.id}" aria-label="One less">−</button><b>${n}</b><button data-inc="${it.id}" aria-label="One more">+</button></span>` : ""}
         </div>`;
-      }).join("") || '<p class="quiet small">No item matches. Use “Item not in list”.</p>';
+      }).join("") || (q ? `<div class="bnone"><p class="quiet small" style="margin:0 0 8px">No item called “${esc($("#bq").value.trim())}” yet.</p>
+        <button class="btn line" id="addq" type="button">+ Sell it and save “${esc($("#bq").value.trim())}” as a new item</button></div>` : "");
       $("#bsum").innerHTML = t.units ? `<span class="cartsum">${ic("bag")}<span><b>${rupee(t.total)}</b><em>${t.units} item${t.units > 1 ? "s" : ""} in cart${t.discount ? ` · ${rupee(t.discount)} off` : ""}</em></span></span>` : '<span class="quiet">Tap items to add them to the cart</span>';
       $("#bgo").classList.toggle("hidden", !t.units);
+      $("#addq") && ($("#addq").onclick = () => otherItem($("#bq").value.trim()));
       $$("[data-it]").forEach((el) => el.onclick = (e) => { if (e.target.closest("[data-dec],[data-inc]")) return; add(s.items.find((x) => x.id === el.dataset.it)); });
       $$("[data-inc]").forEach((b) => b.onclick = () => add(s.items.find((x) => x.id === b.dataset.inc)));
       $$("[data-dec]").forEach((b) => b.onclick = () => add(s.items.find((x) => x.id === b.dataset.dec), -1));

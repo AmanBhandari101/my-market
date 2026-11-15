@@ -707,7 +707,9 @@ window.MM_API = (function () {
     id: d.productId, barcode: d.barcode || null, name: it.name, brand: it.brand || null, model: d.model || null, cat: it.cat, size: d.size || null,
     mrp: d.mrp ?? null, features: d.features || [], description: (d.description || "").slice(0, 1000) || null, specs: d.specMap || {}, keywords: d.keywords || [],
     photo_url: d.productPhoto && /^https:/.test(d.productPhoto) ? d.productPhoto : null, photo_credit: d.photoCredit || null,
-    source: d.source || "shop", created_by: shopId,
+    // the server takes shop / openfoodfacts / ai / gs1; a product picked from the built-in catalogue
+    // ("catalog") is Open Food/Beauty/Products Facts data when its photo says so, otherwise the shop's
+    source: ["shop", "openfoodfacts", "ai", "gs1"].includes(d.source) ? d.source : /Facts/.test(d.photoCredit || "") ? "openfoodfacts" : "shop", created_by: shopId,
     // private unless the shop ticked "Share with other shops" (left out when not decided: the server keeps what it had)
     ...(d.share !== undefined ? { private: !d.share } : {}),
   });
