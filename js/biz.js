@@ -1086,12 +1086,13 @@
   function catImg(r) {
     const v = r[5] || ""; if (!v) return "";
     if (v === "s" && CAT && CAT.img && r[0]) return `${CAT.img}/p/bc-${r[0]}.webp`;
-    if (v.startsWith("w:")) return v.slice(2);
+    if (v.startsWith("w:") || v.startsWith("m:")) return v.slice(2);   // w: matched by name, m: the exact model's photo
     const code = r[0]; let p = code;
     if (code.length > 8) { const c = code.padStart(13, "0"); p = `${c.slice(0, 3)}/${c.slice(3, 6)}/${c.slice(6, 9)}/${c.slice(9)}`; }
     return `https://${IMGHOST[v[0]]}/images/products/${p}/${v.slice(2)}.200.jpg`;
   }
-  const catCredit = (r) => (!r[5] ? "" : r[5].startsWith("w:") ? "Photo: Wikimedia Commons (free licence)"
+  const catCredit = (r) => (!r[5] ? "" : r[5].startsWith("m:") ? (r[10] || "Photo: Wikimedia Commons (free licence)")
+    : r[5].startsWith("w:") ? "Photo: Wikimedia Commons (free licence)"
     : r[5] === "s" ? "Photo: Open Food / Beauty / Products Facts contributors (CC BY-SA), cleaned up by My Market"
     : `Photo: ${CREDIT[r[5][0]]} contributors (CC BY-SA)`);
   // by barcode (typed or scanned), or by words in the name / brand / size / Hindi name
@@ -1139,7 +1140,8 @@
     const clash = s.items.some((x) => x.name.toLowerCase() === r[1].toLowerCase() && (x.brand || "Generic").toLowerCase() === (r[2] || "Generic").toLowerCase());
     const name = clash && r[3] ? `${r[1]} ${r[3]}` : clash && r[0] ? `${r[1]} (${r[0].slice(-4)})` : r[1];
     return A.addOwnItem(s.id, { name, brand: r[2] || "", cat: C[a[2]] ? a[2] : s.cat, price: null,
-      details: { barcode: r[0] || undefined, size: r[3] || undefined, productPhoto: rowImg(r, wiki) || undefined, photoCredit: (rowImg(r, wiki) && catCredit(r)) || undefined, source: "catalog" } });
+      details: { barcode: r[0] || undefined, size: r[3] || undefined, productPhoto: rowImg(r, wiki) || undefined, photoCredit: (rowImg(r, wiki) && catCredit(r)) || undefined,
+        ...(r[9] ? { features: String(r[9]).split(" | ").filter(Boolean).slice(0, 8) } : {}), source: "catalog" } });
   }
   // the shop's item that came from catalogue row r (by barcode, or by name)
   const itemOfRow = (s, r) => s.items.find((i) => (r[0] && i.barcode && noZeros(i.barcode) === noZeros(r[0]))
