@@ -1158,14 +1158,18 @@
     const it = A.addOwnItem(s.id, { name, brand: r[2] || "", cat: C[a[2]] ? a[2] : s.cat, price: null,
       details: { barcode: r[0] || undefined, size: r[3] || undefined, productPhoto: rowImg(r, wiki) || undefined, photoCredit: (rowImg(r, wiki) && catCredit(r)) || undefined,
         ...(r[9] ? { features: String(r[9]).split(" | ").filter(Boolean).slice(0, 12) } : {}), source: "catalog" } });
-    // electronics etc.: model, MRP and the full specification table come from catalog/specs/<key>.json
+    // electronics: model, MRP, the full specification table, every feature line, the description and a large photo
+    // come from catalog/specs/<key>.json; what the shop already set on the item wins
     if (it && r[11]) catSpecs(r[11]).then((d) => {
       if (!d) return;
       const cur = A.getShop(s.id)?.items.find((x) => x.id === it.id); if (!cur) return;
       const specMap = { ...(d.colour ? { Colour: d.colour } : {}), ...(d.specs || {}), ...(cur.specMap || {}) };
-      A.saveDetails(s.id, cur.id, { barcode: cur.barcode, size: cur.size, features: cur.features, description: cur.description, keywords: cur.keywords,
-        productPhoto: cur.productPhoto, photoCredit: cur.photoCredit, share: cur.share, model: cur.model || d.model || undefined,
-        mrp: cur.mrp ?? d.mrp ?? undefined, specMap });
+      const small = cur.productPhoto && cur.productPhoto === rowImg(r, wiki);      // still the list's thumbnail
+      const feats = d.features && d.features.length >= (cur.features || []).length ? d.features.slice(0, 20) : cur.features;
+      A.saveDetails(s.id, cur.id, { barcode: cur.barcode, size: cur.size, features: feats, description: cur.description || d.description || undefined,
+        keywords: cur.keywords, productPhoto: (small || !cur.productPhoto) && d.photos?.[0] ? d.photos[0] : cur.productPhoto,
+        photoCredit: (small || !cur.productPhoto) && d.photos?.[0] ? d.credit || cur.photoCredit : cur.photoCredit,
+        share: cur.share, model: cur.model || d.model || undefined, mrp: cur.mrp ?? d.mrp ?? undefined, specMap });
     }).catch(() => {});
     return it;
   }
