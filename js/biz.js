@@ -789,7 +789,7 @@
         if (filter === "uncounted") return it.qty == null;
         return true;
       });
-      const cat = A.catalogFor(s.cat);
+      const cat = builtIn(s.cat);
       // more popular products from the big catalogue (kinds of shop without a built-in list get only these)
       const pop = setup && CAT ? catPopular(s.cat, 60).filter((r) => !cat.some((c) => c.name.toLowerCase() === r[1].toLowerCase())) : [];
       if (setup && !CAT && !catTried) { catTried = true; loadCatalog().then(() => { if (/setup=1/.test(location.hash)) draw(); }).catch(() => {}); }
@@ -1144,8 +1144,13 @@
   const catPopular = (k, n = 30) => {
     if (!CAT) return [];
     const ds = SHOP_DEPTS[k];
-    return CAT.rows.filter((r) => { const a = CAT.aisles[r[4]]; return ds ? ds.includes(a[0]) : a[2] === k; }).slice(0, n);
+    const own = CAT.rows.filter((r) => { const a = CAT.aisles[r[4]]; return ds ? ds.includes(a[0]) : a[2] === k; }).slice(0, n);
+    return own.length ? own : CAT.rows.slice(0, n);       // the catalogue is electronics only: other kinds of shop see its bestsellers
   };
+  // 2026-11-18, owner's decision: the app offers electronics only. The built-in starter list (data.js) is used only
+  // for electronics shops, and the Open Food Facts online search is off.
+  const ELEC = new Set(["mobile", "electronics"]);
+  const builtIn = (k) => (ELEC.has(k) ? A.catalogFor(k) : []);
 
   // a product from the built-in catalogue (a row of catalog/products.json) into the shop; the shop sets its price
   // wiki: false leaves out photos matched from Wikipedia by name (often not the product) - used when adding many at once
@@ -1463,7 +1468,7 @@
       const mine = !q ? [] : s.items.filter((it) => isCode ? [it.barcode, it.code].some((c) => c && noZeros(c) === noZeros(q))
         : qw.every((w) => `${it.name} ${it.brand || ""} ${it.barcode || ""} ${it.code || ""}`.toLowerCase().includes(w))).slice(0, 20);
       const filt = fA != null || fT != null || fB != null;
-      const local = filt ? [] : !q ? A.catalogFor(s.cat).map((x) => ({ ...x, cat: s.cat })) : isCode ? [] : A.catalogSearch(q, s.cat);
+      const local = filt ? [] : !q ? builtIn(s.cat).map((x) => ({ ...x, cat: s.cat })) : isCode ? [] : A.catalogSearch(q, s.cat).filter((x) => ELEC.has(x.cat));
       // the catalogue rows: what's typed (or the chosen category), narrowed by the chips
       const base = !CAT || isCode ? null : q ? catMatchIdx(q) : fA != null ? CAT.rows.reduce((o, r, i) => (r[4] === fA && o.push(i), o), []) : null;
       const inA = base && fA != null ? base.filter((i) => CAT.rows[i][4] === fA) : base;
@@ -1490,7 +1495,6 @@
         ${sharedNew.length ? `<div class="eyebrow" style="margin-top:14px">Added by shops on My Market</div>${sharedNew.map((p, i) => row("s" + i, p.photo_path ? photoUrl(p.photo_path) : p.photo_url, p.name, [p.brand, p.size, C[p.cat]?.name].filter(Boolean).join(" · "), p.cat)).join("")}` : ""}
         ${online && online.length ? `<div class="eyebrow" style="margin-top:14px">Online product databases</div>${online.map((p, i) => row("o" + i, p.img, p.name, [p.brand, p.size, p.label].filter(Boolean).join(" · "), p.cat || s.cat)).join("")}` : ""}
         ${q ? `<div class="pick-more">
-          ${online == null ? `<button class="btn line" id="ponl">${ic("search")} Search online for “${esc(q)}”</button>` : online.length ? "" : offBusy ? `<p class="quiet small" style="margin:0 0 8px">Online search is busy — try again in a minute.</p><button class="btn line" id="ponl">Try again</button>` : `<p class="quiet small" style="margin:0 0 8px">Nothing online for “${esc(q)}”.</p>`}
           <button class="btn" id="pnew">+ New product “${esc(q)}”</button></div>` : `<p class="faint tiny" style="margin:12px 0 10px">Type a name or tap Scan to find the product. Not in the list? Add your own with a photo:</p>
           <button class="btn line" id="pnew">${ic("camera")} + New product (your own)</button>`}`;
       const L = local, S = sharedNew, O = online || [], K = cat;
@@ -1538,7 +1542,7 @@
       $("#pnew", box) && ($("#pnew", box).onclick = () => { U.closeSheet(); newItemSheet(s, (it) => { after && after(it); }, q); });
     };
     U.openSheet(`<div class="eyebrow">Stock</div><div class="title">Find & add products</div>
-      <div class="scanrow" style="margin-top:10px"><div class="inshop">${ic("search")}<input id="pq" placeholder="Name, brand or barcode — e.g. maggi, LED bulb 9W" autocomplete="off" value="${esc(q)}"></div>
+      <div class="scanrow" style="margin-top:10px"><div class="inshop">${ic("search")}<input id="pq" placeholder="Name, brand or barcode — e.g. redmi, boAt earbuds" autocomplete="off" value="${esc(q)}"></div>
         <button class="btn auto scanbtn" id="pscan" type="button">${ic("camera")} Scan</button></div>
       <div id="pfil" class="pick-filters"></div>
       <div id="pres" class="pick-list"></div>
