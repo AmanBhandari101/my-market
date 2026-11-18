@@ -1498,27 +1498,69 @@
           <button class="btn" id="pnew">+ New product “${esc(q)}”</button></div>` : `<p class="faint tiny" style="margin:12px 0 10px">Type a name or tap Scan to find the product. Not in the list? Add your own with a photo:</p>
           <button class="btn line" id="pnew">${ic("camera")} + New product (your own)</button>`}`;
       const L = local, S = sharedNew, O = online || [], K = cat;
+      // price, MRP, cost and stock filled in right under the row just added (or tapped), without leaving the search;
+      // "More details" opens the full product details and comes back to this search afterwards
+      const quick = (x, it, isNew) => {
+        $$(".quickdet", box).forEach((d) => d.remove());
+        it = A.getShop(s.id)?.items.find((i) => i.id === it.id) || it;
+        const d = document.createElement("div"); d.className = "quickdet";
+        d.innerHTML = `<div class="qd-head"><b>${isNew ? "Added" : "In your shop"}</b> — ${isNew ? "fill in now, or later in Stock" : "change it here"}</div>
+          <div class="two"><label>Selling price ₹<input class="field" data-q="price" inputmode="numeric" value="${it.price || ""}" placeholder="e.g. 14999"></label>
+            <label>MRP ₹ <span class="faint tiny">(optional)</span><input class="field" data-q="mrp" inputmode="numeric" value="${it.mrp || ""}"></label></div>
+          <div class="two"><label>Your cost ₹ <span class="faint tiny">(private)</span><input class="field" data-q="cost" inputmode="numeric" value="${it.cost || ""}"></label>
+            ${onAdd ? "" : `<label>${it.qty != null ? `In stock (now ${it.qty})` : "Quantity in stock"}<input class="field" data-q="qty" inputmode="numeric" placeholder="${it.qty != null ? it.qty : "e.g. 5"}"></label>`}</div>
+          <div class="qd-btns"><button class="btn auto" type="button" data-qs>Save</button>
+            <button class="btn line auto" type="button" data-qm>More details — colours, specs, photo</button></div>`;
+        x.after(d);
+        const v = (k) => { const f = $(`[data-q="${k}"]`, d); return f && f.value.trim() !== "" ? Math.round(+f.value.replace(/[^\d.]/g, "")) : null; };
+        const save = () => {
+          const patch = {}, pr = v("price"), mrp = v("mrp"), co = v("cost"), qt = v("qty");
+          if (pr > 0) patch.price = pr; if (mrp > 0) patch.mrp = mrp; if (co > 0) patch.cost = co;
+          if (pr > 0 && mrp > 0 && pr > mrp) { U.toast("Selling price is more than the MRP — check it"); return false; }
+          if (Object.keys(patch).length) {
+            A.setItem(s.id, it.id, patch);
+            const cur = A.getShop(s.id)?.items.find((i) => i.id === it.id) || it;   // setItem keeps cost / MRP in the edits store
+            if (patch.cost != null) cur.cost = patch.cost; if (patch.mrp != null) cur.mrp = patch.mrp;
+          }
+          if (qt != null && qt >= 0 && qt !== it.qty) A.moveStock(s.id, it.id, { set: qt, reason: "count" });
+          return Object.keys(patch).length || qt != null;
+        };
+        $("[data-qs]", d).onclick = () => { const r = save(); if (r === false) return; d.remove(); U.toast(r ? "Saved" : "Nothing to save — added without a price"); };
+        $("[data-qm]", d).onclick = () => {
+          if (save() === false) return;
+          const cur = A.getShop(s.id)?.items.find((i) => i.id === it.id) || it;
+          detailsSheet(s, cur, () => addItemsSheet(s, q, after, onAdd));
+        };
+        setTimeout(() => $('[data-q="price"]', d)?.focus(), 50);
+      };
       $$("[data-my]", box).forEach((x) => x.onclick = () => {
         const it = mine[+x.dataset.my];
         if (onAdd) { onAdd(it); U.toast(`${it.name} added to this delivery`); }
-        else U.toast("Already in your products — find it in Stock to edit it");
+        else quick(x, it, false);
       });
       $$("[data-k]", box).forEach((x) => x.onclick = async () => {
         const k = x.dataset.k, i = +k.slice(1);
-        if (x.classList.contains("on")) return;
+        if (x.classList.contains("on")) {
+          // already in the shop: open its price / stock form again
+          const nm = (k[0] === "c" ? K[i]?.[1] : k[0] === "l" ? L[i]?.name : k[0] === "s" ? S[i]?.name : O[i]?.name || "").toLowerCase();
+          const ex = (k[0] === "c" && K[i] && itemOfRow(s, K[i])) || s.items.find((t) => t.name.toLowerCase() === nm);
+          if (ex && !onAdd) quick(x, ex, false);
+          return;
+        }
         x.classList.add("on"); x.querySelector(".pick-add").innerHTML = ic("check");
+        let it = null;
         try {
           if (k[0] === "c") {
             // from the catalogue: name, brand, size, barcode and photo come along; the shop sets its price
-            const r = K[i], it = addCatRow(s, r);
+            const r = K[i]; it = addCatRow(s, r);
             if (!it) { U.toast("You already have this item"); return; }
             added.add(r[1].toLowerCase()); if (r[0]) added.add("#" + noZeros(r[0]));
             onAdd && onAdd(it);
           }
-          else if (k[0] === "l") { const it = L[i]; A.addItem(s.id, it.tmpl, it.cat); added.add(it.name.toLowerCase()); }
+          else if (k[0] === "l") { const t = L[i]; it = A.addItem(s.id, t.tmpl, t.cat); added.add(t.name.toLowerCase()); }
           else if (k[0] === "s") {
             const p = S[i];
-            A.addOwnItem(s.id, { name: p.name, brand: p.brand || "", cat: p.cat || s.cat, price: null, details: A.productDetails(p, photoUrl, s.id) });
+            it = A.addOwnItem(s.id, { name: p.name, brand: p.brand || "", cat: p.cat || s.cat, price: null, details: A.productDetails(p, photoUrl, s.id) });
             added.add(p.name.toLowerCase());
           } else {
             const p = O[i];
@@ -1526,10 +1568,11 @@
             const hit = window.MM_CLOUD ? await window.MM_CLOUD.lookupBarcode(p.code).catch(() => null) : null;
             const det = hit && hit.source === "catalog" ? A.productDetails(hit.product, photoUrl, s.id)
               : { barcode: p.code, size: p.size, productPhoto: p.photo, photoCredit: p.photo ? `Photo: ${p.label} contributors (CC BY-SA)` : "", source: "openfoodfacts" };
-            A.addOwnItem(s.id, { name: p.name, brand: p.brand || "", cat: p.cat || s.cat, price: null, details: det });
+            it = A.addOwnItem(s.id, { name: p.name, brand: p.brand || "", cat: p.cat || s.cat, price: null, details: det });
             added.add(p.name.toLowerCase());
           }
-          U.toast("Added — set its price in Stock (or when you first bill it)");
+          if (it) quick(x, it, true);
+          else U.toast("Added — set its price in Stock (or when you first bill it)");
         } catch (e) { x.classList.remove("on"); U.toast(e.message || "Couldn't add"); }
       });
       $("#pmore", box) && ($("#pmore", box).onclick = () => { show += 60; draw(el); });

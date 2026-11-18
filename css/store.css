@@ -990,3 +990,10 @@ body.has-scb .s-foot { padding-bottom: 110px; }
 .opay.ok { background: #e5f3ea; color: #1f6b42; }
 .opay.warn { background: #fff3d6; color: #8a5a00; }
 .opay.bad { background: #fde8e4; color: #9a3324; }
+/* price / stock form under a product just added in Find & add */
+.quickdet { margin: 0 0 10px; padding: 12px; border-radius: 12px; background: #f4faf6; border: 1px solid #cfe7d8; display: grid; gap: 8px; }
+.quickdet .qd-head { font-size: 13px; color: var(--ink-2, #555); }
+.quickdet .qd-head b { color: #17733f; }
+.quickdet label { font-size: 12px; }
+.quickdet .qd-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.quickdet .qd-btns .btn { padding: 9px 14px; font-size: 14px; }
