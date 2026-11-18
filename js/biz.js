@@ -1096,19 +1096,35 @@
     : r[5] === "s" ? "Photo: Open Food / Beauty / Products Facts contributors (CC BY-SA), cleaned up by My Market"
     : `Photo: ${CREDIT[r[5][0]]} contributors (CC BY-SA)`);
   // by barcode (typed or scanned), or by words in the name / brand / size / Hindi name
-  function catSearch(q, limit = 40) {
+  function catSearch(q, limit = 40) { return catMatchIdx(q, 400).slice(0, limit).map((i) => CAT.rows[i]); }
+  // row numbers matching the search, best first (max: how many matches to collect before sorting)
+  function catMatchIdx(q, max = 3000) {
     if (!CAT || !q) return [];
     const digits = q.replace(/\s/g, "");
-    if (/^\d{6,14}$/.test(digits)) { const r = CAT.byCode.get(noZeros(digits)); return r ? [r] : []; }
+    if (/^\d{6,14}$/.test(digits)) { const r = CAT.byCode.get(noZeros(digits)); return r ? [CAT.rows.indexOf(r)] : []; }
     const words = q.toLowerCase().replace(/[^\p{L}\p{N} ]+/gu, " ").split(/\s+/).filter((w) => w.length > 1);
     if (!words.length) return [];
     const out = [];
-    for (let i = 0; i < CAT.rows.length && out.length < 400; i++) if (words.every((w) => CAT.hay[i].includes(w))) out.push(i);
+    for (let i = 0; i < CAT.rows.length && out.length < max; i++) if (words.every((w) => CAT.hay[i].includes(w))) out.push(i);
     // names starting with the first word first, then whole-word matches; otherwise the catalogue's popularity order
     // a Hindi / local name that is exactly the search ("aloo" → Potato) comes first of all
     const w0 = words[0], kw = (i) => (CAT.rows[i][6] || "").toLowerCase().split(/\s*,\s*/).includes(words.join(" "));
     const sc = (i) => (kw(i) ? 0 : CAT.hay[i].startsWith(w0) ? 1 : (" " + CAT.hay[i]).includes(" " + w0) ? 2 : 3);
-    return out.map((i) => [sc(i), i]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).slice(0, limit).map((x) => CAT.rows[x[1]]);
+    return out.map((i) => [sc(i), i]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((x) => x[1]);
+  }
+  // the aisles that suit this kind of shop, biggest first (for the category chips when nothing is typed)
+  function shopAisles(k) {
+    if (!CAT) return [];
+    const ds = SHOP_DEPTS[k], n = new Map();
+    CAT.rows.forEach((r) => { const a = CAT.aisles[r[4]]; if (ds ? ds.includes(a[0]) : a[2] === k) n.set(r[4], (n.get(r[4]) || 0) + 1); });
+    return [...n].sort((a, b) => b[1] - a[1]);
+  }
+  // [value, count] for a column over some rows, most common first ("" counted as Other only when other values exist)
+  function facet(idx, col, max = 60) {
+    const n = new Map();
+    for (const i of idx) { const v = col === 4 ? CAT.rows[i][4] : String(CAT.rows[i][col] || "").trim(); n.set(v, (n.get(v) || 0) + 1); }
+    if (col !== 4 && n.size === 1 && n.has("")) return [];
+    return [...n].filter((x) => x[0] !== "" || col === 12).sort((a, b) => b[1] - a[1]).slice(0, max);
   }
 
   // kinds of shop without a built-in starter list: suggest popular products from the matching catalogue departments
@@ -1139,9 +1155,25 @@
     // two packs with the same name ("Maggi" 70 g and 280 g): the size goes into the name
     const clash = s.items.some((x) => x.name.toLowerCase() === r[1].toLowerCase() && (x.brand || "Generic").toLowerCase() === (r[2] || "Generic").toLowerCase());
     const name = clash && r[3] ? `${r[1]} ${r[3]}` : clash && r[0] ? `${r[1]} (${r[0].slice(-4)})` : r[1];
-    return A.addOwnItem(s.id, { name, brand: r[2] || "", cat: C[a[2]] ? a[2] : s.cat, price: null,
+    const it = A.addOwnItem(s.id, { name, brand: r[2] || "", cat: C[a[2]] ? a[2] : s.cat, price: null,
       details: { barcode: r[0] || undefined, size: r[3] || undefined, productPhoto: rowImg(r, wiki) || undefined, photoCredit: (rowImg(r, wiki) && catCredit(r)) || undefined,
-        ...(r[9] ? { features: String(r[9]).split(" | ").filter(Boolean).slice(0, 8) } : {}), source: "catalog" } });
+        ...(r[9] ? { features: String(r[9]).split(" | ").filter(Boolean).slice(0, 12) } : {}), source: "catalog" } });
+    // electronics etc.: model, MRP and the full specification table come from catalog/specs/<key>.json
+    if (it && r[11]) catSpecs(r[11]).then((d) => {
+      if (!d) return;
+      const cur = A.getShop(s.id)?.items.find((x) => x.id === it.id); if (!cur) return;
+      const specMap = { ...(d.colour ? { Colour: d.colour } : {}), ...(d.specs || {}), ...(cur.specMap || {}) };
+      A.saveDetails(s.id, cur.id, { barcode: cur.barcode, size: cur.size, features: cur.features, description: cur.description, keywords: cur.keywords,
+        productPhoto: cur.productPhoto, photoCredit: cur.photoCredit, share: cur.share, model: cur.model || d.model || undefined,
+        mrp: cur.mrp ?? d.mrp ?? undefined, specMap });
+    }).catch(() => {});
+    return it;
+  }
+  // full details of a catalogue product (kept in memory; the browser caches the file too)
+  const SPECS = new Map();
+  function catSpecs(key) {
+    if (!SPECS.has(key)) SPECS.set(key, fetch(`catalog/specs/${encodeURIComponent(key)}.json`).then((r) => (r.ok ? r.json() : null)).catch(() => { SPECS.delete(key); return null; }));
+    return SPECS.get(key);
   }
   // the shop's item that came from catalogue row r (by barcode, or by name)
   const itemOfRow = (s, r) => s.items.find((i) => (r[0] && i.barcode && noZeros(i.barcode) === noZeros(r[0]))
@@ -1381,6 +1413,8 @@
 
   function addItemsSheet(s, q0 = "", after, onAdd) {
     let q = q0, shared = [], online = null, offBusy = false, timer = null, seq = 0, catErr = false;
+    // filters over the catalogue: category (aisle #) > type ("Android phones") > brand; show = how many rows are listed
+    let fA = null, fT = null, fB = null, show = 40;
     const added = new Set();
     const have = (name, code) => code
       ? s.items.some((i) => noZeros(i.barcode || i.code) === noZeros(code)) || added.has("#" + noZeros(code))
@@ -1390,14 +1424,51 @@
         <span class="thumb" style="${U.catVars(cat || s.cat)}">${img ? `<img src="${esc(img)}" alt="" loading="lazy" onerror="this.remove()">` : U.art(cat || s.cat, 28)}</span>
         <div class="body"><div class="name">${esc(name)}</div><div class="note">${esc(sub)}</div></div>
         <span class="pick-add">${have(name, code) ? ic("check") : ic("plus")}</span></button>`;
+    // the chip rows: tap to narrow, tap again to undo; each row keeps its sideways scroll when redrawn
+    const drawChips = (el, base, inA, inT, fin) => {
+      const box = $("#pfil", el); if (!box) return;
+      if (!CAT || (q && !base) || (q && !base.length && fA == null)) { box.innerHTML = ""; return; }
+      const keep = {}; $$(".fchips", box).forEach((x) => (keep[x.dataset.row] = x.scrollLeft));
+      const withSel = (list, v) => (v == null || list.some((x) => x[0] === v) ? list : [[v, 0], ...list]);
+      const aisles = withSel(q ? facet(base, 4, 30) : shopAisles(s.cat), fA);
+      const types = fA != null ? withSel(facet(inA, 12), fT) : [];
+      // a long brand list drops the one-off spellings ("Galaxy-power") so the real brands are easy to find
+      const bl = fA != null || q ? facet(inT, 2, 80) : [];
+      const brands = withSel(bl.length > 12 ? bl.filter((x) => x[1] > 1) : bl, fB);
+      const chip = (row, v, label, n, on) => `<button class="fchip ${on ? "on" : ""}" data-f="${row}" data-v="${esc(String(v))}">${esc(label)}${n ? `<span class="n">${n.toLocaleString("en-IN")}</span>` : ""}</button>`;
+      const line = (row, label, chips) => `<div class="flabel">${label}</div><div class="fchips" data-row="${row}">${chips}</div>`;
+      box.innerHTML = (aisles.length > 1 || fA != null ? line("a", "Category",
+          (fA != null || fT != null || fB != null ? `<button class="fchip clear" data-f="x">✕ Clear</button>` : "") +
+          aisles.map(([a, n]) => chip("a", a, CAT.aisles[a][1], n, a === fA)).join("")) : "") +
+        (types.length > 1 || fT != null ? line("t", "Type", types.map(([t, n]) => chip("t", t, t || "Other", n, t === fT)).join("")) : "") +
+        (brands.length > 1 || fB != null ? line("b", "Brand", brands.map(([b, n]) => chip("b", b, b, n, b === fB)).join("")) : "");
+      $$(".fchips", box).forEach((x) => (x.scrollLeft = keep[x.dataset.row] || 0));
+      $$("[data-f]", box).forEach((b) => b.onclick = () => {
+        const f = b.dataset.f, v = b.dataset.v;
+        if (f === "x") fA = fT = fB = null;
+        else if (f === "a") { fA = fA === +v ? null : +v; fT = fB = null; }
+        else if (f === "t") { fT = fT === v ? null : v; fB = null; }
+        else fB = fB === v ? null : v;
+        show = 40; draw(el);
+      });
+    };
     const draw = (el) => {
       const isCode = /^\d{6,14}$/.test(q.replace(/\s/g, ""));
       // My products: what this shop already has (its own catalogue), found by name, brand, barcode or own code
       const qw = q.toLowerCase().split(/\s+/).filter(Boolean);
       const mine = !q ? [] : s.items.filter((it) => isCode ? [it.barcode, it.code].some((c) => c && noZeros(c) === noZeros(q))
         : qw.every((w) => `${it.name} ${it.brand || ""} ${it.barcode || ""} ${it.code || ""}`.toLowerCase().includes(w))).slice(0, 20);
-      const local = !q ? A.catalogFor(s.cat).map((x) => ({ ...x, cat: s.cat })) : isCode ? [] : A.catalogSearch(q, s.cat);
-      const cat = q ? catSearch(q).filter((r) => !local.some((l) => l.name.toLowerCase() === r[1].toLowerCase())) : local.length ? [] : catPopular(s.cat);
+      const filt = fA != null || fT != null || fB != null;
+      const local = filt ? [] : !q ? A.catalogFor(s.cat).map((x) => ({ ...x, cat: s.cat })) : isCode ? [] : A.catalogSearch(q, s.cat);
+      // the catalogue rows: what's typed (or the chosen category), narrowed by the chips
+      const base = !CAT || isCode ? null : q ? catMatchIdx(q) : fA != null ? CAT.rows.reduce((o, r, i) => (r[4] === fA && o.push(i), o), []) : null;
+      const inA = base && fA != null ? base.filter((i) => CAT.rows[i][4] === fA) : base;
+      const inT = inA && fT != null ? inA.filter((i) => (CAT.rows[i][12] || "") === fT) : inA;
+      const fin = inT && fB != null ? inT.filter((i) => (CAT.rows[i][2] || "").trim() === fB) : inT;
+      const cat = fin ? fin.map((i) => CAT.rows[i]).filter((r) => !local.some((l) => l.name.toLowerCase() === r[1].toLowerCase())).slice(0, show)
+        : q ? catSearch(q).filter((r) => !local.some((l) => l.name.toLowerCase() === r[1].toLowerCase())) : local.length ? [] : catPopular(s.cat);
+      const more = fin ? fin.length - cat.length : 0;
+      drawChips(el, base, inA, inT, fin);
       const sharedNew = shared.filter((p) => !local.some((l) => l.name.toLowerCase() === p.name.toLowerCase()) && !cat.some((r) => r[1].toLowerCase() === p.name.toLowerCase()));
       const box = $("#pres", el);
       box.innerHTML = `
@@ -1405,8 +1476,10 @@
           <span class="thumb" style="${U.catVars(it.cat)}">${U.pimg(it)}</span>
           <div class="body"><div class="name">${esc(it.name)}</div><div class="note">${esc([it.brand !== "Generic" ? it.brand : "", it.size, it.price ? "₹" + it.price : "", it.qty != null ? it.qty + " in stock" : ""].filter(Boolean).join(" · "))}</div></div>
           <span class="pick-add">${onAdd ? ic("plus") : ic("check")}</span></button>`).join("")}` : ""}
-        ${cat.length ? `<div class="eyebrow" style="margin-top:${mine.length ? 14 : 6}px">${isCode ? "Barcode " + esc(q) : q ? "My Market catalogue" : "Popular for " + esc(C[s.cat]?.name || "your shop")}</div>${cat.map((r, i) => row("c" + i, catImg(r), r[1],
+        ${filt && fin && !fin.length ? `<p class="quiet small" style="margin:8px 0">Nothing in this category${q ? ` for “${esc(q)}”` : ""} — tap another chip or clear the filters.</p>` : ""}
+        ${cat.length ? `<div class="eyebrow" style="margin-top:${mine.length ? 14 : 6}px">${isCode ? "Barcode " + esc(q) : filt ? esc([fA != null ? CAT.aisles[fA][1] : "", fT != null ? fT || "Other" : "", fB].filter(Boolean).join(" · ")) + ` — ${fin.length.toLocaleString("en-IN")} product${fin.length === 1 ? "" : "s"}` : q ? "My Market catalogue" : "Popular for " + esc(C[s.cat]?.name || "your shop")}</div>${cat.map((r, i) => row("c" + i, catImg(r), r[1],
           [r[8] === "veg" ? "🟢 Veg" : r[8] === "nonveg" ? "🔴 Non-veg" : "", r[2], r[3], CAT.aisles[r[4]][1]].filter(Boolean).join(" · ") + (r[0] && !isCode ? ` · ${r[0]}` : ""), CAT.aisles[r[4]][2], r[0])).join("")}` : ""}
+        ${more > 0 ? `<button class="btn line" id="pmore" style="margin-top:10px">Show ${Math.min(more, 60)} more (${more.toLocaleString("en-IN")} left)</button>` : ""}
         ${q && !CAT ? `<p class="quiet small" style="margin:8px 0">${catErr ? "Couldn't load the product catalogue — check the internet and type again." : "Loading the product catalogue…"}</p>` : ""}
         ${isCode && CAT && !cat.length ? `<p class="quiet small" style="margin:8px 0">Barcode ${esc(q)} isn't in the catalogue — search online below, or add it as a new item.</p>` : ""}
         ${local.length ? `<div class="eyebrow" style="margin-top:${cat.length ? 14 : 6}px">${q ? "From the My Market list" : "Popular in " + esc(C[s.cat].name)}</div>${local.map((x, i) => row("l" + i, x.img, x.name, `${x.brand !== "Generic" ? x.brand + " · " : ""}${C[x.cat]?.name || ""}`, x.cat)).join("")}` : ""}
@@ -1451,6 +1524,7 @@
           U.toast("Added — set its price in Stock (or when you first bill it)");
         } catch (e) { x.classList.remove("on"); U.toast(e.message || "Couldn't add"); }
       });
+      $("#pmore", box) && ($("#pmore", box).onclick = () => { show += 60; draw(el); });
       $("#ponl", box) && ($("#ponl", box).onclick = async (ev) => {
         if (!window.MM_CLOUD) return U.toast("Needs the internet");
         ev.currentTarget.disabled = true; ev.currentTarget.textContent = "Searching online…";
@@ -1462,6 +1536,7 @@
     U.openSheet(`<div class="eyebrow">Stock</div><div class="title">Find & add products</div>
       <div class="scanrow" style="margin-top:10px"><div class="inshop">${ic("search")}<input id="pq" placeholder="Name, brand or barcode — e.g. maggi, LED bulb 9W" autocomplete="off" value="${esc(q)}"></div>
         <button class="btn auto scanbtn" id="pscan" type="button">${ic("camera")} Scan</button></div>
+      <div id="pfil" class="pick-filters"></div>
       <div id="pres" class="pick-list"></div>
       <div class="opts" style="margin-top:14px"><button class="link" id="pdone">Done</button></div>`, (el) => {
       el.classList.add("pick-sheet");
